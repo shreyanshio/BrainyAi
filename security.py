@@ -1,3 +1,4 @@
+"""Brainy Security Guard: Input sanitization, memory rate-limiting, and header defenses."""
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #   SECURITY.PY — BRAINY Web App Security Module
 #   Input sanitization, rate limiting, blacklist, headers
