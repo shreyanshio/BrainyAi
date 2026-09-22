@@ -1,3 +1,6 @@
+"""Brainy-AI REST API & Web Sanctuary Gateway.
+Provides session authorization, cross-origin security headers, and AI proxy routing.
+"""
 import os
 import re
 import uuid
