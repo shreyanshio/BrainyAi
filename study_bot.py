@@ -927,7 +927,7 @@ def web_search(query: str, max_results: int = 5) -> str:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #   GLOBAL STATE
 
-MAINTENANCE_MODE        = False
+MAINTENANCE_MODE        = False  # Global maintenance toggle guard
 AUTH_SESSIONS           = {}   # Web auth handshake sessions shared with app.py
 user_conversations      = {}   # UNIFIED history for chat + /ask + /brainy (50 msgs = 25 exchanges)
 user_data_store         = {}
