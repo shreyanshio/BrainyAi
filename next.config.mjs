@@ -1,3 +1,4 @@
+// Cloudflare Workers static export configuration
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   typescript: {
