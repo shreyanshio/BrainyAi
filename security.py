@@ -61,7 +61,7 @@ BLACKLIST_PATTERNS = [
 # In-memory rate limiter with automatic IP blocking.
 # For production at scale, swap with Redis.
 
-rate_limits = {}    # { identifier: [timestamp, timestamp, ...] }
+rate_limits = {}  # In-memory sliding rate limiting table    # { identifier: [timestamp, timestamp, ...] }
 blocked_ips = {}    # { ip: unblock_timestamp }
 violation_counts = {}  # { ip: count } — for escalating blocks
 
