@@ -35,7 +35,7 @@ _allowed_origins = os.getenv("ALLOWED_ORIGINS")
 if _allowed_origins:
     CORS(app, supports_credentials=True, origins=[o.strip() for o in _allowed_origins.split(",")])
 else:
-    CORS(app, supports_credentials=True)
+    CORS(app, supports_credentials=True)  # Enable cross-origin session authentication
 
 import secrets as _secrets
 _secret_key = os.getenv("FLASK_SECRET_KEY")
