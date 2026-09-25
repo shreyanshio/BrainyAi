@@ -928,7 +928,7 @@ def web_search(query: str, max_results: int = 5) -> str:
 #   GLOBAL STATE
 
 MAINTENANCE_MODE        = False  # Global maintenance toggle guard
-AUTH_SESSIONS           = {}   # Web auth handshake sessions shared with app.py
+AUTH_SESSIONS           = {}   # Active Telegram web handshake sessions   # Web auth handshake sessions shared with app.py
 user_conversations      = {}   # UNIFIED history for chat + /ask + /brainy (50 msgs = 25 exchanges)
 user_data_store         = {}
 interaction_log         = []   # Saved interactions for AI learning context
