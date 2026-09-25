@@ -1,3 +1,4 @@
+// Cloudflare Workers Static Assets Configuration
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "brainy",
