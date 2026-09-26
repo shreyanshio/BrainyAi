@@ -654,6 +654,67 @@ def auth_initdata():
     return jsonify({"error": "Invalid signature"}), 401
 
 
+@app.route("/api/auth/web", methods=["POST"])
+@security_guard
+def auth_web():
+    """Handle direct web login with Name and optional Username."""
+    data = request.json or {}
+    name = (data.get("name") or "").strip()
+    username = (data.get("username") or "").strip()
+
+    if not name:
+        return jsonify({"error": "Name is required"}), 400
+
+    if not username:
+        username = re.sub(r"[^a-zA-Z0-9_]", "", name.lower().replace(" ", "_")) or f"user_{int(time.time())}"
+
+    # Deterministic integer user_id from username/name
+    user_id = int(hashlib.md5(f"web_{username}".encode()).hexdigest(), 16) % (10**9)
+
+    session["user_id"] = user_id
+    session["first_name"] = name
+    session["username"] = username
+    session["email"] = ""
+
+    # Ensure user memory in study_bot / Supabase
+    study_bot.load_user_into_memory(user_id, name, username)
+
+    # Record login in Supabase user_logins table
+    sb_record_login(
+        user_id=user_id,
+        username=username,
+        first_name=name,
+        login_type="web",
+        ip=request.remote_addr or "",
+        user_agent=request.headers.get("User-Agent", "")
+    )
+
+    return jsonify({
+        "status": "authenticated",
+        "user": {
+            "id": user_id,
+            "first_name": name,
+            "username": username
+        }
+    })
+
+
+@app.route("/api/auth/me", methods=["GET"])
+def auth_me():
+    """Check current authentication status."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"authenticated": False}), 401
+    return jsonify({
+        "authenticated": True,
+        "user": {
+            "id": user_id,
+            "first_name": session.get("first_name", "Student"),
+            "username": session.get("username", "")
+        }
+    })
+
+
 @app.route("/api/auth/google", methods=["POST"])
 def auth_google():
     """Handle Google Identity Services login credential token.

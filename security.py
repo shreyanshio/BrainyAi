@@ -206,8 +206,8 @@ def security_guard(f):
     Note: /api/auth/google and /api/auth/initdata are exempt from body
     blacklist scanning since they receive opaque JWT/credential tokens.
     """
-    # Routes exempt from body blacklist scanning (they receive JWT tokens)
-    BODY_SCAN_EXEMPT = {"/api/auth/google", "/api/auth/initdata"}
+    # Routes exempt from body blacklist scanning (they receive auth/credential tokens)
+    BODY_SCAN_EXEMPT = {"/api/auth/google", "/api/auth/initdata", "/api/auth/web"}
 
     @wraps(f)
     def decorated(*args, **kwargs):
