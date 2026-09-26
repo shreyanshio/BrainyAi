@@ -33,8 +33,12 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild",
+      "workerd",
       "@esbuild/linux-x64",
-      "workerd"
+      "@esbuild/linux-arm64",
+      "@esbuild/darwin-x64",
+      "@esbuild/darwin-arm64",
+      "@esbuild/win32-x64"
     ]
   }
 }

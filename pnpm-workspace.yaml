@@ -1,4 +1,11 @@
-pmOnFail: ignore
+onlyBuiltDependencies:
+  - esbuild
+  - workerd
+  - '@esbuild/linux-x64'
+  - '@esbuild/linux-arm64'
+  - '@esbuild/darwin-x64'
+  - '@esbuild/darwin-arm64'
+  - '@esbuild/win32-x64'
 
 minimumReleaseAgeExclude:
   - '@next/*'
