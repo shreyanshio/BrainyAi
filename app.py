@@ -584,6 +584,7 @@ def auth_status(session_id):
     return jsonify({"status": "pending"})
 
 
+# Telegram bot handshake verification endpoint
 @app.route("/api/auth/verify", methods=["GET"])
 def auth_verify():
     session_id = request.args.get("session_id")
