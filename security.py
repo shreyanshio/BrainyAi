@@ -16,6 +16,7 @@ from flask import request, jsonify, session
 # Compiled regex patterns for detecting malicious input.
 # If ANY pattern matches user input, the request is blocked.
 
+# Common exploit patterns
 BLACKLIST_PATTERNS = [
     # ── XSS ──
     re.compile(r'<script.*?>', re.IGNORECASE),
