@@ -2740,7 +2740,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /login command to authenticate the user to the web application."""
+    """Handle /login command: pre-authenticates session and dispatches instant access link."""
     if await maintenance_guard(update):
         return
 
