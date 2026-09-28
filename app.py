@@ -11,7 +11,7 @@ import requests
 from datetime import datetime, timezone, timedelta
 from html import escape
 from functools import wraps
-from flask import Flask, request, jsonify, session, send_from_directory
+from flask import Flask, request, jsonify, session, send_from_directory, redirect
 from flask_cors import CORS
 
 logging.basicConfig(level=logging.INFO)
@@ -530,13 +530,13 @@ def verify_telegram_init_data(init_data: str, bot_token: str) -> dict | None:
     return None
 
 
-# Serve the single merged index.html (HTML + CSS + JS all in one file).
-# Lives right next to app.py — no templates/ subfolder needed.
+# Route / redirects directly to the primary Cloudflare frontend
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 @app.route("/")
 def index():
-    return send_from_directory(BASE_DIR, "index.html")
+    frontend_url = os.getenv("FRONTEND_URL", "https://brainyai.cenai.workers.dev")
+    return redirect(frontend_url, code=302)
 
 
 @app.route("/api/config", methods=["GET"])
