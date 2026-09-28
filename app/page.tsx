@@ -80,6 +80,15 @@ const quickPrompts = [
   { title: 'Test my knowledge', copy: 'Generate 3 high-yield questions with instant explanations.', icon: Sparkles },
 ]
 
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '')
+
+const apiFetch = (path: string, options: RequestInit = {}) => {
+  return fetch(`${API_BASE}${path}`, {
+    ...options,
+    credentials: 'include',
+  })
+}
+
 export default function Page() {
   // Auth state
   const [user, setUser] = useState<UserSession | null>(null)
@@ -174,7 +183,7 @@ export default function Page() {
       const tg = typeof window !== 'undefined' && (window as any).Telegram?.WebApp
       if (tg && tg.initData) {
         tg.expand()
-        const resp = await fetch('/api/auth/initdata', {
+        const resp = await apiFetch('/api/auth/initdata', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ initData: tg.initData }),
@@ -189,7 +198,7 @@ export default function Page() {
       }
 
       // 2. Check Flask server session via /api/auth/me or /api/user/profile
-      const profResp = await fetch('/api/user/profile')
+      const profResp = await apiFetch('/api/user/profile')
       if (profResp.ok) {
         const prof = await profResp.json()
         if (prof.user_id || prof.first_name) {
@@ -223,7 +232,7 @@ export default function Page() {
 
   const loadSessions = async () => {
     try {
-      const resp = await fetch('/api/sessions')
+      const resp = await apiFetch('/api/sessions')
       if (resp.ok) {
         const data = await resp.json()
         const sessList = Array.isArray(data) ? data : data.sessions || []
@@ -239,7 +248,7 @@ export default function Page() {
 
   const loadProfile = async () => {
     try {
-      const resp = await fetch('/api/user/profile')
+      const resp = await apiFetch('/api/user/profile')
       if (resp.ok) {
         const prof = await resp.json()
         setProfileStats({
@@ -256,7 +265,7 @@ export default function Page() {
 
   const loadMemory = async () => {
     try {
-      const resp = await fetch('/api/user/memory')
+      const resp = await apiFetch('/api/user/memory')
       if (resp.ok) {
         const mem = await resp.json()
         setMemoryData({
@@ -274,7 +283,7 @@ export default function Page() {
     setActiveSessionTitle(title || 'Study Session')
     setMobileOpen(false)
     try {
-      const resp = await fetch(`/api/chat/${sessionId}`)
+      const resp = await apiFetch(`/api/chat/${sessionId}`)
       if (resp.ok) {
         const data = await resp.json()
         const msgs = (data.messages || []).map((m: any) => ({
@@ -302,7 +311,7 @@ export default function Page() {
   const handleDeleteSession = async (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation()
     try {
-      const resp = await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' })
+      const resp = await apiFetch(`/api/sessions/${sessionId}`, { method: 'DELETE' })
       if (resp.ok) {
         setSessions((prev) => prev.filter((s) => s.id !== sessionId))
         if (activeSessionId === sessionId) {
@@ -325,7 +334,7 @@ export default function Page() {
     setLoginError('')
 
     try {
-      const resp = await fetch('/api/auth/web', {
+      const resp = await apiFetch('/api/auth/web', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -351,7 +360,7 @@ export default function Page() {
 
   const initGoogleAuth = async () => {
     try {
-      const cfgResp = await fetch('/api/config')
+      const cfgResp = await apiFetch('/api/config')
       if (!cfgResp.ok) return
       const cfg = await cfgResp.json()
       if (!cfg.google_client_id) return
@@ -385,7 +394,7 @@ export default function Page() {
   const handleGoogleCredential = async (response: any) => {
     if (!response?.credential) return
     try {
-      const resp = await fetch('/api/auth/google', {
+      const resp = await apiFetch('/api/auth/google', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ credential: response.credential }),
@@ -405,7 +414,7 @@ export default function Page() {
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' })
+      await apiFetch('/api/auth/logout', { method: 'POST' })
     } catch (e) {}
     setUser(null)
     setMessages([])
@@ -426,7 +435,7 @@ export default function Page() {
     setMessageCount((prev) => prev + 1)
 
     try {
-      const resp = await fetch('/api/chat/send', {
+      const resp = await apiFetch('/api/chat/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -520,7 +529,7 @@ export default function Page() {
 
   const saveToMemory = async (note: string) => {
     try {
-      await fetch('/api/user/memory', {
+      await apiFetch('/api/user/memory', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note }),

@@ -43,7 +43,8 @@ if not _secret_key:
           "FLASK_SECRET_KEY in Railway's environment variables to fix this.")
 app.secret_key = _secret_key
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SAMESITE"] = os.getenv("SESSION_COOKIE_SAMESITE", "None")
+app.config["SESSION_COOKIE_SECURE"] = os.getenv("SESSION_COOKIE_SECURE", "True").lower() == "true"
 app.config["PERMANENT_SESSION_LIFETIME"] = 86400  # 24 hours
 
 
