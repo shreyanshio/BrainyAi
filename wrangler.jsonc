@@ -1,16 +1,11 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "brainyai",
-  "main": ".open-next/worker.js",
   "compatibility_date": "2026-09-25",
-  "compatibility_flags": [
-    "nodejs_compat"
-  ],
   "assets": {
+    "directory": "out",
     "binding": "ASSETS",
-    "directory": ".open-next/assets"
-  },
-  "observability": {
-    "enabled": true
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "single-page-application"
   }
 }
