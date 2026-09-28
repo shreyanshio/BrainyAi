@@ -6,6 +6,7 @@
     <a href="https://brainyai.cenai.workers.dev"><img src="https://img.shields.io/badge/Web-Sanctuary-F59E0B?style=for-the-badge&logo=cloudflare&logoColor=black" alt="Live Web App"></a>
     <a href="https://t.me/AiChatExpert_Bot"><img src="https://img.shields.io/badge/Telegram-@AiChatExpert__Bot-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram Bot"></a>
     <a href="https://t.me/aurabreaker7"><img src="https://img.shields.io/badge/Telegram-Channel-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram Channel"></a>
+    <a href="https://github.com/shreyanshio/BrainyAi/stargazers"><img src="https://img.shields.io/github/stars/shreyanshio/BrainyAi?style=for-the-badge&color=F59E0B&logo=star" alt="GitHub Stars"></a>
   </p>
 
   <p><strong>An executive, emotionally intelligent AI study companion built with Next.js, Cloudflare Workers, and Flask.</strong></p>
