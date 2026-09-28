@@ -35,7 +35,14 @@ interface UserSession {
   id: number
   first_name: string
   username: string
+  photo_url?: string
 }
+
+const TelegramIcon = ({ className = 'w-5 h-5' }: { className?: string }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.75-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z" />
+  </svg>
+)
 
 interface ChatSessionItem {
   id: string
@@ -93,10 +100,13 @@ export default function Page() {
   // Auth state
   const [user, setUser] = useState<UserSession | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
-  const [loginName, setLoginName] = useState('')
-  const [loginUsername, setLoginUsername] = useState('')
-  const [loginSubmitting, setLoginSubmitting] = useState(false)
   const [loginError, setLoginError] = useState('')
+
+  // Telegram auth handshake state
+  const [telegramSessionId, setTelegramSessionId] = useState<string | null>(null)
+  const [telegramBotUrl, setTelegramBotUrl] = useState<string>('')
+  const [telegramWaiting, setTelegramWaiting] = useState(false)
+  const [telegramStarting, setTelegramStarting] = useState(false)
 
   // UI state
   const [collapsed, setCollapsed] = useState(false)
@@ -123,7 +133,7 @@ export default function Page() {
   const [showMemoryModal, setShowMemoryModal] = useState(false)
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
 
-  // Real stats state (from Supabase)
+  // Real stats state
   const [profileStats, setProfileStats] = useState<ProfileStats>({
     streak: 1,
     level: '1',
@@ -176,9 +186,53 @@ export default function Page() {
     }
   }, [user])
 
+  // Poll Telegram auth session status
+  useEffect(() => {
+    if (!telegramWaiting || !telegramSessionId || user) return
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const resp = await apiFetch(`/api/auth/status/${telegramSessionId}`)
+        if (resp.ok) {
+          const data = await resp.json()
+          if (data.status === 'authenticated' && data.user) {
+            clearInterval(pollInterval)
+            setTelegramWaiting(false)
+            setTelegramSessionId(null)
+            setUser(data.user)
+            await loadUserData()
+          }
+        }
+      } catch (err) {
+        console.error('Polling Telegram auth error:', err)
+      }
+    }, 2000)
+
+    return () => clearInterval(pollInterval)
+  }, [telegramWaiting, telegramSessionId, user])
+
   const checkCurrentUser = async () => {
     setAuthLoading(true)
     try {
+      // 0. Check URL query params (?auth_session=... from Telegram bot / redirect)
+      if (typeof window !== 'undefined') {
+        const urlParams = new URLSearchParams(window.location.search)
+        const authSessionParam = urlParams.get('auth_session')
+        if (authSessionParam) {
+          const statusResp = await apiFetch(`/api/auth/status/${authSessionParam}`)
+          if (statusResp.ok) {
+            const data = await statusResp.json()
+            if (data.status === 'authenticated' && data.user) {
+              setUser(data.user)
+              window.history.replaceState({}, document.title, window.location.pathname)
+              await loadUserData()
+              setAuthLoading(false)
+              return
+            }
+          }
+        }
+      }
+
       // 1. Check if Telegram WebApp has initData
       const tg = typeof window !== 'undefined' && (window as any).Telegram?.WebApp
       if (tg && tg.initData) {
@@ -197,7 +251,7 @@ export default function Page() {
         }
       }
 
-      // 2. Check Flask server session via /api/auth/me or /api/user/profile
+      // 2. Check server session via /api/auth/me or /api/user/profile
       const profResp = await apiFetch('/api/user/profile')
       if (profResp.ok) {
         const prof = await profResp.json()
@@ -206,6 +260,7 @@ export default function Page() {
             id: prof.user_id || 1,
             first_name: prof.first_name || 'Student',
             username: prof.username || '',
+            photo_url: prof.photo_url || (prof.username ? `https://t.me/i/userpic/320/${prof.username}.jpg` : ''),
           })
           setProfileStats({
             streak: prof.streak || 1,
@@ -324,38 +379,32 @@ export default function Page() {
   }
 
   // ── 2. Authentication Handlers ────────────────────────────────
-  const handleWebLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!loginName.trim()) {
-      setLoginError('Please enter your name.')
-      return
-    }
-    setLoginSubmitting(true)
+  const handleStartTelegramAuth = async () => {
+    setTelegramStarting(true)
     setLoginError('')
-
     try {
-      const resp = await apiFetch('/api/auth/web', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: loginName.trim(),
-          username: loginUsername.trim(),
-        }),
-      })
-
+      const resp = await apiFetch('/api/auth/init', { method: 'POST' })
       if (resp.ok) {
         const data = await resp.json()
-        setUser(data.user)
-        await loadUserData()
+        const botUrl = data.bot_url || 'https://t.me/AiChatExpert_Bot'
+        setTelegramSessionId(data.session_id)
+        setTelegramBotUrl(botUrl)
+        setTelegramWaiting(true)
+        window.open(botUrl, '_blank')
       } else {
-        const err = await resp.json().catch(() => ({}))
-        setLoginError(err.error || 'Failed to sign in. Please try again.')
+        setLoginError('Could not initialize Telegram login session.')
       }
-    } catch (err) {
-      setLoginError('Network error connecting to the server.')
+    } catch (e) {
+      setLoginError('Network error connecting to authentication server.')
     } finally {
-      setLoginSubmitting(false)
+      setTelegramStarting(false)
     }
+  }
+
+  const handleCancelTelegramAuth = () => {
+    setTelegramWaiting(false)
+    setTelegramSessionId(null)
+    setLoginError('')
   }
 
   const initGoogleAuth = async () => {
@@ -546,154 +595,207 @@ export default function Page() {
     .toUpperCase()
 
   // ═════════════════════════════════════════════════════════════
-  // VIEW 1: HERO & LOGIN SECTION (When not authenticated)
+  // VIEW 1: HERO & STRICT AUTH SECTION (Yellow, White, Black Palette)
   // ═════════════════════════════════════════════════════════════
   if (!user && !authLoading) {
     return (
-      <div className="min-h-screen bg-[#080a12] text-[#f4f5fb] flex flex-col justify-between selection:bg-[#8a6bff] selection:text-white relative overflow-hidden">
-        {/* Background glow effects */}
-        <div className="absolute top-[-10%] right-[10%] w-[500px] h-[500px] bg-indigo-600/15 rounded-full blur-[120px] pointer-events-none" />
-        <div className="absolute bottom-[-10%] left-[5%] w-[450px] h-[450px] bg-cyan-500/10 rounded-full blur-[140px] pointer-events-none" />
+      <div className="min-h-screen bg-[#050507] text-[#FFFFFF] flex flex-col justify-between selection:bg-[#F59E0B] selection:text-black relative overflow-hidden font-sans">
+        {/* Ambient subtle gold highlights */}
+        <div className="absolute top-[-15%] right-[5%] w-[650px] h-[650px] bg-[#F59E0B]/[0.06] rounded-full blur-[150px] pointer-events-none" />
+        <div className="absolute bottom-[-15%] left-[5%] w-[550px] h-[550px] bg-[#D97706]/[0.04] rounded-full blur-[160px] pointer-events-none" />
 
         {/* Top Navbar */}
         <header className="w-full max-w-7xl mx-auto px-6 py-6 flex items-center justify-between relative z-10">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#a789ff] to-[#38d4e8] flex items-center justify-center text-black font-extrabold shadow-[0_0_20px_rgba(167,137,255,0.4)]">
-              <Sparkles size={18} />
+          <div className="flex items-center gap-3.5">
+            {/* Brainy AI Monogram Emblem */}
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#FEF08A] via-[#F59E0B] to-[#B45309] p-[1.5px] shadow-[0_0_20px_rgba(245,158,11,0.25)] flex items-center justify-center">
+              <div className="w-full h-full bg-[#09090B] rounded-[10px] flex items-center justify-center">
+                <span className="font-black text-transparent bg-clip-text bg-gradient-to-br from-[#FEF08A] to-[#F59E0B] text-base font-serif">
+                  B
+                </span>
+              </div>
             </div>
-            <span className="font-extrabold text-lg tracking-wider text-white">
-              BRAINY <span className="text-[#8a6bff] text-xs font-semibold">AI</span>
-            </span>
+
+            <div className="flex items-center gap-3">
+              <span className="font-black text-xl tracking-tight text-white">
+                BRAINY <span className="text-[#FBBF24]">AI</span>
+              </span>
+              {/* Premium Line of Separation */}
+              <div className="h-5 w-[1.5px] bg-gradient-to-b from-transparent via-[#F59E0B]/60 to-transparent" />
+              <span className="text-[11px] uppercase tracking-[0.2em] font-semibold text-zinc-400 hidden sm:inline-block">
+                Cognitive Study Sanctuary
+              </span>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 text-xs font-medium text-[#858da1] bg-white/5 border border-white/10 px-3 py-1.5 rounded-full">
-            <span className="w-2 h-2 rounded-full bg-[#43d9a2] animate-pulse" />
-            AI Intelligence Online
+          <div className="flex items-center gap-2.5 text-xs font-semibold text-zinc-300 bg-zinc-900/90 border border-zinc-800 px-3.5 py-1.5 rounded-full shadow-inner">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#F59E0B] opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-[#F59E0B]" />
+            </span>
+            <span>Intellect Online • 24/7 Available</span>
           </div>
         </header>
 
-        {/* Hero & Login Body */}
-        <main className="max-w-7xl mx-auto px-6 py-8 flex-1 flex flex-col lg:flex-row items-center justify-center gap-12 lg:gap-20 relative z-10 w-full">
-          {/* Left Hero Description */}
+        {/* Hero & Auth Body */}
+        <main className="max-w-7xl mx-auto px-6 py-10 flex-1 flex flex-col lg:flex-row items-center justify-center gap-12 lg:gap-20 relative z-10 w-full">
+          {/* Left Hero Description ("The Book Cover") */}
           <div className="flex-1 max-w-xl text-center lg:text-left">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-[#a594ff] text-xs font-semibold mb-6">
-              <Zap size={14} className="text-[#38d4e8]" />
-              <span>Deep Reasoning • Zero Fluff • 24/7 Available</span>
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#F59E0B]/10 border border-[#F59E0B]/25 text-[#FBBF24] text-xs font-semibold mb-6">
+              <Zap size={14} className="text-[#FBBF24]" />
+              <span>Autonomous Academic Architecture • Zero Fluff</span>
             </div>
 
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-medium tracking-tight text-white leading-[1.15] mb-6">
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-white leading-[1.12] mb-6">
               Think Clearly. <br />
-              <span className="italic font-serif text-[#a594ff]">Master Confidently.</span>
+              <span className="italic font-serif text-transparent bg-clip-text bg-gradient-to-r from-[#FEF08A] via-[#FBBF24] to-[#D97706]">
+                Master Confidently.
+              </span>
             </h1>
 
-            <p className="text-[#80899d] text-base sm:text-lg leading-relaxed mb-8">
-              Your emotionally intelligent, pure AI study companion. Instant breakdowns for complex code,
+            <p className="text-zinc-400 text-base sm:text-lg leading-relaxed mb-8">
+              Your emotionally intelligent, persistent AI study companion. Instant breakdowns for complex code,
               mathematical derivations, sciences, and deep concept synthesis.
             </p>
 
-            {/* Interactive Feature Pills */}
-            <div className="grid grid-cols-2 gap-3 text-left">
-              <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/10 flex items-center gap-3">
-                <Code2 size={18} className="text-[#38d4e8]" />
+            {/* Executive Feature Bento Pills */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-left">
+              <div className="p-4 rounded-xl bg-[#0C0D12] border border-zinc-800/80 hover:border-[#F59E0B]/30 transition flex items-center gap-3.5 shadow-sm">
+                <div className="w-9 h-9 rounded-lg bg-[#F59E0B]/10 border border-[#F59E0B]/20 flex items-center justify-center text-[#FBBF24] flex-shrink-0">
+                  <Code2 size={18} />
+                </div>
                 <div>
-                  <h4 className="text-xs font-semibold text-white">Code & Logic</h4>
-                  <p className="text-[11px] text-[#69748b]">Real-time debugging & traces</p>
+                  <h4 className="text-xs font-bold text-white">Socratic Logic Engine</h4>
+                  <p className="text-[11px] text-zinc-500 mt-0.5">Real-time traces & step derivations</p>
                 </div>
               </div>
-              <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/10 flex items-center gap-3">
-                <Brain size={18} className="text-[#a789ff]" />
+
+              <div className="p-4 rounded-xl bg-[#0C0D12] border border-zinc-800/80 hover:border-[#F59E0B]/30 transition flex items-center gap-3.5 shadow-sm">
+                <div className="w-9 h-9 rounded-lg bg-[#F59E0B]/10 border border-[#F59E0B]/20 flex items-center justify-center text-[#FBBF24] flex-shrink-0">
+                  <Brain size={18} />
+                </div>
                 <div>
-                  <h4 className="text-xs font-semibold text-white">Adaptive Memory</h4>
-                  <p className="text-[11px] text-[#69748b]">Learns your doubt patterns</p>
+                  <h4 className="text-xs font-bold text-white">Persistent Memory</h4>
+                  <p className="text-[11px] text-zinc-500 mt-0.5">Remembers your doubt patterns</p>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Right Auth Card */}
-          <div className="w-full max-w-md bg-[#0e111c]/90 border border-white/10 rounded-2xl p-7 shadow-2xl backdrop-blur-xl relative">
-            <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-[#a789ff] via-[#38d4e8] to-[#43d9a2] rounded-t-2xl" />
+          {/* Right Auth Card (Strict, Professional, No Mock Bypass) */}
+          <div className="w-full max-w-md bg-[#0C0D12] border border-zinc-800/90 rounded-2xl p-7 shadow-2xl backdrop-blur-xl relative">
+            <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#FBBF24] to-transparent rounded-t-2xl" />
 
             <div className="mb-6 text-center">
-              <h2 className="text-xl font-bold text-white mb-1">Enter Study Sanctuary</h2>
-              <p className="text-xs text-[#858da1]">Sign in to keep your streak and session memory alive.</p>
+              <h2 className="text-xl font-extrabold text-white mb-1.5 tracking-tight">Access Study Sanctuary</h2>
+              <p className="text-xs text-zinc-400">Strict authentication required. Persistent memory active.</p>
             </div>
 
             {loginError && (
-              <div className="mb-4 p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs text-center">
+              <div className="mb-5 p-3 rounded-xl bg-rose-500/10 border border-rose-500/25 text-rose-300 text-xs text-center font-medium">
                 {loginError}
               </div>
             )}
 
-            {/* Google Sign In Container */}
-            <div className="flex flex-col gap-3 mb-5">
-              <div id="google-btn-slot" className="w-full flex justify-center min-h-[40px]" />
+            {/* Mode A: Telegram Waiting Screen */}
+            {telegramWaiting ? (
+              <div className="p-5 rounded-xl bg-[#08090D] border border-[#F59E0B]/30 text-center">
+                <div className="relative w-16 h-16 mx-auto mb-4 flex items-center justify-center">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#F59E0B]/20" />
+                  <div className="relative w-14 h-14 rounded-full bg-[#229ED9]/15 border border-[#229ED9]/40 flex items-center justify-center text-[#229ED9]">
+                    <TelegramIcon className="w-7 h-7" />
+                  </div>
+                </div>
 
-              {/* Telegram Login */}
-              <button
-                onClick={() => {
-                  window.open('https://t.me/BrainyAiStudyBot', '_blank')
-                }}
-                className="w-full py-2.5 px-4 rounded-xl bg-[#229ED9]/15 border border-[#229ED9]/30 text-[#229ED9] hover:bg-[#229ED9]/25 transition text-xs font-semibold flex items-center justify-center gap-2"
-              >
-                <span>✈️ Continue with Telegram Bot</span>
-              </button>
-            </div>
+                <h3 className="text-sm font-bold text-white mb-2">Connecting with Telegram</h3>
+                <p className="text-xs text-zinc-400 mb-4 leading-relaxed">
+                  Open <span className="text-[#FBBF24] font-semibold">@AiChatExpert_Bot</span> in Telegram, send{' '}
+                  <span className="text-white font-mono bg-zinc-800 px-1.5 py-0.5 rounded">/login</span>, and tap{' '}
+                  <strong className="text-white">"Authorize Web Login"</strong>.
+                </p>
 
-            {/* Divider */}
-            <div className="relative my-5 text-center">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-white/10" />
+                <div className="flex flex-col gap-2.5">
+                  <button
+                    onClick={() => {
+                      if (telegramBotUrl) window.open(telegramBotUrl, '_blank')
+                    }}
+                    className="w-full py-2.5 px-4 rounded-xl bg-[#229ED9] hover:bg-[#1E88E5] text-white text-xs font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-[#229ED9]/20"
+                  >
+                    <TelegramIcon className="w-4 h-4" />
+                    <span>Open @AiChatExpert_Bot in Telegram ↗</span>
+                  </button>
+
+                  <div className="flex items-center justify-center gap-2 py-1 text-[11px] text-[#FBBF24]">
+                    <span className="w-2 h-2 rounded-full bg-[#FBBF24] animate-pulse" />
+                    <span>Listening for authorization handshake...</span>
+                  </div>
+
+                  <button
+                    onClick={handleCancelTelegramAuth}
+                    className="text-xs text-zinc-500 hover:text-zinc-300 py-1.5 transition underline"
+                  >
+                    Cancel and use another sign-in method
+                  </button>
+                </div>
               </div>
-              <span className="relative px-3 bg-[#0e111c] text-[10px] uppercase font-bold tracking-wider text-[#596174]">
-                Or Instant Web Login
-              </span>
-            </div>
+            ) : (
+              /* Mode B: Strict Sign In Options (Google + Telegram Only) */
+              <div className="space-y-4">
+                {/* 1. Google OAuth Container */}
+                <div>
+                  <div
+                    id="google-btn-slot"
+                    className="w-full flex justify-center min-h-[44px] rounded-xl overflow-hidden"
+                  />
+                </div>
 
-            {/* Direct Web Form */}
-            <form onSubmit={handleWebLogin} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-[#858da1] mb-1.5">Your Name</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Shrey Pathak"
-                  value={loginName}
-                  onChange={(e) => setLoginName(e.target.value)}
-                  className="w-full bg-[#131725] border border-white/10 focus:border-[#8a6bff] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-[#596174] outline-none transition"
-                />
+                {/* Divider */}
+                <div className="relative my-4 text-center">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-zinc-800" />
+                  </div>
+                  <span className="relative px-3 bg-[#0C0D12] text-[10px] uppercase font-bold tracking-widest text-zinc-500">
+                    OR SECURE TELEGRAM AUTH
+                  </span>
+                </div>
+
+                {/* 2. Official Telegram Login Button */}
+                <button
+                  onClick={handleStartTelegramAuth}
+                  disabled={telegramStarting}
+                  className="w-full py-3 px-4 rounded-xl bg-[#090A0E] hover:bg-zinc-900 border border-zinc-700/80 hover:border-[#FBBF24]/50 text-white hover:text-white transition duration-200 flex items-center justify-between group shadow-sm"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-[#229ED9] flex items-center justify-center text-white flex-shrink-0 shadow-md shadow-[#229ED9]/30">
+                      <TelegramIcon className="w-5 h-5" />
+                    </div>
+                    <div className="text-left">
+                      <div className="text-xs font-bold text-white group-hover:text-[#FBBF24] transition">
+                        Continue with Telegram
+                      </div>
+                      <div className="text-[10px] text-zinc-400">@AiChatExpert_Bot</div>
+                    </div>
+                  </div>
+                  <span className="text-zinc-500 group-hover:text-[#FBBF24] text-xs font-semibold transition">
+                    {telegramStarting ? 'Connecting...' : 'Authorize →'}
+                  </span>
+                </button>
+
+                {/* Strict Security Badge */}
+                <div className="mt-6 pt-5 border-t border-zinc-800/80 text-center">
+                  <div className="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-500">
+                    <Target size={13} className="text-[#FBBF24]" />
+                    <span>Strict Authentication • No Guest Bypass • Verified Identity</span>
+                  </div>
+                </div>
               </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#858da1] mb-1.5">
-                  Username <span className="text-[#596174] font-normal">(optional)</span>
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. shrey_08"
-                  value={loginUsername}
-                  onChange={(e) => setLoginUsername(e.target.value)}
-                  className="w-full bg-[#131725] border border-white/10 focus:border-[#8a6bff] rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-[#596174] outline-none transition"
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={loginSubmitting}
-                className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-[#8a6bff] to-[#5e9df9] text-white font-semibold text-xs shadow-lg shadow-indigo-500/25 hover:opacity-95 transition disabled:opacity-50"
-              >
-                {loginSubmitting ? 'Entering Sanctuary...' : 'Start Learning Now →'}
-              </button>
-            </form>
-
-            <p className="mt-5 text-[11px] text-center text-[#596174]">
-              Data directly synced with Supabase. Real sessions & memory.
-            </p>
+            )}
           </div>
         </main>
 
-        <footer className="w-full text-center py-6 text-xs text-[#596174] border-t border-white/5 relative z-10">
-          BRAINY AI — Dedicated to high-performing learners.
+        {/* Executive Footer */}
+        <footer className="w-full text-center py-6 text-xs text-zinc-500 border-t border-zinc-900 relative z-10">
+          BRAINY AI — Dedicated to high-performing scholars and engineers.
         </footer>
       </div>
     )
@@ -743,7 +845,7 @@ export default function Page() {
             )}
           </button>
 
-          {/* Real Chat History (from Supabase) */}
+          {/* Persistent Chat History */}
           {!collapsed && (
             <div className="history-section flex-1 overflow-y-auto">
               <div className="section-heading">
@@ -801,7 +903,20 @@ export default function Page() {
 
             {/* Profile Bar */}
             <div className="profile-row">
-              <div className="avatar">{userInitials}</div>
+              <div className="avatar overflow-hidden flex items-center justify-center">
+                {user?.photo_url ? (
+                  <img
+                    src={user.photo_url}
+                    alt={user.first_name}
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLElement).style.display = 'none'
+                    }}
+                  />
+                ) : (
+                  userInitials
+                )}
+              </div>
               {!collapsed && (
                 <span>
                   <strong>{user?.first_name || 'Student'}</strong>
@@ -978,7 +1093,20 @@ export default function Page() {
                 m.role === 'user' ? (
                   <div key={index} className="message user-message">
                     <span>{m.content}</span>
-                    <span className="user-avatar">{userInitials}</span>
+                    <span className="user-avatar overflow-hidden flex items-center justify-center">
+                      {user?.photo_url ? (
+                        <img
+                          src={user.photo_url}
+                          alt={user.first_name}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none'
+                          }}
+                        />
+                      ) : (
+                        userInitials
+                      )}
+                    </span>
                   </div>
                 ) : (
                   <article key={index} className="ai-message">
@@ -1174,28 +1302,53 @@ export default function Page() {
               </button>
             </div>
 
+            {/* User Profile Card */}
+            <div className="flex items-center gap-4 p-4 rounded-xl bg-[#08090D] border border-zinc-800 mb-5">
+              <div className="w-13 h-13 rounded-full overflow-hidden bg-gradient-to-br from-[#F59E0B] to-[#B45309] flex items-center justify-center text-black font-extrabold text-base flex-shrink-0 border-2 border-[#FBBF24]/40">
+                {user?.photo_url ? (
+                  <img
+                    src={user.photo_url}
+                    alt={user.first_name}
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLElement).style.display = 'none'
+                    }}
+                  />
+                ) : (
+                  userInitials
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h4 className="text-sm font-bold text-white truncate">{user?.first_name || 'Scholar'}</h4>
+                <p className="text-xs text-[#FBBF24] font-medium truncate">
+                  {user?.username ? `@${user.username}` : 'Verified Scholar'}
+                </p>
+                <p className="text-[11px] text-zinc-500 mt-0.5">Persistent Session Synced</p>
+              </div>
+            </div>
+
             {/* Bento Grid Stats */}
             <div className="grid grid-cols-2 gap-3 mb-5">
-              <div className="p-4 rounded-xl bg-[#080a12] border border-white/5">
-                <span className="text-[11px] text-[#69748b] font-semibold uppercase block mb-1">
+              <div className="p-4 rounded-xl bg-[#08090D] border border-zinc-800/80">
+                <span className="text-[11px] text-zinc-400 font-semibold uppercase block mb-1">
                   Active Streak
                 </span>
-                <span className="text-2xl font-bold text-[#fbbf58]">
+                <span className="text-2xl font-bold text-[#FBBF24]">
                   {profileStats.streak} 🔥
                 </span>
               </div>
 
-              <div className="p-4 rounded-xl bg-[#080a12] border border-white/5">
-                <span className="text-[11px] text-[#69748b] font-semibold uppercase block mb-1">
+              <div className="p-4 rounded-xl bg-[#08090D] border border-zinc-800/80">
+                <span className="text-[11px] text-zinc-400 font-semibold uppercase block mb-1">
                   Scholar Level
                 </span>
-                <span className="text-2xl font-bold text-[#38d4e8]">
+                <span className="text-2xl font-bold text-white">
                   Lvl {profileStats.level}
                 </span>
               </div>
 
-              <div className="p-4 rounded-xl bg-[#080a12] border border-white/5">
-                <span className="text-[11px] text-[#69748b] font-semibold uppercase block mb-1">
+              <div className="p-4 rounded-xl bg-[#08090D] border border-zinc-800/80">
+                <span className="text-[11px] text-zinc-400 font-semibold uppercase block mb-1">
                   Questions Asked
                 </span>
                 <span className="text-2xl font-bold text-white">
@@ -1203,20 +1356,20 @@ export default function Page() {
                 </span>
               </div>
 
-              <div className="p-4 rounded-xl bg-[#080a12] border border-white/5">
-                <span className="text-[11px] text-[#69748b] font-semibold uppercase block mb-1">
+              <div className="p-4 rounded-xl bg-[#08090D] border border-zinc-800/80">
+                <span className="text-[11px] text-zinc-400 font-semibold uppercase block mb-1">
                   Quiz Accuracy
                 </span>
-                <span className="text-2xl font-bold text-[#43d9a2]">
+                <span className="text-2xl font-bold text-[#F59E0B]">
                   {profileStats.score}%
                 </span>
               </div>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-[#080a12] border border-white/5 text-xs text-[#858da1] flex justify-between">
-              <span>Account:</span>
-              <strong className="text-white">
-                {user?.first_name} {user?.username ? `(@${user.username})` : ''}
+            <div className="p-3.5 rounded-xl bg-[#08090D] border border-zinc-800 text-xs text-zinc-400 flex justify-between items-center">
+              <span>Security Status:</span>
+              <strong className="text-[#FBBF24] flex items-center gap-1">
+                <Check size={13} /> Verified & Persistent
               </strong>
             </div>
           </div>

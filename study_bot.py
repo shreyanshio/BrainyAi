@@ -1,4 +1,5 @@
 import os
+import uuid
 import logging
 import asyncio
 import base64
@@ -927,6 +928,7 @@ def web_search(query: str, max_results: int = 5) -> str:
 #   GLOBAL STATE
 
 MAINTENANCE_MODE        = False
+AUTH_SESSIONS           = {}   # Web auth handshake sessions shared with app.py
 user_conversations      = {}   # UNIFIED history for chat + /ask + /brainy (50 msgs = 25 exchanges)
 user_data_store         = {}
 interaction_log         = []   # Saved interactions for AI learning context
@@ -2718,9 +2720,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = user.id
         username = user.username or ""
         first_name = user.first_name or ""
+        if context.user_data is not None:
+            context.user_data["pending_session_id"] = session_id
         
-        web_url = os.getenv("WEB_APP_URL", "https://brainyai.up.railway.app")
-        verify_url = f"{web_url}/api/auth/verify?session_id={session_id}&user_id={user_id}&username={username}&first_name={first_name}"
+        api_base = os.getenv("API_BASE_URL") or os.getenv("WEB_APP_URL", "https://brainyai.up.railway.app")
+        api_base = api_base.rstrip("/")
+        verify_url = f"{api_base}/api/auth/verify?session_id={session_id}&user_id={user_id}&username={username}&first_name={first_name}"
         
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔓 Authorize Web Login", url=verify_url)]
@@ -2728,10 +2733,59 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(
             "⚡ 𝗕𝗥𝗔𝗜𝗡𝗬 𝗪𝗲𝗯 𝗟𝗼𝗴𝗶𝗻 𝗥𝗲𝗾𝘂𝗲𝘀𝘁\n\n"
-            f"Hi {first_name}! Tap the button below to sign in to the web app/mini-app securely.",
+            f"Hi {first_name}! Tap the button below to authorize web access, or send /login.",
             reply_markup=keyboard
         )
         return
+
+
+async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /login command to authenticate the user to the web application."""
+    if await maintenance_guard(update):
+        return
+
+    user = update.effective_user
+    user_id = user.id
+    username = user.username or ""
+    first_name = user.first_name or ""
+
+    session_id = None
+    if context.args and context.args[0].startswith("sess_"):
+        session_id = context.args[0].partition("sess_")[2].strip()
+    elif context.args and context.args[0]:
+        session_id = context.args[0].strip()
+    elif context.user_data and context.user_data.get("pending_session_id"):
+        session_id = context.user_data.get("pending_session_id")
+
+    api_base = (os.getenv("API_BASE_URL") or os.getenv("WEB_APP_URL", "https://brainyai.up.railway.app")).rstrip("/")
+    frontend_url = (os.getenv("FRONTEND_URL", "https://brainyai.cenai.workers.dev")).rstrip("/")
+
+    if session_id:
+        verify_url = f"{api_base}/api/auth/verify?session_id={session_id}&user_id={user_id}&username={username}&first_name={first_name}"
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔓 Authorize Web Login", url=verify_url)]
+        ])
+        await update.message.reply_text(
+            "⚡ 𝗕𝗥𝗔𝗜𝗡𝗬 𝗪𝗲𝗯 𝗟𝗼𝗴𝗶𝗻 𝗔𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗮𝘁𝗶𝗼𝗻\n\n"
+            f"Hi {first_name}! Tap below to authorize your active web session:",
+            reply_markup=keyboard
+        )
+    else:
+        # Pre-authenticate a fresh session directly
+        sess_id = uuid.uuid4().hex
+        AUTH_SESSIONS[sess_id] = {
+            "status": "authenticated",
+            "user": {"id": user_id, "first_name": first_name, "username": username}
+        }
+        login_link = f"{frontend_url}/?auth_session={sess_id}"
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔓 Open Brainy AI Sanctuary", url=login_link)]
+        ])
+        await update.message.reply_text(
+            "⚡ 𝗕𝗥𝗔𝗜𝗡𝗬 𝗪𝗲𝗯 𝗔𝗰𝗰𝗲𝘀𝘀 𝗚𝗿𝗮𝗻𝘁𝗲𝗱\n\n"
+            f"Welcome {first_name}! Tap below to enter Brainy AI with your Telegram account.",
+            reply_markup=keyboard
+        )
 
     if is_group(update):
         chat = update.effective_chat
@@ -4304,6 +4358,7 @@ def main():
 
     # Register handlers
     app.add_handler(CommandHandler("start",       start))
+    app.add_handler(CommandHandler("login",       login_command))
     app.add_handler(CommandHandler("help",        help_command))
     app.add_handler(CommandHandler("ask",         ask_command))
     app.add_handler(CommandHandler("brainy",      brainy_command))

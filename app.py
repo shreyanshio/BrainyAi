@@ -152,8 +152,7 @@ def format_for_web(text: str) -> str:
 
 
 # In-memory browser auth handshake sessions (short-lived, just for the login flow):
-# { session_id: { "status": "pending"|"authenticated", "user": { ... } } }
-auth_sessions = {}
+auth_sessions = study_bot.AUTH_SESSIONS
 share_links = {}
 
 
@@ -573,6 +572,9 @@ def auth_status(session_id):
         session["first_name"] = user["first_name"]
         session["username"] = user.get("username", "")
         session["email"] = ""  # Telegram logins have no verified email
+        if user.get("username"):
+            user["photo_url"] = f"https://t.me/i/userpic/320/{user['username']}.jpg"
+        session["photo_url"] = user.get("photo_url", "")
         auth_sessions.pop(session_id, None)
         return jsonify({"status": "authenticated", "user": user})
 
@@ -590,40 +592,111 @@ def auth_verify():
         return "❌ Missing session_id or user_id", 400
 
     if session_id in auth_sessions:
+        photo_url = f"https://t.me/i/userpic/320/{username}.jpg" if username else ""
         auth_sessions[session_id] = {
             "status": "authenticated",
-            "user": {"id": int(user_id), "first_name": first_name, "username": username}
+            "user": {
+                "id": int(user_id),
+                "first_name": first_name,
+                "username": username,
+                "photo_url": photo_url
+            }
         }
-        return """
-        <html>
-            <head>
-                <title>Login Successful</title>
-                <style>
-                    body {
-                        background-color: #0d1117; color: #c9d1d9;
-                        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-                        display: flex; flex-direction: column; align-items: center; justify-content: center;
-                        height: 100vh; margin: 0;
-                    }
-                    .card {
-                        background: rgba(22, 27, 34, 0.8); border: 1px solid #30363d; border-radius: 12px;
-                        padding: 30px; text-align: center; box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-                        backdrop-filter: blur(4px);
-                    }
-                    h1 { color: #58a6ff; font-size: 24px; margin-bottom: 10px; }
-                    p { font-size: 16px; margin-bottom: 20px; }
-                    .success-icon { font-size: 48px; margin-bottom: 15px; }
-                </style>
-            </head>
-            <body>
-                <div class="card">
-                    <div class="success-icon">🔓</div>
-                    <h1>Login Authorized</h1>
-                    <p>Verification successful! You can now close this window and return to your chat page.</p>
-                </div>
-            </body>
-        </html>
-        """
+
+        try:
+            study_bot.load_user_into_memory(int(user_id), first_name, username)
+            sb_record_login(
+                user_id=int(user_id),
+                username=username,
+                first_name=first_name,
+                login_type="telegram",
+                ip=request.remote_addr or "",
+                user_agent=request.headers.get("User-Agent", "")
+            )
+        except Exception as e:
+            logger.warning("Error recording verified Telegram login: %s", e)
+
+        frontend_url = os.getenv("FRONTEND_URL", "https://brainyai.cenai.workers.dev").rstrip("/")
+        display_name = escape(first_name or username or "Scholar")
+
+        return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brainy-AI — Authorized</title>
+    <meta http-equiv="refresh" content="2;url={frontend_url}">
+    <style>
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{
+            background: #09090B;
+            color: #FFFFFF;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }}
+        .card {{
+            background: #121214;
+            border: 1px solid rgba(245, 158, 11, 0.35);
+            border-radius: 20px;
+            padding: 36px 32px;
+            text-align: center;
+            max-width: 420px;
+            width: 100%;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8), 0 0 30px rgba(245, 158, 11, 0.1);
+        }}
+        .emblem {{
+            width: 60px;
+            height: 60px;
+            border-radius: 16px;
+            background: rgba(245, 158, 11, 0.15);
+            border: 1px solid rgba(245, 158, 11, 0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            margin: 0 auto 20px;
+        }}
+        h1 {{
+            font-size: 22px;
+            font-weight: 700;
+            color: #FFFFFF;
+            margin-bottom: 8px;
+        }}
+        p {{
+            font-size: 14px;
+            color: #A1A1AA;
+            line-height: 1.6;
+            margin-bottom: 24px;
+        }}
+        .btn {{
+            display: inline-block;
+            background: linear-gradient(135deg, #FBBF24, #D97706);
+            color: #09090B;
+            font-weight: 700;
+            font-size: 14px;
+            padding: 12px 24px;
+            border-radius: 12px;
+            text-decoration: none;
+            transition: transform 0.2s;
+        }}
+        .btn:hover {{
+            transform: scale(1.02);
+        }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="emblem">🔓</div>
+        <h1>Authentication Successful</h1>
+        <p>Welcome, <strong>{display_name}</strong>! Your session is verified. Redirecting you to Brainy AI...</p>
+        <a href="{frontend_url}" class="btn">Enter Sanctuary →</a>
+    </div>
+</body>
+</html>"""
     return "❌ Invalid or expired session ID", 400
 
 
@@ -711,7 +784,8 @@ def auth_me():
         "user": {
             "id": user_id,
             "first_name": session.get("first_name", "Student"),
-            "username": session.get("username", "")
+            "username": session.get("username", ""),
+            "photo_url": session.get("photo_url", "")
         }
     })
 
@@ -751,6 +825,7 @@ def auth_google():
     email = id_info.get("email", "")
     name = id_info.get("name") or (email.split("@")[0] if email else "Google Student")
     google_sub = id_info.get("sub") or email or name
+    picture = id_info.get("picture", "")
 
     # Deterministic integer user_id
     user_id = int(hashlib.md5(f"google_{google_sub}".encode()).hexdigest(), 16) % (10**9)
@@ -760,6 +835,7 @@ def auth_google():
     session["first_name"] = name
     session["username"] = username
     session["email"] = email.strip().lower()  # verified by Google — safe to gate admin access on
+    session["photo_url"] = picture
 
     # Ensure user memory in study_bot
     study_bot.load_user_into_memory(user_id, name, username)
@@ -781,7 +857,8 @@ def auth_google():
             "first_name": name,
             "username": username,
             "email": email,
-            "picture": id_info.get("picture", "")
+            "picture": picture,
+            "photo_url": picture
         }
     })
 

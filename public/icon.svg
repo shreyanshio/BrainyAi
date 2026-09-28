@@ -1,26 +1,52 @@
-<svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <style>
-    @media (prefers-color-scheme: light) {
-      .background { fill: black; }
-      .foreground { fill: white; }
-    }
-    @media (prefers-color-scheme: dark) {
-      .background { fill: white; }
-      .foreground { fill: black; }
-    }
-  </style>
-  <g clip-path="url(#clip0_7960_43945)">
-    <rect class="background" width="180" height="180" rx="37" />
-    <g style="transform: scale(95%); transform-origin: center">
-      <path class="foreground"
-        d="M101.141 53H136.632C151.023 53 162.689 64.6662 162.689 79.0573V112.904H148.112V79.0573C148.112 78.7105 148.098 78.3662 148.072 78.0251L112.581 112.898C112.701 112.902 112.821 112.904 112.941 112.904H148.112V126.672H112.941C98.5504 126.672 86.5638 114.891 86.5638 100.5V66.7434H101.141V100.5C101.141 101.15 101.191 101.792 101.289 102.422L137.56 66.7816C137.255 66.7563 136.945 66.7434 136.632 66.7434H101.141V53Z" />
-      <path class="foreground"
-        d="M65.2926 124.136L14 66.7372H34.6355L64.7495 100.436V66.7372H80.1365V118.47C80.1365 126.278 70.4953 129.958 65.2926 124.136Z" />
-    </g>
-  </g>
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <clipPath id="clip0_7960_43945">
-      <rect width="180" height="180" fill="white" />
-    </clipPath>
+    <linearGradient id="goldGradient" x1="64" y1="64" x2="448" y2="448" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FEF08A"/>
+      <stop offset="35%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#B45309"/>
+    </linearGradient>
+    <linearGradient id="borderGrad" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FBBF24" stop-opacity="0.6"/>
+      <stop offset="50%" stop-color="#27272A" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#F59E0B" stop-opacity="0.5"/>
+    </linearGradient>
+    <filter id="goldGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
   </defs>
+
+  <!-- Deep Obsidian Rounded Background -->
+  <rect width="512" height="512" rx="112" fill="#09090B"/>
+  <rect x="4" y="4" width="504" height="504" rx="108" stroke="url(#borderGrad)" stroke-width="4" fill="none"/>
+
+  <!-- Subtle Ambient Glow -->
+  <circle cx="256" cy="256" r="160" fill="#F59E0B" fill-opacity="0.08" filter="url(#goldGlow)" />
+
+  <!-- Brainy 'B' Monogram / Neural Architecture -->
+  <g filter="url(#goldGlow)">
+    <!-- Vertical Spine -->
+    <path d="M168 128H236C296 128 344 160 344 212C344 246 322 274 290 286C332 298 358 332 358 374C358 430 306 464 242 464H168C154.745 464 144 453.255 144 440V152C144 138.745 154.745 128 168 128Z" 
+          fill="none" 
+          stroke="url(#goldGradient)" 
+          stroke-width="32" 
+          stroke-linecap="round" 
+          stroke-linejoin="round"/>
+    
+    <!-- Central Divider -->
+    <path d="M160 288H264" 
+          stroke="url(#goldGradient)" 
+          stroke-width="28" 
+          stroke-linecap="round"/>
+    
+    <!-- Inner Neural Nodes -->
+    <circle cx="240" cy="208" r="12" fill="#FEF08A"/>
+    <circle cx="254" cy="376" r="14" fill="#FEF08A"/>
+    <circle cx="204" cy="208" r="6" fill="#F59E0B"/>
+    <circle cx="208" cy="376" r="7" fill="#F59E0B"/>
+
+    <!-- Neural Circuit Accent Lines -->
+    <path d="M252 208L290 208" stroke="#FEF08A" stroke-width="4" stroke-linecap="round" stroke-dasharray="6 6"/>
+    <path d="M268 376L304 376" stroke="#FEF08A" stroke-width="4" stroke-linecap="round" stroke-dasharray="6 6"/>
+  </g>
 </svg>
