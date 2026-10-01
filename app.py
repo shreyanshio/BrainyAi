@@ -138,7 +138,128 @@ def handle_uncaught(e):
 
 SUPABASE_URL = study_bot.SUPABASE_URL
 SUPABASE_KEY = study_bot.SUPABASE_KEY
-MESSAGE_LIMIT = 50
+
+# ── GLOBAL USER MESSAGE QUOTA: 30 MESSAGES PER 8 HOURS ──
+GLOBAL_MESSAGE_LIMIT = 30
+QUOTA_WINDOW_HOURS = 8
+QUOTA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_quotas.json")
+
+import threading
+_quota_lock = threading.Lock()
+_user_quotas: dict = {}
+
+def _load_user_quotas():
+    global _user_quotas
+    if os.path.exists(QUOTA_FILE):
+        try:
+            with open(QUOTA_FILE, "r", encoding="utf-8") as f:
+                _user_quotas = json.load(f)
+        except Exception as e:
+            logger.warning("Could not load user_quotas.json: %s", e)
+            _user_quotas = {}
+
+def _save_user_quotas():
+    try:
+        with open(QUOTA_FILE, "w", encoding="utf-8") as f:
+            json.dump(_user_quotas, f, indent=2)
+    except Exception as e:
+        logger.warning("Could not save user_quotas.json: %s", e)
+
+_load_user_quotas()
+
+def get_user_quota(user_id: int | str) -> dict:
+    """Return current quota status, automatically rolling over expired 8-hour windows."""
+    with _quota_lock:
+        uid_str = str(user_id)
+        now = datetime.now(timezone.utc)
+        record = _user_quotas.get(uid_str)
+        if record:
+            try:
+                reset_at = datetime.fromisoformat(record["reset_at"])
+            except Exception:
+                reset_at = now
+            if now >= reset_at:
+                record = {
+                    "count": 0,
+                    "reset_at": (now + timedelta(hours=QUOTA_WINDOW_HOURS)).isoformat(),
+                    "window_start": now.isoformat()
+                }
+                _user_quotas[uid_str] = record
+                _save_user_quotas()
+        else:
+            record = {
+                "count": 0,
+                "reset_at": (now + timedelta(hours=QUOTA_WINDOW_HOURS)).isoformat(),
+                "window_start": now.isoformat()
+            }
+            _user_quotas[uid_str] = record
+            _save_user_quotas()
+
+        used = record["count"]
+        remaining = max(0, GLOBAL_MESSAGE_LIMIT - used)
+        return {
+            "used": used,
+            "limit": GLOBAL_MESSAGE_LIMIT,
+            "remaining": remaining,
+            "reset_at": record["reset_at"],
+            "window_hours": QUOTA_WINDOW_HOURS
+        }
+
+def consume_user_quota(user_id: int | str) -> tuple[bool, dict]:
+    """Atomically check and consume 1 message credit from the user's 8h quota."""
+    with _quota_lock:
+        status = get_user_quota(user_id)
+        if status["used"] >= GLOBAL_MESSAGE_LIMIT:
+            return False, status
+
+        uid_str = str(user_id)
+        _user_quotas[uid_str]["count"] += 1
+        _save_user_quotas()
+        return True, get_user_quota(user_id)
+
+MODELS_CATALOG = [
+    {
+        "id": "brainy-balanced",
+        "name": "Brainy Balanced",
+        "tagline": "All-round concept learning",
+        "description": "Balanced speed and depth for everyday study questions, explanations, and doubts.",
+        "badge": "Default",
+        "recommendedFor": "General study & concept clarity"
+    },
+    {
+        "id": "brainy-fast",
+        "name": "Brainy Fast",
+        "tagline": "Speedrun & flash review",
+        "description": "Instant, concise answers optimized for rapid memorization and quick formula checks.",
+        "badge": "Fast",
+        "recommendedFor": "Quick definitions & flashcard review"
+    },
+    {
+        "id": "brainy-reasoning",
+        "name": "Brainy Reasoning",
+        "tagline": "Deep academic derivations",
+        "description": "Step-by-step mathematical proofs, multi-stage logic, and rigorous scientific explanations.",
+        "badge": "Deep",
+        "recommendedFor": "Math, Physics & complex proofs"
+    },
+    {
+        "id": "brainy-coding",
+        "name": "Brainy Code",
+        "tagline": "Programming & logic",
+        "description": "Clean syntax, algorithmic decomposition, memory optimization, and line-by-line debugging.",
+        "badge": "Technical",
+        "recommendedFor": "Coding, data structures & debugging"
+    },
+    {
+        "id": "brainy-exam",
+        "name": "Brainy Exam Prep",
+        "tagline": "Exam strategy & marking schemes",
+        "description": "Focuses on high-yield exam traps, marking rubrics, structured answers, and practice questions.",
+        "badge": "Exam",
+        "recommendedFor": "Exam revision & high-yield practice"
+    }
+]
+
 
 def format_for_web(text: str) -> str:
     """
@@ -943,6 +1064,20 @@ def delete_session(session_id):
     return jsonify({"status": "ok"})
 
 
+@app.route("/api/usage", methods=["GET"])
+@login_required
+def get_usage():
+    """Returns the user's global 8-hour window quota status."""
+    user_id = session["user_id"]
+    return jsonify(get_user_quota(user_id))
+
+
+@app.route("/api/models", methods=["GET"])
+def get_models():
+    """Public catalogue of capability-based models."""
+    return jsonify(MODELS_CATALOG)
+
+
 @app.route("/api/chat/<session_id>", methods=["GET"])
 @login_required
 def get_chat_history(session_id):
@@ -955,12 +1090,16 @@ def get_chat_history(session_id):
     for m in messages:
         if m.get("role") == "assistant":
             m["content"] = format_for_web(m["content"])
-    user_msg_count = sum(1 for m in messages if m["role"] == "user")
+
+    quota_status = get_user_quota(user_id)
 
     return jsonify({
+        "session_id": session_id,
+        "title": sess.get("title", "Study Session"),
         "messages": messages,
-        "user_message_count": user_msg_count,
-        "message_limit": MESSAGE_LIMIT
+        "usage": quota_status,
+        "user_message_count": quota_status["used"],
+        "message_limit": GLOBAL_MESSAGE_LIMIT
     })
 
 
@@ -1021,10 +1160,23 @@ def send_message():
 
     data = request.json or {}
     session_id = data.get("session_id")
-    content = data.get("content", "").strip()
+    # Unified contract: accept both 'message' and 'content'
+    content = (data.get("message") or data.get("content") or "").strip()
+    model_id = (data.get("model") or "brainy-balanced").strip().lower()
+    answer_length = (data.get("answer_length") or "medium").strip().lower()
 
-    if not session_id or not content:
-        return jsonify({"error": "Missing session_id or content"}), 400
+    if not content:
+        return jsonify({"error": "Message content cannot be empty"}), 400
+
+    # Ensure session exists or auto-create it
+    if not session_id:
+        new_sess = sb_create_session(user_id, "New Study Session")
+        session_id = new_sess["id"]
+        sess = new_sess
+    else:
+        sess = sb_get_session(session_id, user_id)
+        if not sess:
+            sess = sb_create_session(user_id, "New Study Session", session_id=session_id)
 
     # Sanitize user input
     content = sanitize_input(content)
@@ -1037,25 +1189,21 @@ def send_message():
     # Per-user rate limit: 10 messages per minute
     if not check_rate_limit("user_{}".format(user_id), limit=10, window=60):
         log_security_event("user_rate_limit", ip, user_id, "")
-        return jsonify({"error": "Message limit reached. Please wait a moment."}), 429
+        return jsonify({"error": "Message rate limit reached. Please wait a moment."}), 429
 
-    sess = sb_get_session(session_id, user_id)
-    if not sess:
-        return jsonify({"error": "Session not found"}), 404
-
-    # Enforce the 50-message-per-session limit BEFORE spending an AI call
-    current_count = sb_count_user_messages(session_id)
-    if current_count >= MESSAGE_LIMIT:
+    # Enforce atomic 30 messages / 8 hours user quota BEFORE spending AI tokens
+    allowed, quota_status = consume_user_quota(user_id)
+    if not allowed:
         return jsonify({
-            "error": "limit_reached",
-            "message": "This chat hit its 50-message limit. Start a new chat to keep going.",
-            "user_message_count": current_count,
-            "message_limit": MESSAGE_LIMIT
-        }), 403
+            "error": "quota_exceeded",
+            "message": f"You have reached your 8-hour limit of {GLOBAL_MESSAGE_LIMIT} messages. Quota resets at {quota_status['reset_at']}.",
+            "usage": quota_status,
+            "user_message_count": quota_status["used"],
+            "message_limit": GLOBAL_MESSAGE_LIMIT
+        }), 429
 
     # Save user message
     sb_insert_message(session_id, "user", content)
-    new_count = current_count + 1
 
     # Fetch last 15 messages (now including the one we just saved) for context
     messages_context = [{"role": m["role"], "content": m["content"]} for m in sb_get_recent_messages(session_id, 15)]
@@ -1066,29 +1214,62 @@ def send_message():
     system_prompt = study_bot.SYSTEM_PROMPT
     max_tok = None
 
-    # ── Zero Sugarcoating toggle ──────────────────────────
-    tone = data.get("tone", "standard")
-    if tone == "blunt":
-        system_prompt = (
-            system_prompt
-            + "\n\nTONE OVERRIDE — ZERO SUGARCOATING MODE:\n"
-            "Be blunt, direct, and no-nonsense. Skip encouragement fluff, "
-            "skip 'Great question!', skip motivational padding. "
-            "Give the answer straight, correct mistakes directly, "
-            "and be brutally honest about what the student is getting wrong. "
-            "Still be helpful — just cut the sugar."
+    # Model capability overrides
+    if model_id == "brainy-fast":
+        system_prompt += (
+            "\n\nCAPABILITY OVERRIDE — BRAINY FAST:\n"
+            "Deliver rapid, highly distilled answers with zero fluff. Use crisp bullet points, direct equations, and one-line summaries."
+        )
+    elif model_id == "brainy-reasoning":
+        system_prompt += (
+            "\n\nCAPABILITY OVERRIDE — BRAINY REASONING:\n"
+            "Provide deep academic reasoning. Break problems down from first principles, write explicit mathematical "
+            "or logical steps, and verify edge cases before stating conclusions."
+        )
+    elif model_id == "brainy-coding":
+        system_prompt += (
+            "\n\nCAPABILITY OVERRIDE — BRAINY CODE:\n"
+            "Focus on clean code architecture, optimal time/space complexity, type safety, and edge-case handling. "
+            "Annotate key lines with concise comments."
+        )
+    elif model_id == "brainy-exam":
+        system_prompt += (
+            "\n\nCAPABILITY OVERRIDE — BRAINY EXAM PREP:\n"
+            "Structure the response according to high-yield exam standards. Highlight key marks distribution, "
+            "common student mistakes, and provide 2 quick self-test questions at the end."
         )
 
-    # Ground the model in real facts about itself so it doesn't guess/hallucinate
-    # when the user asks about limits or features.
-    remaining = MESSAGE_LIMIT - new_count
-    system_prompt = (
-        system_prompt
-        + f"\n\nFACTS ABOUT THIS CHAT (answer accurately if asked, don't guess):\n"
-        f"- This session has a hard limit of {MESSAGE_LIMIT} messages total.\n"
-        f"- {new_count} messages used so far, {remaining} remaining.\n"
-        f"- Once the limit is hit, the user must start a new chat to continue.\n"
-        f"- Only the last 15 messages of a session are kept as context."
+    # Answer length constraint handling
+    if answer_length == "short":
+        system_prompt += (
+            "\n\nANSWER LENGTH CONSTRAINT — SHORT MODE:\n"
+            "Keep your response concise, direct, and under 250 words. Focus strictly on "
+            "core definitions, key bullet points, and essential formulas. Avoid conversational filler."
+        )
+        max_tok = 350
+    elif answer_length == "long":
+        system_prompt += (
+            "\n\nANSWER LENGTH CONSTRAINT — LONG MODE:\n"
+            "Provide an exhaustive, in-depth explanation (~800-1200 words). Include background context, "
+            "detailed step-by-step breakdown or derivations, real-world examples, common pitfalls, and review questions."
+        )
+        max_tok = 1400
+    else:
+        answer_length = "medium"
+        system_prompt += (
+            "\n\nANSWER LENGTH CONSTRAINT — MEDIUM MODE:\n"
+            "Provide a balanced, well-structured explanation (~400-600 words) with clear headings, "
+            "bullet points, and relevant examples."
+        )
+        max_tok = 800
+
+    # Ground the model in real facts about this user's quota
+    system_prompt += (
+        f"\n\nFACTS ABOUT THIS USER (answer accurately if asked, don't guess):\n"
+        f"- The user has an 8-hour quota of {GLOBAL_MESSAGE_LIMIT} messages total across Brainy.\n"
+        f"- {quota_status['used']} messages used so far in this window, {quota_status['remaining']} remaining.\n"
+        f"- The window resets at {quota_status['reset_at']}.\n"
+        f"- The last 15 messages of a session are kept as context."
     )
 
     user_profile = study_bot.get_user_data(user_id)
@@ -1194,12 +1375,18 @@ def send_message():
     except Exception as se:
         print(f"Sync to Supabase memory failed: {se}")
 
+    # Return unified typed API response
     return jsonify({
         "role": "assistant",
         "content": format_for_web(response_text),
+        "response": format_for_web(response_text),
+        "session_id": session_id,
         "new_title": title_updated,
-        "user_message_count": new_count,
-        "message_limit": MESSAGE_LIMIT
+        "model": model_id,
+        "answer_length": answer_length,
+        "usage": quota_status,
+        "user_message_count": quota_status["used"],
+        "message_limit": GLOBAL_MESSAGE_LIMIT
     })
 
 
