@@ -33,13 +33,13 @@ const getModelIcon = (id: string) => {
     case 'brainy-fast':
       return <Zap size={14} className="text-amber-400" />
     case 'brainy-reasoning':
-      return <Sparkles size={14} className="text-indigo-400" />
+      return <Sparkles size={14} className="text-emerald-400" />
     case 'brainy-coding':
-      return <Code2 size={14} className="text-emerald-400" />
+      return <Code2 size={14} className="text-teal-400" />
     case 'brainy-exam':
-      return <BookOpen size={14} className="text-rose-400" />
+      return <BookOpen size={14} className="text-emerald-300" />
     default:
-      return <Sparkles size={14} className="text-sky-400" />
+      return <Sparkles size={14} className="text-emerald-400" />
   }
 }
 

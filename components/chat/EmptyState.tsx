@@ -14,11 +14,11 @@ const getCategoryIcon = (category: string) => {
     case 'concept':
       return <Lightbulb size={16} className="text-amber-400" />
     case 'problem':
-      return <Target size={16} className="text-indigo-400" />
+      return <Target size={16} className="text-emerald-400" />
     case 'code':
-      return <Code2 size={16} className="text-emerald-400" />
+      return <Code2 size={16} className="text-teal-400" />
     case 'exam':
-      return <Sparkles size={16} className="text-rose-400" />
+      return <Sparkles size={16} className="text-emerald-300" />
     default:
       return <Lightbulb size={16} className="text-zinc-400" />
   }

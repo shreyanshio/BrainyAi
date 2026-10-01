@@ -2,15 +2,22 @@
 @import 'tw-animate-css';
 
 :root {
-  --background: #090a0f;
-  --foreground: #f4f4f5;
-  --surface: #10121a;
-  --surface-border: #27272a;
-  --text-muted: #a1a1aa;
+  --background: #060e0a;
+  --foreground: #f4fbf6;
+  --surface: #0a1711;
+  --surface-border: #143522;
+  --text-muted: #8aa995;
+  --primary: #059669;
+  --accent: #10b981;
 }
 
 * {
   box-sizing: border-box;
+}
+
+::selection {
+  background-color: #059669;
+  color: #ffffff;
 }
 
 html,
@@ -25,7 +32,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Custom subtle scrollbar */
+/* Custom subtle emerald-tinted scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -36,12 +43,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #27272a;
+  background: #173824;
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3f3f46;
+  background: #245236;
 }
 
 /* KaTeX equations safe wrapper & math styling */

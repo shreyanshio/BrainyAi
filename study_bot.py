@@ -163,7 +163,7 @@ OPENAI_API_KEYS     = [k for k in [os.getenv(f"OPENAI_API_KEY_{i}")     for i in
 
 # ── Supabase (used for broadcast user list — persists across restarts) ──
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")          # e.g. https://xxxx.supabase.co
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")  # service_role key (server-side only, never expose to clients)
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY", "")  # service_role key
 
 if not TELEGRAM_TOKEN or not GROQ_API_KEYS:
     print("WARNING: TELEGRAM_TOKEN or GROQ_API_KEYS are missing!")

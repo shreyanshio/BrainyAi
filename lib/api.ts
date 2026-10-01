@@ -119,6 +119,15 @@ export async function loginWeb(name: string, username?: string): Promise<User> {
   return res.user
 }
 
+export async function loginStudentPass(): Promise<User> {
+  const res = await request<AuthResponse>('/api/auth/student_pass', {
+    method: 'POST',
+  })
+  if (!res.user) throw new ApiError('Authentication failed: no user returned', 401)
+  return res.user
+}
+
+
 export async function initTelegramLogin(): Promise<{ session_id: string; bot_url: string }> {
   return request<{ session_id: string; bot_url: string }>('/api/auth/init', {
     method: 'POST',

@@ -293,7 +293,7 @@ export function Sidebar({
                     ? 'bg-rose-500'
                     : progressPercent >= 80
                     ? 'bg-amber-400'
-                    : 'bg-zinc-300'
+                    : 'bg-emerald-500'
                 }`}
                 style={{ width: `${progressPercent}%` }}
               />
