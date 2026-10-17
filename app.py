@@ -1,6 +1,13 @@
 """Brainy-AI REST API & Web Sanctuary Gateway.
 Provides session authorization, cross-origin security headers, and AI proxy routing.
 """
+import sys
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 import os
 import re
 import uuid
@@ -59,6 +66,7 @@ CORS(
 
 # Persistent, synchronized secret key for sessions and tokens
 app.secret_key = _get_auth_secret_key()
+_secret_key = app.secret_key
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = os.getenv("SESSION_COOKIE_SAMESITE", "None")
 app.config["SESSION_COOKIE_SECURE"] = os.getenv("SESSION_COOKIE_SECURE", "True").lower() == "true"
@@ -165,7 +173,7 @@ def handle_uncaught(e):
     log_security_event("uncaught_exception", request.remote_addr or "unknown", session.get("user_id"), str(e)[:200])
     return jsonify({"error": "Unexpected error. Please try again."}), 500
 
-SUPABASE_URL = os.getenv("SUPABASE_URL") or study_bot.SUPABASE_URL
+SUPABASE_URL = (os.getenv("SUPABASE_URL") or study_bot.SUPABASE_URL or "").rstrip("/")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY") or study_bot.SUPABASE_KEY
 
 # ── SECURE HASH ENCRYPTION FOR CHAT TITLES & USER QUESTIONS ──
@@ -177,7 +185,8 @@ def mask_secure_hash(text: str) -> str:
     if not text:
         return text
     salt = os.urandom(16)
-    key = hashlib.pbkdf2_hmac('sha256', _secret_key.encode('utf-8'), salt, 50000, dklen=32)
+    secret = _get_auth_secret_key()
+    key = hashlib.pbkdf2_hmac('sha256', secret.encode('utf-8'), salt, 50000, dklen=32)
     text_bytes = text.encode('utf-8')
     keystream = bytearray()
     counter = 0
@@ -200,7 +209,8 @@ def unmask_secure_hash(stored_val: str) -> str:
         salt = raw[:16]
         mac = raw[16:32]
         ciphertext = raw[32:]
-        key = hashlib.pbkdf2_hmac('sha256', _secret_key.encode('utf-8'), salt, 50000, dklen=32)
+        secret = _get_auth_secret_key()
+        key = hashlib.pbkdf2_hmac('sha256', secret.encode('utf-8'), salt, 50000, dklen=32)
         expected_mac = hmac.new(key, ciphertext, hashlib.sha256).digest()[:16]
         if not hmac.compare_digest(mac, expected_mac):
             return stored_val
@@ -221,7 +231,7 @@ QUOTA_WINDOW_HOURS = 5
 QUOTA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_quotas.json")
 
 import threading
-_quota_lock = threading.Lock()
+_quota_lock = threading.RLock()
 _user_quotas: dict = {}
 
 def _load_user_quotas():
@@ -292,6 +302,15 @@ def consume_user_quota(user_id: int | str) -> tuple[bool, dict]:
         _user_quotas[uid_str]["count"] += 1
         _save_user_quotas()
         return True, get_user_quota(user_id)
+
+def refund_user_quota(user_id: int | str) -> dict:
+    """Refund 1 message credit if an AI generation call fails."""
+    with _quota_lock:
+        uid_str = str(user_id)
+        if uid_str in _user_quotas and _user_quotas[uid_str]["count"] > 0:
+            _user_quotas[uid_str]["count"] -= 1
+            _save_user_quotas()
+        return get_user_quota(user_id)
 
 # ── SUSPENDED USERS MANAGEMENT ──
 SUSPENDED_USERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "suspended_users.json")
@@ -392,6 +411,7 @@ share_links = {}
 # Ensures the web app ALWAYS works seamlessly even if Supabase has network hiccups
 MEM_SESSIONS = {}  # { user_id: [ { id, title, created_at } ] }
 MEM_MESSAGES = {}  # { session_id: [ { role, content, created_at } ] }
+MEM_LOGINS = []    # [ { user_id, username, first_name, login_type, ip_address, created_at } ]
 
 
 # ── SUPABASE HELPERS (chat_sessions / chat_messages / user_logins) ──
@@ -408,7 +428,23 @@ def _sb_headers(prefer: str | None = None) -> dict:
 
 
 def sb_record_login(user_id: int, username: str, first_name: str, login_type: str = "web", ip: str = "", user_agent: str = "") -> None:
-    """Record user login event in Supabase user_logins table."""
+    """Record user login event in Supabase user_logins table and in-memory queue fallback."""
+    login_entry = {
+        "user_id": user_id,
+        "username": username or "",
+        "first_name": first_name or "",
+        "login_type": login_type,
+        "ip_address": ip or "",
+        "user_agent": user_agent[:250] if user_agent else "",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    MEM_LOGINS.append(login_entry)
+    if len(MEM_LOGINS) > 2000:
+        del MEM_LOGINS[:-2000]
+
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        return
+
     try:
         payload = {
             "user_id": user_id,
@@ -418,29 +454,38 @@ def sb_record_login(user_id: int, username: str, first_name: str, login_type: st
             "ip_address": ip or "",
             "user_agent": user_agent[:250] if user_agent else ""
         }
-        requests.post(
+        r = requests.post(
             f"{SUPABASE_URL}/rest/v1/user_logins",
             headers=_sb_headers("return=minimal"), json=payload, timeout=5
         )
+        if r.status_code not in (200, 201, 204):
+            logger.warning("Supabase record login status %s: %s", r.status_code, r.text[:200])
     except Exception as e:
         logger.warning("Supabase record login error (non-fatal): %s", e)
 
 
 def sb_list_sessions(user_id: int) -> list:
-    try:
-        r = requests.get(
-            f"{SUPABASE_URL}/rest/v1/chat_sessions"
-            f"?user_id=eq.{user_id}&select=id,title,created_at&order=created_at.desc",
-            headers=_sb_headers(), timeout=8
-        )
-        if r.status_code == 200:
-            rows = r.json()
-            for row in rows:
-                if row.get("title"):
-                    row["title"] = unmask_secure_hash(row["title"])
-            return rows
-    except Exception as e:
-        logger.warning("Supabase list_sessions error: %s", e)
+    if SUPABASE_URL and SUPABASE_KEY:
+        try:
+            r = requests.get(
+                f"{SUPABASE_URL}/rest/v1/chat_sessions"
+                f"?user_id=eq.{user_id}&select=id,title,created_at&order=created_at.desc",
+                headers=_sb_headers(), timeout=8
+            )
+            if r.status_code == 200:
+                rows = r.json()
+                for row in rows:
+                    if row.get("title"):
+                        row["title"] = unmask_secure_hash(row["title"])
+                # Merge with any local in-memory sessions that haven't synced yet
+                mem_list = MEM_SESSIONS.get(user_id, [])
+                seen_ids = {row["id"] for row in rows}
+                for m in mem_list:
+                    if m["id"] not in seen_ids:
+                        rows.append(m)
+                return rows
+        except Exception as e:
+            logger.warning("Supabase list_sessions error: %s", e)
 
     return MEM_SESSIONS.get(user_id, [])
 
@@ -458,6 +503,9 @@ def sb_create_session(user_id: int, title: str, session_id: str | None = None) -
     if not any(s["id"] == session_id for s in MEM_SESSIONS[user_id]):
         MEM_SESSIONS[user_id].insert(0, sess_obj)
 
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        return sess_obj
+
     try:
         r = requests.post(
             f"{SUPABASE_URL}/rest/v1/chat_sessions",
@@ -474,20 +522,21 @@ def sb_create_session(user_id: int, title: str, session_id: str | None = None) -
 
 
 def sb_get_session(session_id: str, user_id: int) -> dict | None:
-    try:
-        r = requests.get(
-            f"{SUPABASE_URL}/rest/v1/chat_sessions"
-            f"?id=eq.{session_id}&user_id=eq.{user_id}&select=id,title",
-            headers=_sb_headers(), timeout=8
-        )
-        if r.status_code == 200:
-            rows = r.json()
-            if rows:
-                row = rows[0]
-                row["title"] = unmask_secure_hash(row.get("title", ""))
-                return row
-    except Exception as e:
-        logger.warning("Supabase get_session error: %s", e)
+    if SUPABASE_URL and SUPABASE_KEY:
+        try:
+            r = requests.get(
+                f"{SUPABASE_URL}/rest/v1/chat_sessions"
+                f"?id=eq.{session_id}&user_id=eq.{user_id}&select=id,title,user_id",
+                headers=_sb_headers(), timeout=8
+            )
+            if r.status_code == 200:
+                rows = r.json()
+                if rows:
+                    row = rows[0]
+                    row["title"] = unmask_secure_hash(row.get("title", ""))
+                    return row
+        except Exception as e:
+            logger.warning("Supabase get_session error: %s", e)
 
     # Check memory cache
     user_sessions = MEM_SESSIONS.get(user_id, [])
@@ -495,13 +544,15 @@ def sb_get_session(session_id: str, user_id: int) -> dict | None:
         if s["id"] == session_id:
             return s
 
-    return sb_create_session(user_id, "New Study Session", session_id=session_id)
+    return None
 
 
 def sb_rename_session(session_id: str, user_id: int, title: str) -> None:
     for s in MEM_SESSIONS.get(user_id, []):
         if s["id"] == session_id:
             s["title"] = title
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        return
     try:
         # Hash title before patching Supabase
         requests.patch(
@@ -517,9 +568,16 @@ def sb_delete_session(session_id: str, user_id: int) -> None:
         MEM_SESSIONS[user_id] = [s for s in MEM_SESSIONS[user_id] if s["id"] != session_id]
     MEM_MESSAGES.pop(session_id, None)
 
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        return
+
     try:
         requests.delete(
             f"{SUPABASE_URL}/rest/v1/chat_sessions?id=eq.{session_id}&user_id=eq.{user_id}",
+            headers=_sb_headers(), timeout=8
+        )
+        requests.delete(
+            f"{SUPABASE_URL}/rest/v1/chat_messages?session_id=eq.{session_id}",
             headers=_sb_headers(), timeout=8
         )
     except Exception as e:
@@ -527,39 +585,44 @@ def sb_delete_session(session_id: str, user_id: int) -> None:
 
 
 def sb_get_messages(session_id: str) -> list:
-    try:
-        r = requests.get(
-            f"{SUPABASE_URL}/rest/v1/chat_messages"
-            f"?session_id=eq.{session_id}&select=role,content,created_at&order=id.asc",
-            headers=_sb_headers(), timeout=8
-        )
-        if r.status_code == 200:
-            msgs = r.json()
-            for m in msgs:
-                if m.get("content"):
-                    m["content"] = unmask_secure_hash(m["content"])
-            return msgs
-    except Exception as e:
-        logger.warning("Supabase get_messages error: %s", e)
+    if SUPABASE_URL and SUPABASE_KEY:
+        try:
+            r = requests.get(
+                f"{SUPABASE_URL}/rest/v1/chat_messages"
+                f"?session_id=eq.{session_id}&select=role,content,created_at&order=id.asc",
+                headers=_sb_headers(), timeout=8
+            )
+            if r.status_code == 200:
+                msgs = r.json()
+                if msgs:
+                    for m in msgs:
+                        if m.get("content"):
+                            m["content"] = unmask_secure_hash(m["content"])
+                    return msgs
+        except Exception as e:
+            logger.warning("Supabase get_messages error: %s", e)
 
     return MEM_MESSAGES.get(session_id, [])
 
 
 def sb_get_recent_messages(session_id: str, limit: int = 15) -> list:
-    try:
-        r = requests.get(
-            f"{SUPABASE_URL}/rest/v1/chat_messages"
-            f"?session_id=eq.{session_id}&select=role,content,created_at&order=id.desc&limit={limit}",
-            headers=_sb_headers(), timeout=8
-        )
-        if r.status_code == 200:
-            msgs = list(reversed(r.json()))
-            for m in msgs:
-                if m.get("content"):
-                    m["content"] = unmask_secure_hash(m["content"])
-            return msgs
-    except Exception as e:
-        logger.warning("Supabase get_recent_messages error: %s", e)
+    if SUPABASE_URL and SUPABASE_KEY:
+        try:
+            r = requests.get(
+                f"{SUPABASE_URL}/rest/v1/chat_messages"
+                f"?session_id=eq.{session_id}&select=role,content,created_at&order=id.desc&limit={limit}",
+                headers=_sb_headers(), timeout=8
+            )
+            if r.status_code == 200:
+                raw_msgs = r.json()
+                if raw_msgs:
+                    msgs = list(reversed(raw_msgs))
+                    for m in msgs:
+                        if m.get("content"):
+                            m["content"] = unmask_secure_hash(m["content"])
+                    return msgs
+        except Exception as e:
+            logger.warning("Supabase get_recent_messages error: %s", e)
 
     msgs = MEM_MESSAGES.get(session_id, [])
     return msgs[-limit:]
@@ -570,6 +633,9 @@ def sb_insert_message(session_id: str, role: str, content: str) -> None:
     if session_id not in MEM_MESSAGES:
         MEM_MESSAGES[session_id] = []
     MEM_MESSAGES[session_id].append(msg_obj)
+
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        return
 
     try:
         # Questions asked by the user are stored as secure hash values so they cannot leak from Supabase
@@ -585,19 +651,20 @@ def sb_insert_message(session_id: str, role: str, content: str) -> None:
 
 
 def sb_count_user_messages(session_id: str) -> int:
-    try:
-        headers = _sb_headers()
-        headers["Prefer"] = "count=exact"
-        r = requests.get(
-            f"{SUPABASE_URL}/rest/v1/chat_messages"
-            f"?session_id=eq.{session_id}&role=eq.user&select=id",
-            headers=headers, timeout=8
-        )
-        content_range = r.headers.get("content-range", "")
-        if "/" in content_range:
-            return int(content_range.split("/")[-1])
-    except Exception as e:
-        logger.warning("Supabase count_user_messages error: %s", e)
+    if SUPABASE_URL and SUPABASE_KEY:
+        try:
+            headers = _sb_headers()
+            headers["Prefer"] = "count=exact"
+            r = requests.get(
+                f"{SUPABASE_URL}/rest/v1/chat_messages"
+                f"?session_id=eq.{session_id}&role=eq.user&select=id",
+                headers=headers, timeout=8
+            )
+            content_range = r.headers.get("content-range", "")
+            if "/" in content_range:
+                return int(content_range.split("/")[-1])
+        except Exception as e:
+            logger.warning("Supabase count_user_messages error: %s", e)
 
     msgs = MEM_MESSAGES.get(session_id, [])
     return sum(1 for m in msgs if m.get("role") == "user")
@@ -609,18 +676,21 @@ def sb_count_user_messages(session_id: str) -> int:
 
 def sb_get_all_logins(limit: int = 2000) -> list:
     """Most recent login events, newest first."""
-    try:
-        r = requests.get(
-            f"{SUPABASE_URL}/rest/v1/user_logins"
-            f"?select=user_id,username,first_name,login_type,ip_address,created_at"
-            f"&order=created_at.desc&limit={limit}",
-            headers=_sb_headers(), timeout=10
-        )
-        if r.status_code == 200:
-            return r.json()
-    except Exception as e:
-        logger.warning("Supabase get_all_logins error: %s", e)
-    return []
+    if SUPABASE_URL and SUPABASE_KEY:
+        try:
+            r = requests.get(
+                f"{SUPABASE_URL}/rest/v1/user_logins"
+                f"?select=user_id,username,first_name,login_type,ip_address,created_at"
+                f"&order=created_at.desc&limit={limit}",
+                headers=_sb_headers(), timeout=10
+            )
+            if r.status_code == 200:
+                rows = r.json()
+                if rows:
+                    return rows
+        except Exception as e:
+            logger.warning("Supabase get_all_logins error: %s", e)
+    return list(reversed(MEM_LOGINS))[:limit]
 
 
 def sb_get_all_sessions_light(limit: int = 5000) -> list:
@@ -1037,8 +1107,8 @@ def auth_web():
 @app.route("/api/auth/me", methods=["GET"])
 def auth_me():
     """Check current authentication status. Supports Bearer token or session cookie."""
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
+    auth_header = request.headers.get("Authorization", "").strip()
+    if auth_header.lower().startswith("bearer "):
         payload = verify_auth_token(auth_header[7:].strip())
         if payload and payload.get("sub"):
             session["user_id"] = payload["sub"]
@@ -1538,7 +1608,9 @@ def send_message():
     else:
         sess = sb_get_session(session_id, user_id)
         if not sess:
-            sess = sb_create_session(user_id, "New Study Session", session_id=session_id)
+            new_sess = sb_create_session(user_id, "New Study Session")
+            session_id = new_sess["id"]
+            sess = new_sess
 
     # Sanitize user input
     content = sanitize_input(content)
@@ -1713,8 +1785,12 @@ def send_message():
         response_text = study_bot.ai_call(messages_context, system_prompt, max_tok)
         response_text = study_bot.clean_response(response_text)
     except Exception as e:
-        print(f"AI Call failed in Web App: {e}")
-        response_text = f"❌ Error communicating with AI: {str(e)[:100]}"
+        logger.error("AI Call failed in Web App: %s", e)
+        refund_user_quota(user_id)
+        return jsonify({
+            "error": "ai_provider_error",
+            "message": "AI service temporarily unavailable. Please try again in a few moments."
+        }), 502
 
     # Save assistant reply + auto-title the chat on its first exchange
     sb_insert_message(session_id, "assistant", response_text)

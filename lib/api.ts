@@ -85,6 +85,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   })
 
   if (!response.ok) {
+    if (response.status === 401 && path !== '/api/auth/me') {
+      clearStoredToken()
+    }
     let errorData: any = null
     try {
       errorData = await response.json()

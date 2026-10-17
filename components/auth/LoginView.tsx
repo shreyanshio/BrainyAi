@@ -6,7 +6,6 @@ import {
   fetchPublicConfig,
   initTelegramLogin,
   loginWithGoogle,
-  loginStudentPass,
   pollTelegramLogin,
 } from '@/lib/api'
 import { User } from '@/types/api'
@@ -149,19 +148,7 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
     }
   }
 
-  // 1-Click Secure Student Pass (Zero manual passwords or personal info required)
-  const handleStudentPassLogin = async () => {
-    setError('')
-    setIsSubmitting(true)
-    try {
-      const user = await loginStudentPass()
-      onLoginSuccess(user)
-    } catch (err: any) {
-      setError(err?.message || 'Could not generate student pass.')
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
+
 
   return (
     <div className="min-h-screen bg-[#0e1017] text-zinc-100 flex items-center justify-center p-4 sm:p-6 lg:p-8 font-sans antialiased relative overflow-hidden select-none">
@@ -208,7 +195,7 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 size={14} className="text-emerald-400 flex-shrink-0" />
-                <span>30 high-yield questions every 8-hour window</span>
+                <span>30 high-yield questions every 5-hour window</span>
               </div>
             </div>
           </div>
@@ -317,7 +304,14 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
                   {!googleClientId && (
                     <button
                       type="button"
-                      onClick={handleStartTelegram}
+                      onClick={() => {
+                        const g = (window as any).google
+                        if (g?.accounts?.id && googleClientId) {
+                          g.accounts.id.prompt()
+                        } else {
+                          setError('Google OAuth client ID is not configured on this server. Please use Continue with Telegram.')
+                        }
+                      }}
                       className="w-full py-2.5 px-4 rounded-xl border border-zinc-300 hover:border-zinc-400 hover:bg-zinc-50 text-zinc-700 text-xs font-medium flex items-center justify-center gap-2 transition cursor-pointer"
                     >
                       <GoogleIcon className="w-4 h-4" />
@@ -326,19 +320,8 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
                   )}
                 </div>
 
-                {/* 3. 1-Click Instant Student Pass */}
-                <button
-                  type="button"
-                  onClick={handleStudentPassLogin}
-                  disabled={isSubmitting}
-                  className="w-full py-2.5 px-4 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                >
-                  <ShieldCheck size={16} className="text-emerald-600" />
-                  <span>Instant 1-Click Student Pass</span>
-                </button>
-
                 <div className="pt-2 text-center text-[11px] text-zinc-400">
-                  No account registration or password required.
+                  Select Telegram or Google to authenticate securely.
                 </div>
               </div>
             )}

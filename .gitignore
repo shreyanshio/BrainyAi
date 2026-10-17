@@ -6,6 +6,7 @@
 .env.production
 .env.development
 *.env
+.auth_secret
 
 # Local state & runtime cache files
 user_quotas.json

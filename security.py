@@ -192,7 +192,7 @@ def is_blacklisted(text: str) -> bool:
 # Solves cross-origin third-party cookie blocking across Cloudflare & Railway
 
 def _get_auth_secret_key() -> str:
-    key = os.getenv("FLASK_SECRET_KEY")
+    key = os.getenv("AUTH_SECRET_KEY") or os.getenv("SECRET_KEY") or os.getenv("FLASK_SECRET_KEY")
     if not key:
         secret_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".auth_secret")
         if os.path.exists(secret_file):
@@ -274,7 +274,8 @@ def login_required(f):
     """Decorator: enforce valid authentication via Authorization Bearer token or session cookie.
 
     Checks in order:
-    1. Authorization: Bearer <token> (JWT / HMAC signed)
+    0. Pass OPTIONS requests (CORS preflight)
+    1. Authorization: Bearer <token> (JWT / HMAC signed, case-insensitive)
     2. Flask session cookie ('user_id' in session)
 
     Populates session and request context with authenticated user details.
@@ -282,9 +283,13 @@ def login_required(f):
     """
     @wraps(f)
     def decorated(*args, **kwargs):
-        # 1. Check Bearer token from Authorization header
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
+        # 0. Allow OPTIONS preflight through immediately
+        if request.method == "OPTIONS":
+            return f(*args, **kwargs)
+
+        # 1. Check Bearer token from Authorization header (case-insensitive)
+        auth_header = request.headers.get("Authorization", "").strip()
+        if auth_header.lower().startswith("bearer "):
             token = auth_header[7:].strip()
             payload = verify_auth_token(token)
             if payload and payload.get("sub"):

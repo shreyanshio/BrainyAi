@@ -273,9 +273,17 @@ export default function BrainyApp() {
       // If backend created a new session
       if (res.session_id && res.session_id !== activeSessionId) {
         setActiveSessionId(res.session_id)
+        const sessionTitle = res.new_title || 'New Study Session'
         if (res.new_title) setActiveSessionTitle(res.new_title)
-        const updatedSessions = await fetchSessions().catch(() => [])
-        setSessions(updatedSessions)
+        const optimisticSession: ChatSession = {
+          id: res.session_id,
+          title: sessionTitle,
+          created_at: new Date().toISOString(),
+        }
+        setSessions((prev) => [optimisticSession, ...prev.filter((s) => s.id !== res.session_id)])
+        fetchSessions().then((updated) => {
+          if (updated && updated.length > 0) setSessions(updated)
+        }).catch(() => {})
       } else if (res.new_title) {
         setActiveSessionTitle(res.new_title)
         setSessions((prev) =>

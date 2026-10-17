@@ -1,3 +1,4 @@
+import sys
 import os
 import uuid
 import logging
@@ -8,6 +9,13 @@ import random
 import requests
 from datetime import datetime
 from dotenv import load_dotenv
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 from groq import Groq
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram import Poll
@@ -148,21 +156,34 @@ ASK5_SYSTEM_PROMPT      = ASK5_SYSTEM_PROMPT + "\n" + FONT_INSTRUCTIONS
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
-# ── API Keys (add as many as you want) ───────────────────
-GROQ_API_KEYS       = [k for k in [os.getenv(f"GROQ_API_KEY_{i}")       for i in range(1, 6)] if k]
-NVIDIA_API_KEYS     = [k for k in [os.getenv(f"NVIDIA_API_KEY_{i}")     for i in range(1, 6)] if k]
-DEEPSEEK_API_KEYS   = [k for k in [os.getenv(f"DEEPSEEK_API_KEY_{i}")   for i in range(1, 6)] if k]
-GEMINI_API_KEYS     = [k for k in [os.getenv(f"GEMINI_API_KEY_{i}")     for i in range(1, 6)] if k]
-TAVILY_API_KEYS     = [k for k in [os.getenv(f"TAVILY_API_KEY_{i}")     for i in range(1, 6)] if k]
-CEREBRAS_API_KEYS   = [k for k in [os.getenv(f"CEREBRAS_API_KEY_{i}")   for i in range(1, 6)] if k]
-OPENROUTER_API_KEYS = [k for k in [os.getenv(f"OPENROUTER_API_KEY_{i}") for i in range(1, 6)] if k]
-SAMBANOVA_API_KEYS  = [k for k in [os.getenv(f"SAMBANOVA_API_KEY_{i}")  for i in range(1, 6)] if k]
-TOGETHER_API_KEYS   = [k for k in [os.getenv(f"TOGETHER_API_KEY_{i}")   for i in range(1, 6)] if k]
-MISTRAL_API_KEYS    = [k for k in [os.getenv(f"MISTRAL_API_KEY_{i}")    for i in range(1, 8)] if k]
-OPENAI_API_KEYS     = [k for k in [os.getenv(f"OPENAI_API_KEY_{i}")     for i in range(1, 8)] if k]
+def _collect_keys(prefix: str, count: int = 10) -> list:
+    keys = []
+    # 1. Singular environment variable (standard convention)
+    single = os.getenv(prefix)
+    if single and single.strip():
+        keys.append(single.strip())
+    # 2. Numbered suffixes (PREFIX_1, PREFIX_2, ...)
+    for i in range(1, count + 1):
+        k = os.getenv(f"{prefix}_{i}")
+        if k and k.strip() and k.strip() not in keys:
+            keys.append(k.strip())
+    return keys
+
+# ── API Keys (supports singular GROQ_API_KEY and multi-key GROQ_API_KEY_1..N) ──
+GROQ_API_KEYS       = _collect_keys("GROQ_API_KEY", 10)
+NVIDIA_API_KEYS     = _collect_keys("NVIDIA_API_KEY", 10)
+DEEPSEEK_API_KEYS   = _collect_keys("DEEPSEEK_API_KEY", 10)
+GEMINI_API_KEYS     = _collect_keys("GEMINI_API_KEY", 10)
+TAVILY_API_KEYS     = _collect_keys("TAVILY_API_KEY", 10)
+CEREBRAS_API_KEYS   = _collect_keys("CEREBRAS_API_KEY", 10)
+OPENROUTER_API_KEYS = _collect_keys("OPENROUTER_API_KEY", 10)
+SAMBANOVA_API_KEYS  = _collect_keys("SAMBANOVA_API_KEY", 10)
+TOGETHER_API_KEYS   = _collect_keys("TOGETHER_API_KEY", 10)
+MISTRAL_API_KEYS    = _collect_keys("MISTRAL_API_KEY", 10)
+OPENAI_API_KEYS     = _collect_keys("OPENAI_API_KEY", 10)
 
 # ── Supabase (used for broadcast user list — persists across restarts) ──
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")          # e.g. https://xxxx.supabase.co
+SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").rstrip("/")          # e.g. https://xxxx.supabase.co
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY", "")  # service_role key
 
 if not TELEGRAM_TOKEN or not GROQ_API_KEYS:
@@ -2028,7 +2049,7 @@ def ai_call(messages, system_prompt=None, max_tokens=None):
         max_tokens = TOKEN_MAP.get(q_type, 600)
 
     chain = get_provider_chain(q_type, prompt)
-    print(f"Q-type: {q_type} | starting tokens: {max_tokens} → {chain[0][0]}")
+    print(f"Q-type: {q_type} | starting tokens: {max_tokens} -> {chain[0][0]}")
     last_err = None
 
     for name, caller in chain:
