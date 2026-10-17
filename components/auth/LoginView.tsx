@@ -41,8 +41,13 @@ const TelegramIcon = ({ className = 'w-5 h-5' }: { className?: string }) => (
   </svg>
 )
 
+const DEFAULT_GOOGLE_CLIENT_ID = '793579888403-76l0ls9vr4jjrjshmmdbue6apsiabhpk.apps.googleusercontent.com'
+
 export function LoginView({ onLoginSuccess }: LoginViewProps) {
-  const [googleClientId, setGoogleClientId] = useState<string>('')
+  const [googleClientId, setGoogleClientId] = useState<string>(
+    process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || DEFAULT_GOOGLE_CLIENT_ID
+  )
+  const [googleBtnRendered, setGoogleBtnRendered] = useState(false)
   const [error, setError] = useState<string>('')
   const [telegramWaiting, setTelegramWaiting] = useState(false)
   const [telegramSessionId, setTelegramSessionId] = useState<string | null>(null)
@@ -53,10 +58,19 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
   useEffect(() => {
     let mounted = true
     const init = async () => {
-      const cfg = await fetchPublicConfig()
-      if (mounted && cfg.google_client_id) {
-        setGoogleClientId(cfg.google_client_id)
-        setupGoogleButton(cfg.google_client_id)
+      const activeClientId = googleClientId || DEFAULT_GOOGLE_CLIENT_ID
+      if (activeClientId) {
+        setupGoogleButton(activeClientId)
+      }
+
+      try {
+        const cfg = await fetchPublicConfig()
+        if (mounted && cfg.google_client_id && cfg.google_client_id !== activeClientId) {
+          setGoogleClientId(cfg.google_client_id)
+          setupGoogleButton(cfg.google_client_id)
+        }
+      } catch (err) {
+        console.warn('Could not fetch public config from backend:', err)
       }
     }
     init()
@@ -66,7 +80,11 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
   }, [])
 
   const setupGoogleButton = (clientId: string) => {
+    if (!clientId) return
+    let attempts = 0
+    const maxAttempts = 30
     const checkGSI = setInterval(() => {
+      attempts++
       const g = (window as any).google
       if (g?.accounts?.id) {
         clearInterval(checkGSI)
@@ -75,36 +93,91 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
             client_id: clientId,
             callback: handleGoogleCallback,
             auto_select: false,
+            itp_support: true,
+            use_fedcm_for_prompt: false,
           })
           const target = document.getElementById('google-signin-btn-target')
           if (target) {
             target.innerHTML = ''
             g.accounts.id.renderButton(target, {
+              type: 'standard',
               theme: 'outline',
               size: 'large',
               text: 'continue_with',
               shape: 'rectangular',
               width: 320,
+              logo_alignment: 'left',
             })
+            setGoogleBtnRendered(true)
           }
         } catch (e) {
           console.error('Google button init error:', e)
         }
+      } else if (attempts >= maxAttempts) {
+        clearInterval(checkGSI)
       }
-    }, 250)
+    }, 200)
+  }
 
-    setTimeout(() => clearInterval(checkGSI), 8000)
+  const handleGoogleButtonClick = () => {
+    setError('')
+    const g = (window as any).google
+    const activeClientId = googleClientId || DEFAULT_GOOGLE_CLIENT_ID
+
+    // 1. Try OAuth2 token client popup (cleanest popup experience)
+    if (g?.accounts?.oauth2) {
+      try {
+        const tokenClient = g.accounts.oauth2.initTokenClient({
+          client_id: activeClientId,
+          scope: 'openid email profile',
+          callback: async (tokenResponse: any) => {
+            if (tokenResponse?.error) {
+              console.error('Google OAuth error:', tokenResponse)
+              setError(tokenResponse.error_description || tokenResponse.error || 'Google login cancelled or failed.')
+              return
+            }
+            if (tokenResponse?.access_token) {
+              await handleGoogleCallback({ credential: tokenResponse.access_token })
+            }
+          },
+        })
+        tokenClient.requestAccessToken({ prompt: 'select_account' })
+        return
+      } catch (err: any) {
+        console.warn('OAuth2 token client init failed, trying ID prompt:', err)
+      }
+    }
+
+    // 2. Fallback to ID prompt
+    if (g?.accounts?.id) {
+      try {
+        g.accounts.id.prompt((notification: any) => {
+          if (notification.isNotDisplayed()) {
+            console.warn('Google One Tap not displayed:', notification.getNotDisplayedReason())
+          }
+        })
+        return
+      } catch (err: any) {
+        console.error('Google ID prompt error:', err)
+      }
+    }
+
+    setError('Google Sign-In is still loading. Please wait a moment and try again, or use Continue with Telegram.')
   }
 
   const handleGoogleCallback = async (response: any) => {
-    if (!response?.credential) return
+    if (!response?.credential) {
+      setError('No credential received from Google. Please try again.')
+      return
+    }
     setIsSubmitting(true)
     setError('')
     try {
       const user = await loginWithGoogle(response.credential)
       onLoginSuccess(user)
     } catch (err: any) {
-      setError(err?.message || 'Google verification failed. You can use Telegram or Student Pass.')
+      console.error('Google verification error:', err)
+      setError(err?.message || 'Google verification failed. Please try again or use Continue with Telegram.')
     } finally {
       setIsSubmitting(false)
     }
@@ -300,22 +373,16 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
 
                 {/* 2. Continue with Google */}
                 <div className="w-full flex flex-col items-center">
-                  <div id="google-signin-btn-target" className="w-full flex justify-center" />
-                  {!googleClientId && (
+                  <div id="google-signin-btn-target" className="w-full flex justify-center min-h-[44px]" />
+                  {!googleBtnRendered && (
                     <button
                       type="button"
-                      onClick={() => {
-                        const g = (window as any).google
-                        if (g?.accounts?.id && googleClientId) {
-                          g.accounts.id.prompt()
-                        } else {
-                          setError('Google OAuth client ID is not configured on this server. Please use Continue with Telegram.')
-                        }
-                      }}
-                      className="w-full py-2.5 px-4 rounded-xl border border-zinc-300 hover:border-zinc-400 hover:bg-zinc-50 text-zinc-700 text-xs font-medium flex items-center justify-center gap-2 transition cursor-pointer"
+                      disabled={isSubmitting}
+                      onClick={handleGoogleButtonClick}
+                      className="w-full py-2.5 px-4 rounded-xl border border-zinc-300 hover:border-zinc-400 hover:bg-zinc-50 text-zinc-700 text-xs font-medium flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-60"
                     >
                       <GoogleIcon className="w-4 h-4" />
-                      <span>Continue with Google</span>
+                      <span>{isSubmitting ? 'Signing in with Google...' : 'Continue with Google'}</span>
                     </button>
                   )}
                 </div>

@@ -51,7 +51,17 @@ export function clearStoredToken(): void {
 }
 
 export const getApiBase = (): string => {
-  return (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '')
+  const envUrl = process.env.NEXT_PUBLIC_API_URL
+  if (envUrl && envUrl.trim()) {
+    return envUrl.trim().replace(/\/$/, '')
+  }
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname
+    if (host !== 'localhost' && host !== '127.0.0.1') {
+      return 'https://brainyai.up.railway.app'
+    }
+  }
+  return ''
 }
 
 export class ApiError extends Error {
@@ -105,11 +115,18 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 // ── Auth APIs ──────────────────────────────────────────────
 
-export async function fetchPublicConfig(): Promise<{ google_client_id?: string }> {
+export async function fetchPublicConfig(): Promise<{ google_client_id?: string; telegram_bot_username?: string }> {
   try {
-    return await request<{ google_client_id?: string }>('/api/config')
-  } catch {
-    return {}
+    const res = await request<{ google_client_id?: string; telegram_bot_username?: string }>('/api/config')
+    if (res && res.google_client_id) {
+      return res
+    }
+  } catch (err) {
+    console.warn('Could not fetch /api/config from backend, using production fallbacks:', err)
+  }
+  return {
+    google_client_id: '793579888403-76l0ls9vr4jjrjshmmdbue6apsiabhpk.apps.googleusercontent.com',
+    telegram_bot_username: 'AiChatExpert_Bot',
   }
 }
 

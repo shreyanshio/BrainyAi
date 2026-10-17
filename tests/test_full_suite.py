@@ -284,6 +284,33 @@ class FullSuiteTests(unittest.TestCase):
         finally:
             app.ADMIN_USER_IDS = orig_ids
 
+    def test_google_auth_missing_credential(self):
+        """POST /api/auth/google returns 400 when credential token is missing."""
+        resp = self.client.post("/api/auth/google", json={})
+        self.assertEqual(resp.status_code, 400)
+
+    @patch("requests.get")
+    def test_google_auth_success_with_tokeninfo(self, mock_get):
+        """POST /api/auth/google verifies id_token via Google tokeninfo fallback."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "sub": "10987654321",
+            "email": "scholar@example.com",
+            "email_verified": "true",
+            "name": "Jane Scholar",
+            "picture": "https://example.com/avatar.jpg"
+        }
+        mock_get.return_value = mock_resp
+
+        resp = self.client.post("/api/auth/google", json={"credential": "mock_valid_id_token"})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data.get("authenticated"))
+        self.assertEqual(data["user"]["first_name"], "Jane Scholar")
+        self.assertEqual(data["user"]["email"], "scholar@example.com")
+        self.assertIn("token", data)
+
 
 if __name__ == "__main__":
     unittest.main()
