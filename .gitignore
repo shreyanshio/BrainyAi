@@ -1,28 +1,50 @@
-# v0 sandbox internal files
+# Brainy AI — Git Ignore Rules
+
+# Environment variables & secrets
+.env
+.env*.local
+.env.production
+.env.development
+*.env
+
+# Local state & runtime cache files
+user_quotas.json
+suspended_users.json
+security.log
+*.log
+
+# Node.js dependencies & build outputs
+node_modules/
+.next/
+out/
+.open-next/
+dist/
+build/
+.wrangler/
+
+# Python cache & virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor & OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# v0 sandbox internal artifacts
 __v0_runtime_loader.js
 __v0_devtools.tsx
 __v0_jsx-dev-runtime.ts
 .snowflake/
 .v0-trash/
 .vercel/
-
-# Environment variables
-.env*.local
-.env
-
-# Common ignores
-node_modules
-.next/
-out/
-.open-next/
-.DS_Store
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.log
-user_quotas.json
-venv/
-env/
-.venv/

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Community & Announcements
+    url: https://t.me/aurabreaker7
+    about: Join our official Telegram channel for updates and announcements.
+  - name: Security Vulnerability Reporting
+    url: https://github.com/shreyanshio/BrainyAi/blob/main/SECURITY.md
+    about: Please report security vulnerabilities privately according to our security policy.

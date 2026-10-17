@@ -4,6 +4,9 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // Rewrites enable local proxying to Flask during `next dev`.
+  // Note: During `next build` (output: 'export'), static export omits rewrites;
+  // in production, client requests use NEXT_PUBLIC_API_URL directly.
   async rewrites() {
     return [
       {

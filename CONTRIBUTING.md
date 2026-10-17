@@ -1,121 +1,176 @@
 # Contributing to Brainy AI
 
-Thank you for your interest in contributing to **Brainy AI**! Brainy is an open-source, multi-provider AI study companion and SaaS platform built for students worldwide.
+Thank you for your interest in contributing to **Brainy AI**! Brainy is an open-source, multi-provider AI study companion and academic SaaS platform built to help students understand complex concepts, solve problems, and structure their learning.
+
+We welcome contributions from developers, technical writers, designers, and students of all experience levels.
 
 ---
 
-## 1. Project Architecture
+## 1. Code of Conduct
 
-The repository is structured into two main layers:
+All contributors and participants are expected to adhere to our [Code of Conduct](CODE_OF_CONDUCT.md). Please read it before participating in discussions or submitting pull requests.
 
-```
+---
+
+## 2. Project Architecture & Directory Layout
+
+Brainy AI is organized into a modular architecture combining a Next.js static edge frontend, a Python Flask API gateway, an asynchronous Telegram bot worker, and Supabase PostgreSQL:
+
+```text
 BrainyAi/
-├── app/                  # Next.js App Router (TypeScript, React, Tailwind CSS)
-│   ├── admin/            # Secure /admin Control Panel
-│   ├── page.tsx          # Main Study Sanctuary Shell
-│   ├── layout.tsx        # HTML Root Layout & Metadata
-│   └── globals.css       # Design System Tokens & 5 Calibrated Themes
-├── components/           # Modular React Components
-│   ├── app-shell/        # Header, Sidebar, Segmented Switchers
-│   ├── auth/             # LoginView (Google OAuth, Telegram, 1-Click Pass)
-│   ├── chat/             # MessageList, Composer, EmptyState
-│   ├── dashboard/        # StudentDashboard, Pomodoro Focus Timer, Bento Cards
-│   ├── modals/           # UsageModal (5-Hour Quota), NotesModal
-│   └── settings/         # SettingsModal (Typography, Theme, Accent Picker)
-├── lib/                  # Utilities & API Clients
-│   ├── api.ts            # Typed REST Client with Bearer Token Storage
-│   └── constants.ts      # Models, Themes, Accents, Font Options
-├── types/                # Unified TypeScript Data Contracts (types/api.ts)
-├── app.py                # Flask REST API Gateway & Authorization Service
-├── security.py           # HS256 Token Auth, Rate Limiter, Input Sanitization
-├── study_bot.py          # Multi-Provider AI Routing, Prompt Engineering & Supabase Client
-├── supabase_schema.sql   # Production PostgreSQL Database Schema & RLS Policies
-├── package.json          # Frontend Dependencies & Build Scripts
-└── requirements.txt      # Python Backend Dependencies
+├── app/                           # Next.js App Router (React 19, TypeScript)
+│   ├── admin/                     # Secure /admin Control Panel
+│   ├── globals.css                # CSS variables, Tailwind tokens & 5 theme definitions
+│   ├── layout.tsx                 # Root layout, HTML headers & favicon
+│   └── page.tsx                   # Study chat workspace & core application shell
+├── components/                    # Modular React Components
+│   ├── app-shell/                 # AppHeader, Sidebar, navigation switchers
+│   ├── auth/                      # LoginView (Google OAuth, Telegram, 1-Click Pass)
+│   ├── chat/                      # MessageList, Composer, EmptyState
+│   ├── dashboard/                 # StudentDashboard, Pomodoro Focus Timer, Bento Cards
+│   ├── markdown/                  # MarkdownRenderer with KaTeX LaTeX equation parsing
+│   ├── modals/                    # UsageModal (5-Hour Quota), NotesModal
+│   └── settings/                  # SettingsModal (Typography, Theme, Accent Picker)
+├── docs/                          # Specialized Technical Documentation
+│   ├── API.md                     # Authoritative REST API reference
+│   ├── ARCHITECTURE.md            # System topology, trust boundaries & sequence diagrams
+│   ├── DATABASE.md                # Supabase schema, table specs & RLS policies
+│   └── DEPLOYMENT.md              # Cloudflare Workers & Railway deployment guide
+├── fonts/                         # Math symbols, Greek letters & unicode reference matrices
+├── lib/                           # Typed REST API clients & constants
+├── prompts/                       # Academic system prompt templates (Socratic, deep learning)
+├── public/                        # Static assets (icon.svg)
+├── types/                         # Unified TypeScript data contracts
+├── app.py                         # Flask REST API gateway & admin endpoints
+├── security.py                    # HS256 JWT auth, rate limiter & input sanitization
+├── study_bot.py                   # Telegram bot daemon & multi-provider router
+├── supabase_schema.sql            # Idempotent PostgreSQL schema with RLS policies
+├── wrangler.jsonc                 # Cloudflare Workers static export configuration
+├── next.config.mjs                # Next.js static export settings (`output: 'export'`)
+├── package.json                   # Frontend dependencies and scripts
+└── requirements.txt               # Python backend dependencies
 ```
 
 ---
 
-## 2. Local Development Setup
+## 3. Local Development Setup
 
 ### Prerequisites
-- **Node.js**: v18.17 or later
-- **Python**: 3.10 or later
-- **Git**
+* **Node.js**: v18.17 or higher
+* **Python**: v3.10 or higher
+* **Git**
+* A free [Supabase](https://supabase.com) project for relational database storage.
+* At least one AI provider API key (e.g., [Groq](https://groq.com) or [Google AI Studio](https://aistudio.google.com)).
 
-### Step-by-Step Setup
+### Step-by-Step Instructions
 
-1. **Clone the Repository**:
+1. **Fork and Clone**:
    ```bash
-   git clone https://github.com/shreyanshio/BrainyAi.git
+   git clone https://github.com/your-username/BrainyAi.git
    cd BrainyAi
    ```
 
-2. **Backend Setup**:
+2. **Configure Environment Variables**:
    ```bash
+   cp .env.example .env
+   # Open .env and populate FLASK_SECRET_KEY, SUPABASE_URL, SUPABASE_KEY, GROQ_API_KEY, etc.
+   ```
+
+3. **Backend Setup (Python Virtual Environment)**:
+   ```bash
+   # Create and activate virtual environment
    python -m venv venv
+
    # On Windows:
    .\venv\Scripts\activate
-   # On macOS/Linux:
+   # On macOS / Linux:
    source venv/bin/activate
 
+   # Install dependencies
    pip install -r requirements.txt
    ```
 
-3. **Frontend Setup**:
+4. **Frontend Setup (Node.js)**:
    ```bash
    npm install
    ```
 
-4. **Configure Environment Variables**:
-   ```bash
-   cp .env.example .env
-   # Populate SUPABASE_URL, SUPABASE_KEY, GROQ_API_KEY, etc.
-   ```
+5. **Initialize Database Schema**:
+   In your Supabase project's **SQL Editor**, run the contents of [`supabase_schema.sql`](supabase_schema.sql).
 
-5. **Run the Services**:
-   - Backend:
+6. **Start the Development Servers**:
+   * **Terminal 1 (Flask API Gateway)**:
      ```bash
      python app.py
      ```
-   - Frontend:
+     The backend starts at `http://localhost:5000`.
+   * **Terminal 2 (Next.js Frontend)**:
      ```bash
      npm run dev
+     ```
+     The frontend starts at `http://localhost:3000`.
+   * **Terminal 3 (Optional — Telegram Bot Worker)**:
+     ```bash
+     python study_bot.py
      ```
 
 ---
 
-## 3. Verification & Testing
+## 4. Development Standards & Guidelines
 
-Before submitting a Pull Request, always verify that your code passes all type checks and compiles cleanly:
+### A. Design System & Theme Rules
+* **Zero Purple Shades**: Brainy enforces a distraction-free, focused academic palette based on warm paper, slate, emerald, and dark graphite tones. **Do not introduce purple or lavender colors into the user interface.**
+* **Accessibility**: Maintain a minimum contrast ratio of 4.5:1 for body copy across all 5 themes.
+
+### B. Security & Server Authority
+* **Server-Authoritative Enforcement**: Message quotas (30 messages per 5 hours), rate limits (10 req/min), and admin access must always be validated and enforced by the server. Never trust client-reported counts.
+* **Privacy by Design**: Sensitive user queries and chat titles must remain masked with SHA-256 hashes before insertion into Supabase.
+* **Secret Protection**: Never commit API keys, bot tokens, service-role keys, or private environment files to Git.
+
+### C. Code Quality & Formatting
+* **TypeScript**: Use strict typing. Avoid `any` types; define data structures in `types/api.ts`.
+* **Python**: Follow PEP 8 guidelines. Keep functions modular and maintain docstrings and explanatory comments.
+* **Documentation Integrity**: Preserve existing comments that explain non-obvious design decisions.
+
+---
+
+## 5. Verification Commands
+
+Before opening a pull request, ensure all validation checks pass locally:
 
 ```bash
-# 1. Verify Python files compile with 0 syntax or import errors
+# 1. Verify Python files compile with zero syntax errors
 python -m py_compile app.py security.py study_bot.py
 
-# 2. Verify Next.js production build and TypeScript checks pass
+# 2. Run TypeScript checks and production Next.js build
 npm run build
 ```
 
 ---
 
-## 4. Code Standards & Guidelines
+## 6. Commit Message Guidelines
 
-- **Zero Purple Shades**: Brainy enforces an academic, distraction-free aesthetic with emerald, sapphire, amber, and graphite accents. Avoid introducing purple or lavender visual tokens.
-- **Server Authority**: Quotas, rate limits, and access controls must always be validated server-side.
-- **Privacy First**: Sensitive student queries and conversation titles must remain protected and never logged in plaintext.
-- **Maintain Comments**: Preserve existing documentation and docstrings across modified files.
+We follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
+
+* `feat(chat): add KaTeX rendering for multiline equation blocks`
+* `fix(auth): resolve cross-origin bearer token synchronization`
+* `docs(api): document administrative health endpoints`
+* `refactor(routing): streamline fallback provider list in study_bot`
+* `test(quota): verify 5-hour window calculation`
 
 ---
 
-## 5. Submitting a Pull Request
+## 7. Submitting a Pull Request
 
-1. Create a descriptive feature branch:
+1. Create a feature branch from `main`:
    ```bash
-   git checkout -b feature/your-feature-name
+   git checkout -b feat/your-feature-name
    ```
-2. Commit your changes with a clear message:
+2. Make your changes and commit them cleanly.
+3. Run the verification commands listed above.
+4. Push your branch to your GitHub fork:
    ```bash
-   git commit -m "feat(chat): improve mathematical formula rendering"
+   git push origin feat/your-feature-name
    ```
-3. Push to your branch and open a Pull Request on GitHub against `main`.
+5. Open a Pull Request against `shreyanshio/BrainyAi:main` using our [Pull Request Template](.github/PULL_REQUEST_TEMPLATE.md).
+6. A maintainer will review your pull request, provide feedback, and merge when ready.
