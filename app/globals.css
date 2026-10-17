@@ -2,6 +2,14 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
+@font-face {
+  font-family: 'OPTIZither';
+  src: local('OPTIZither'), url('/fonts/optizither.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* ==========================================================================
    THEME DESIGN TOKENS
    ========================================================================== */
@@ -114,8 +122,36 @@
 .font-sourceserif {
   font-family: 'Source Serif 4', Georgia, serif;
 }
+.font-optizither,
+.font-brand-display {
+  font-family: 'OPTIZither', 'Source Serif 4', Georgia, serif;
+}
 .font-jetbrains {
   font-family: 'JetBrains Mono', Consolas, monospace;
+}
+
+/* Typography Font Scaling & Density Classes */
+.font-size-sm {
+  font-size: 0.875rem;
+}
+.font-size-md {
+  font-size: 0.9375rem;
+}
+.font-size-lg {
+  font-size: 1.0625rem;
+}
+.font-size-xl {
+  font-size: 1.1875rem;
+}
+
+.line-spacing-compact {
+  line-height: 1.4;
+}
+.line-spacing-comfortable {
+  line-height: 1.625;
+}
+.line-spacing-relaxed {
+  line-height: 1.85;
 }
 
 /* Global resets & typography */

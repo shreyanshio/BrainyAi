@@ -171,7 +171,7 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
             <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-600 to-emerald-400 flex items-center justify-center text-white font-black text-sm shadow-md shadow-emerald-950/40">
               B
             </div>
-            <span className="font-bold text-base tracking-tight text-white uppercase">Brainy</span>
+            <span className="font-brand-display font-bold text-base tracking-tight text-white uppercase">Brainy</span>
           </div>
 
           {/* Center Welcome Headline */}

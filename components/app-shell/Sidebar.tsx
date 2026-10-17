@@ -230,7 +230,7 @@ export function Sidebar({
               <div className="w-6 h-6 rounded-md bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 flex items-center justify-center font-black text-xs">
                 B
               </div>
-              <span className="font-extrabold text-sm tracking-tight text-[var(--text-primary)] uppercase">
+              <span className="font-brand-display font-extrabold text-sm tracking-tight text-[var(--text-primary)] uppercase">
                 Brainy
               </span>
             </div>

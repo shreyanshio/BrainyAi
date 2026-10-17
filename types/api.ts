@@ -152,6 +152,7 @@ export type InterfaceFont =
   | 'ibm'
   | 'lora'
   | 'sourceserif'
+  | 'optizither'
   | 'jetbrains'
 
 export type FontSizeOption = 'sm' | 'md' | 'lg' | 'xl'

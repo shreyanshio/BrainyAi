@@ -83,15 +83,28 @@ export default function BrainyApp() {
 
     const root = document.documentElement
 
-    // 1. Theme Class
+    // 1. Theme Class & Dark Mode Flag
     THEME_PRESETS.forEach((t) => root.classList.remove(`theme-${t.id}`))
     root.classList.add(`theme-${preferences.theme}`)
+
+    const activeTheme = THEME_PRESETS.find((t) => t.id === preferences.theme)
+    const isDark = activeTheme ? activeTheme.mode === 'dark' : false
+    root.classList.toggle('dark', isDark)
 
     // 2. Font Class
     FONT_OPTIONS.forEach((f) => root.classList.remove(`font-${f.id}`))
     root.classList.add(`font-${preferences.interfaceFont}`)
 
-    // 3. Accent Color Custom Property
+    // 3. Font Size & Line Spacing Scaling Classes
+    ;['font-size-sm', 'font-size-md', 'font-size-lg', 'font-size-xl'].forEach((cls) => root.classList.remove(cls))
+    root.classList.add(`font-size-${preferences.fontSize || 'md'}`)
+
+    ;['line-spacing-compact', 'line-spacing-comfortable', 'line-spacing-relaxed'].forEach((cls) =>
+      root.classList.remove(cls)
+    )
+    root.classList.add(`line-spacing-${preferences.lineSpacing || 'comfortable'}`)
+
+    // 4. Accent Color Custom Property
     const currentAccent = ACCENT_PRESETS.find((a) => a.id === preferences.accentColor)
     const accentHex = preferences.customAccentHex || currentAccent?.hex || '#059669'
     const accentHover = currentAccent?.hoverHex || '#10b981'

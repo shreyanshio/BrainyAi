@@ -270,6 +270,13 @@ export const FONT_OPTIONS: FontDefinition[] = [
     sample: 'Scholarly book typeface crafted for academic deep work.',
   },
   {
+    id: 'optizither',
+    name: 'OPTIZither',
+    category: 'Editorial Serif',
+    fontFamily: '"OPTIZither", "Source Serif 4", Georgia, serif',
+    sample: 'Distinctive literary display typeface with timeless editorial character.',
+  },
+  {
     id: 'jetbrains',
     name: 'JetBrains Mono',
     category: 'Code & Math',
