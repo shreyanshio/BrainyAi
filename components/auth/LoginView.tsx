@@ -152,7 +152,7 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
 
   return (
     <div className="min-h-screen bg-[#0e1017] text-zinc-100 flex items-center justify-center p-4 sm:p-6 lg:p-8 font-sans antialiased relative overflow-hidden select-none">
-      {/* Background Subtle Tech Grid / Mesh */}
+      {/* Quiet background texture */}
       <div className="absolute inset-0 bg-[radial-gradient(#1c2230_1px,transparent_1px)] [background-size:24px_24px] opacity-40 pointer-events-none" />
       <div className="absolute top-1/4 -left-32 w-96 h-96 bg-emerald-950/20 rounded-full blur-[140px] pointer-events-none" />
       <div className="absolute bottom-1/4 -right-32 w-96 h-96 bg-cyan-950/20 rounded-full blur-[140px] pointer-events-none" />
@@ -181,21 +181,21 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
               Back!
             </h1>
             <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed">
-              Your AI study companion. Understand deep concepts, derive formulas, and retain academic knowledge with ease.
+              A calmer place to understand difficult ideas, work through solutions, and build a study routine that fits you.
             </p>
 
             <div className="pt-4 space-y-2 text-xs text-zinc-300">
               <div className="flex items-center gap-2">
                 <CheckCircle2 size={14} className="text-emerald-400 flex-shrink-0" />
-                <span>Zero passwords or manual data entry to leak</span>
+                <span>Pick up your study sessions where you left off</span>
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 size={14} className="text-emerald-400 flex-shrink-0" />
-                <span>Encrypted hash storage in Supabase database</span>
+                <span>Save useful answers as study notes</span>
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 size={14} className="text-emerald-400 flex-shrink-0" />
-                <span>30 high-yield questions every 5-hour window</span>
+                <span>Ask questions, revise topics, and keep your notes together</span>
               </div>
             </div>
           </div>
@@ -207,8 +207,8 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
                 <ShieldCheck size={18} />
               </div>
               <div>
-                <div className="text-xs font-semibold text-white">Platform 100% secure</div>
-                <div className="text-[11px] text-zinc-400">Fully protected & hashed data</div>
+                <div className="text-xs font-semibold text-white">Your study space</div>
+                <div className="text-[11px] text-zinc-400">Sign in to continue learning</div>
               </div>
             </div>
           </div>
@@ -223,7 +223,7 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
                 Login
               </h2>
               <p className="text-xs sm:text-sm text-zinc-500">
-                Instant verified access — no manual credentials or passwords required.
+                Sign in to return to your conversations and saved study notes.
               </p>
             </div>
 
@@ -329,11 +329,11 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
 
           {/* Bottom Security & Copyright Footer */}
           <div className="mt-8 pt-4 border-t border-zinc-100 flex flex-col sm:flex-row items-center justify-between text-[11px] text-zinc-400 gap-2">
-            <div className="flex items-center gap-1.5 text-emerald-700 font-medium">
+            <div className="flex items-center gap-1.5 text-zinc-500 font-medium">
               <Lock size={12} />
-              <span>AES & Hash Masked in Supabase</span>
+              <span>Sign in to your personal study space</span>
             </div>
-            <span>Copyright ©2026 BrainyAi • Study Safe</span>
+            <span>© 2026 BrainyAi</span>
           </div>
         </div>
 

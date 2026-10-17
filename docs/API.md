@@ -36,7 +36,7 @@ All JSON responses follow predictable structures. On validation or server failur
 * `401 Unauthorized`: Missing or invalid Bearer token / session.
 * `403 Forbidden`: Authenticated user lacks administrator privileges or is suspended.
 * `404 Not Found`: Requested session or user does not exist.
-* `429 Too Many Requests`: User exceeded sliding-window rate limit (10 req/min) or 5-hour quota (30 messages / 5 hours).
+* `429 Too Many Requests`: Includes a `code` that distinguishes `RATE_LIMITED`, `CHAT_RATE_LIMITED`, and `QUOTA_EXCEEDED`; rate-limited responses include `Retry-After` where available.
 * `500 Internal Server Error`: Backend runtime or provider error.
 
 ---
@@ -329,7 +329,7 @@ Submits a query to the multi-provider study AI engine within a session.
 * **Error Response (Quota Exceeded)** `429 Too Many Requests`:
   ```json
   {
-    "error": "You have reached your limit of 30 questions per 5 hours. Please take a break and return later.",
+    "error": "quota_exceeded",
     "code": "QUOTA_EXCEEDED",
     "message_count": 30,
     "message_limit": 30,
@@ -363,7 +363,7 @@ Streams real-time tokens from the upstream LLM provider using Newline-Delimited 
      ```json
      {"type": "start", "request_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d", "session_id": "e4b6c3d2-8f1a-4d7e-9c2b-1a3f5e7d9c1b"}
      ```
-  2. **Status Event**:
+  2. **Status Event** (the final status can be `persisting`):
      ```json
      {"type": "status", "stage": "generating"}
      ```
@@ -388,9 +388,11 @@ Streams real-time tokens from the upstream LLM provider using Newline-Delimited 
          "reset_at": "2026-10-17T23:30:00.000Z",
          "window_hours": 5
        },
-       "latency_ms": {
+      "latency_ms": {
          "pre_gen_ms": 42.1,
          "ttft_ms": 284.5,
+        "generation_ms": 1500,
+        "persistence_ms": 40,
          "total_duration_ms": 1940.2
        }
      }
@@ -435,7 +437,7 @@ Retrieves academic performance statistics, streak counter, and current level.
   ```
 
 ### `GET /api/user/memory`
-Retrieves personalized learning memory, saved notebook bookmarks, and past topics.
+Retrieves the authenticated user's saved study notes and learning preferences. Conversation history remains session-scoped at `GET /api/chat/<session_id>`; cross-user interaction logs are not returned as personal memory.
 
 * **Authentication**: 🔒 Authenticated
 * **Response** `200 OK`:
@@ -448,10 +450,14 @@ Retrieves personalized learning memory, saved notebook bookmarks, and past topic
       "liked_notes": [
         "Maxwell's Equations integral vs differential forms summary"
       ],
-      "history": ["Rotational Dynamics", "Organic Reaction Mechanisms"]
+      "preferences": {"explanation_style": "step-by-step"}
     }
   }
   ```
+
+### Quota storage requirement
+
+Apply `migrations/20261017_durable_quotas.sql` before deployment. `/api/usage`, `/api/chat/send`, and `/api/chat/stream` use shared atomic Supabase RPCs. If the migration or Supabase service is unavailable, the API reports a storage error instead of falling back to local files or claiming an empty quota.
 
 ---
 

@@ -412,10 +412,11 @@ MAX_LIKED_NOTES   = 15   # how many 👍'd answer summaries to keep per user
 def _sb_save_user_memory(user_id: int, first_name: str = "", username: str = "",
                           history: list = None, ask_history: list = None,
                           liked_notes: list = None,
+                          preferences: dict = None,
                           level: str = "", score: int = 0, total: int = 0) -> None:
-    """Upsert full user state into Supabase user_memory table — non-blocking fire-and-forget."""
+    """Persist user state and fail visibly if Supabase does not confirm the write."""
     if not (SUPABASE_URL and SUPABASE_KEY):
-        return
+        raise RuntimeError("Supabase is not configured; user memory is not durable")
     try:
         import json as _json
         payload = {
@@ -442,20 +443,27 @@ def _sb_save_user_memory(user_id: int, first_name: str = "", username: str = "",
             ])
         if liked_notes is not None:
             payload["liked_notes"] = _json.dumps(liked_notes[-MAX_LIKED_NOTES:])
+        if preferences is not None:
+            payload["preferences"] = _json.dumps(preferences)
         headers = _supabase_headers()
-        headers["Prefer"] = "resolution=merge-duplicates,return=minimal"
-        requests.post(
+        headers["Prefer"] = "resolution=merge-duplicates,return=representation"
+        response = requests.post(
             f"{SUPABASE_URL}/rest/v1/user_memory",
             headers=headers, json=payload, timeout=6
         )
+        response.raise_for_status()
+        rows = response.json()
+        if not isinstance(rows, list) or not rows:
+            raise RuntimeError("Supabase did not confirm the user memory write")
     except Exception as e:
-        print(f"[memory] save failed (non-fatal): {str(e)[:80]}")
+        logging.getLogger(__name__).error("Supabase user_memory upsert failed user_id=%s category=%s", user_id, type(e).__name__)
+        raise RuntimeError("Could not persist user memory") from e
 
 
 def _sb_load_user_memory(user_id: int) -> dict:
-    """Load a user's full state from Supabase. Returns {} if not found."""
+    """Load a user's full state. An empty row set means missing; errors stay errors."""
     if not (SUPABASE_URL and SUPABASE_KEY):
-        return {}
+        raise RuntimeError("Supabase is not configured; user memory is not durable")
     try:
         import json as _json
         resp = requests.get(
@@ -468,29 +476,29 @@ def _sb_load_user_memory(user_id: int) -> dict:
             return {}
         row = rows[0]
         # Deserialize JSON columns
-        for key in ("history", "ask_history", "liked_notes"):
+        for key in ("history", "ask_history", "liked_notes", "preferences"):
             val = row.get(key)
             if isinstance(val, str):
                 try:
                     row[key] = _json.loads(val)
                 except Exception:
-                    row[key] = []
+                    row[key] = {} if key == "preferences" else []
             elif val is None:
-                row[key] = []
+                row[key] = {} if key == "preferences" else []
         return row
     except Exception as e:
-        print(f"[memory] load failed (non-fatal): {str(e)[:80]}")
-        return {}
+        logging.getLogger(__name__).error("Supabase user_memory read failed user_id=%s category=%s", user_id, type(e).__name__)
+        raise RuntimeError("Could not load user memory") from e
 
 
-def load_user_into_memory(user_id: int, first_name: str = "", username: str = "") -> None:
+def load_user_into_memory(user_id: int, first_name: str = "", username: str = "", refresh: bool = False) -> None:
     """
     Called once per user on their first message/command in a session.
     Restores their conversation history + profile from Supabase into in-memory dicts.
     ALL features (chat, /ask, /brainy) now share ONE unified history (user_conversations)
     so context carries across every entry point — that used to be split into two silos.
     """
-    if user_id in user_conversations:
+    if user_id in user_conversations and not refresh:
         return   # already loaded this session
     row = _sb_load_user_memory(user_id)
     
@@ -500,13 +508,14 @@ def load_user_into_memory(user_id: int, first_name: str = "", username: str = ""
         history = legacy_ask_history
     user_conversations[user_id] = history
     # Restore profile / progress data
-    if user_id not in user_data_store:
+    if user_id not in user_data_store or refresh:
         user_data_store[user_id] = {
             "level":  row.get("level") or "",
             "score":  row.get("score") or 0,
             "total":  row.get("total") or 0,
             "joined": datetime.now().strftime("%d %b %Y"),
             "liked_notes": row.get("liked_notes") or [],
+            "preferences": row.get("preferences") or {},
         }
     if row:
         d = user_data_store[user_id]
@@ -514,6 +523,7 @@ def load_user_into_memory(user_id: int, first_name: str = "", username: str = ""
         d["score"] = row.get("score") or d.get("score") or 0
         d["total"] = row.get("total") or d.get("total") or 0
         d["liked_notes"] = row.get("liked_notes") or d.get("liked_notes") or []
+        d["preferences"] = row.get("preferences") or {}
         restored = len(user_conversations[user_id])
         if restored:
             print(f"[memory] restored {restored} messages for user {user_id} ({first_name})")
@@ -609,21 +619,12 @@ def sync_to_web_history(user_id: int, user_msg: str, assistant_msg: str) -> None
 
 
 def save_user_memory_async(user_id: int) -> None:
-    """Fire-and-forget: saves current in-memory state for user_id to Supabase."""
-    import threading
+    """Compatibility name retained for callers; persistence is synchronous and checked."""
     data = user_data_store.get(user_id, {})
-    threading.Thread(
-        target=_sb_save_user_memory,
-        kwargs=dict(
-            user_id     = user_id,
-            history     = user_conversations.get(user_id, []),
-            liked_notes = data.get("liked_notes", []),
-            level       = data.get("level", ""),
-            score       = data.get("score", 0),
-            total       = data.get("total", 0),
-        ),
-        daemon=True
-    ).start()
+    _sb_save_user_memory(user_id, history=user_conversations.get(user_id, []),
+        liked_notes=data.get("liked_notes", []), level=data.get("level", ""),
+        preferences=data.get("preferences", {}),
+        score=data.get("score", 0), total=data.get("total", 0))
 
 
 #   FANCY UNICODE FONT HELPERS

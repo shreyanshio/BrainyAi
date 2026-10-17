@@ -80,11 +80,13 @@ export interface ChatSendResponse {
   latency_ms?: StreamLatencyMetrics
 }
 
-export type StreamStage = 'preparing' | 'searching' | 'generating'
+export type StreamStage = 'preparing' | 'searching' | 'generating' | 'persisting'
 
 export interface StreamLatencyMetrics {
   pre_gen_ms?: number
   ttft_ms?: number
+  generation_ms?: number
+  persistence_ms?: number
   total_duration_ms?: number
 }
 
@@ -125,6 +127,7 @@ export interface UserProfileStats {
 export interface UserMemoryData {
   learn_context: string
   liked_notes: string[]
+  preferences?: Record<string, unknown>
 }
 
 export interface QuickPrompt {

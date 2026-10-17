@@ -113,7 +113,7 @@ export function Composer({
           <div className="flex items-center gap-2">
             <Clock size={14} className="text-rose-500 flex-shrink-0" />
             <span>
-              You&apos;ve used your 8-hour quota (30 questions). Resets at{' '}
+              You&apos;ve used your {usage?.window_hours}-hour quota ({usage?.limit} questions). Resets at{' '}
               <strong>{formatResetTime(usage?.reset_at)}</strong>.
             </span>
           </div>
@@ -136,7 +136,7 @@ export function Composer({
           disabled={isThinking || isExhausted}
           placeholder={
             isExhausted
-              ? '8-hour quota reached. Please wait for the window to reset.'
+              ? `${usage?.window_hours}-hour quota reached. Please wait for the window to reset.`
               : 'Ask a question, enter code, or paste a problem... (Shift+Enter for new line)'
           }
           rows={1}

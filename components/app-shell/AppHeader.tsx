@@ -177,7 +177,7 @@ export function AppHeader({
         </button>
       </div>
 
-      {/* Right: 8-Hour Quota, Settings & User Profile */}
+      {/* Right: Usage, Settings & User Profile */}
       <div className="flex items-center gap-2 sm:gap-2.5">
         {/* Quota Button / Indicator */}
         <button
@@ -189,7 +189,7 @@ export function AppHeader({
               ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
               : 'bg-[var(--bg-surface-elevated)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
           }`}
-          title="Global message quota: 30 questions per 8 hours"
+          title={usage ? `Global message quota: ${usage.limit} questions per ${usage.window_hours} hours` : 'Message quota unavailable'}
         >
           <Clock size={12} className={isExhausted ? 'text-rose-500' : isNearLimit ? 'text-amber-500' : 'text-emerald-500'} />
           <span>

@@ -52,18 +52,52 @@ export function StudentDashboard({
   const [sprintMinutes, setSprintMinutes] = useState(25)
   const [timeLeftSeconds, setTimeLeftSeconds] = useState(25 * 60)
   const [isTimerRunning, setIsTimerRunning] = useState(false)
-  const [completedSprints, setCompletedSprints] = useState(0)
+  const [timerEndsAt, setTimerEndsAt] = useState<number | null>(null)
+  const timerStorageKey = `brainy_focus_timer_${user.id}`
 
-  // Countdown timer effect
+  // Restore a personal timer and derive the countdown from an end timestamp.
   useEffect(() => {
-    let timer: NodeJS.Timeout | null = null
-    if (isTimerRunning && timeLeftSeconds > 0) {
-      timer = setInterval(() => {
-        setTimeLeftSeconds((prev) => prev - 1)
-      }, 1000)
-    } else if (timeLeftSeconds === 0 && isTimerRunning) {
-      setIsTimerRunning(false)
-      setCompletedSprints((prev) => prev + 1)
+    try {
+      const saved = localStorage.getItem(timerStorageKey)
+      if (saved) {
+        const timerState = JSON.parse(saved)
+        if ([15, 25, 45].includes(timerState.minutes)) setSprintMinutes(timerState.minutes)
+        const remaining = timerState.running && timerState.endsAt
+          ? Math.max(0, Math.ceil((timerState.endsAt - Date.now()) / 1000))
+          : Math.max(0, Number(timerState.remaining) || 0)
+        setTimeLeftSeconds(remaining)
+        if (timerState.running && remaining > 0) {
+          setTimerEndsAt(timerState.endsAt)
+          setIsTimerRunning(true)
+        }
+      }
+    } catch {
+      localStorage.removeItem(timerStorageKey)
+    }
+  }, [timerStorageKey])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(timerStorageKey, JSON.stringify({
+        minutes: sprintMinutes,
+        remaining: timeLeftSeconds,
+        running: isTimerRunning,
+        endsAt: timerEndsAt,
+      }))
+    } catch { /* Timer remains usable when storage is unavailable. */ }
+  }, [timerStorageKey, sprintMinutes, timeLeftSeconds, isTimerRunning, timerEndsAt])
+
+  useEffect(() => {
+    if (!isTimerRunning || !timerEndsAt) return
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((timerEndsAt - Date.now()) / 1000))
+      setTimeLeftSeconds(remaining)
+      if (remaining === 0) {
+        setIsTimerRunning(false)
+        setTimerEndsAt(null)
+        try {
+          localStorage.removeItem(timerStorageKey)
+        } catch { /* ignore */ }
       try {
         // Subtle audio notification using AudioContext
         const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
@@ -80,21 +114,35 @@ export function StudentDashboard({
       } catch {
         // audio context not available
       }
+      }
     }
-    return () => {
-      if (timer) clearInterval(timer)
-    }
-  }, [isTimerRunning, timeLeftSeconds])
+    tick()
+    const timer = window.setInterval(tick, 1000)
+    return () => window.clearInterval(timer)
+  }, [isTimerRunning, timerEndsAt, timerStorageKey])
 
   const handleSelectSprintDuration = (mins: number) => {
     setIsTimerRunning(false)
+    setTimerEndsAt(null)
     setSprintMinutes(mins)
     setTimeLeftSeconds(mins * 60)
   }
 
   const handleResetTimer = () => {
     setIsTimerRunning(false)
+    setTimerEndsAt(null)
     setTimeLeftSeconds(sprintMinutes * 60)
+  }
+
+  const handleToggleTimer = () => {
+    if (isTimerRunning) {
+      setTimeLeftSeconds(Math.max(0, timerEndsAt ? Math.ceil((timerEndsAt - Date.now()) / 1000) : timeLeftSeconds))
+      setTimerEndsAt(null)
+      setIsTimerRunning(false)
+    } else if (timeLeftSeconds > 0) {
+      setTimerEndsAt(Date.now() + timeLeftSeconds * 1000)
+      setIsTimerRunning(true)
+    }
   }
 
   // Format time mm:ss
@@ -118,9 +166,9 @@ export function StudentDashboard({
   }, [])
 
   // User stats
-  const questionsUsed = usage ? usage.used : 0
-  const questionsLimit = usage ? usage.limit : 30
-  const questionsRemaining = usage ? usage.remaining : 30
+  const questionsUsed = usage?.used ?? null
+  const questionsLimit = usage?.limit ?? null
+  const questionsRemaining = usage?.remaining ?? null
   const savedNotesCount = memoryData?.liked_notes?.length || 0
 
   const handleJumpSubmit = (e: React.FormEvent) => {
@@ -150,19 +198,14 @@ export function StudentDashboard({
 
             {/* Badges / Chips */}
             <div className="flex flex-wrap items-center gap-2 pt-2">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                <Flame size={13} />
-                <span>3-Day Streak</span>
-              </span>
-
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                 <Award size={13} />
-                <span>{questionsRemaining} Questions Left</span>
+                <span>{questionsRemaining === null ? 'Usage unavailable' : `${questionsRemaining} Questions Left`}</span>
               </span>
 
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-[var(--bg-surface-elevated)] text-[var(--text-secondary)] border border-[var(--border-subtle)]">
                 <Clock size={13} />
-                <span>8h Window Active</span>
+                <span>{usage ? `${usage.window_hours}h quota window` : 'Quota window unavailable'}</span>
               </span>
             </div>
           </div>
@@ -201,7 +244,7 @@ export function StudentDashboard({
                 Study Focus Sprint
               </h2>
               <div className="flex items-center gap-1 text-[11px] font-medium text-[var(--text-muted)]">
-                <span>{completedSprints} completed</span>
+                <span>{isTimerRunning ? 'Session in progress' : 'Focus timer'}</span>
               </div>
             </div>
 
@@ -266,7 +309,7 @@ export function StudentDashboard({
           {/* Timer Action Buttons */}
           <div className="flex items-center gap-2 pt-4">
             <button
-              onClick={() => setIsTimerRunning(!isTimerRunning)}
+              onClick={handleToggleTimer}
               className={`flex-1 py-3 px-4 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-sm ${
                 isTimerRunning
                   ? 'bg-amber-600 hover:bg-amber-700 text-white'
@@ -299,57 +342,50 @@ export function StudentDashboard({
         {/* Right Column: 4 Bento Metric Cards (Aptivus Metric Bento Grid) */}
         <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-4">
           
-          {/* Card 1: 8-Hour Quota */}
+          {/* Card 1: Current quota */}
           <div
             onClick={onOpenUsageModal}
             className="rounded-3xl p-6 bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-[var(--card-shadow)] flex flex-col justify-between cursor-pointer hover:border-[var(--border-strong)] transition"
           >
             <div className="flex items-center justify-between text-xs text-[var(--text-muted)]">
               <span className="font-semibold uppercase tracking-wider text-[10px]">
-                8-Hour Quota
+                {usage ? `${usage.window_hours}-Hour Quota` : 'Quota'}
               </span>
               <Clock size={14} className="text-emerald-500" />
             </div>
             <div className="my-3">
               <div className="text-3xl font-extrabold text-[var(--text-primary)]">
-                {questionsRemaining}{' '}
-                <span className="text-sm font-normal text-[var(--text-muted)]">
-                  / {questionsLimit}
-                </span>
+                {questionsRemaining === null ? '—' : questionsRemaining}{' '}
+                {questionsLimit !== null && <span className="text-sm font-normal text-[var(--text-muted)]">/ {questionsLimit}</span>}
               </div>
               <p className="text-xs text-[var(--text-secondary)] mt-1">
-                Questions available in current 8h window
+                {usage ? `Questions available in current ${usage.window_hours}h window` : 'Usage data unavailable'}
               </p>
             </div>
-            <div className="w-full bg-[var(--bg-surface-elevated)] h-2 rounded-full overflow-hidden">
-              <div
-                className="bg-emerald-500 h-full rounded-full transition-all duration-300"
-                style={{
-                  width: `${Math.round((questionsUsed / questionsLimit) * 100)}%`,
-                }}
-              />
-            </div>
+            {usage ? (
+              <div className="w-full bg-[var(--bg-surface-elevated)] h-2 rounded-full overflow-hidden" aria-label={`${questionsUsed} of ${questionsLimit} questions used`}>
+                <div className="bg-emerald-500 h-full rounded-full transition-all duration-300" style={{ width: `${Math.round((questionsUsed! / questionsLimit!) * 100)}%` }} />
+              </div>
+            ) : <p className="text-xs text-[var(--text-muted)]">Usage progress is unavailable</p>}
           </div>
 
-          {/* Card 2: Active Study Streak */}
+          {/* Card 2: Academic progress from recorded quiz data */}
           <div className="rounded-3xl p-6 bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-[var(--card-shadow)] flex flex-col justify-between">
             <div className="flex items-center justify-between text-xs text-[var(--text-muted)]">
               <span className="font-semibold uppercase tracking-wider text-[10px]">
-                Study Consistency
+                Quiz progress
               </span>
-              <Flame size={14} className="text-amber-500" />
+              <Flame size={14} className="text-[var(--text-muted)]" />
             </div>
             <div className="my-3">
               <div className="text-3xl font-extrabold text-[var(--text-primary)]">
-                3 <span className="text-sm font-normal text-[var(--text-muted)]">Days</span>
+                {profileStats?.total ? `${Math.round((profileStats.score / profileStats.total) * 100)}%` : '—'}
               </div>
               <p className="text-xs text-[var(--text-secondary)] mt-1">
-                Active revision & problem-solving streak
+                {profileStats?.total ? `${profileStats.score} correct of ${profileStats.total} recorded quiz answers` : 'Quiz activity is not available yet'}
               </p>
             </div>
-            <div className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
-              Keep it up today to hit 4 days!
-            </div>
+            <div className="text-[11px] text-[var(--text-muted)] font-medium">Based on recorded quiz answers</div>
           </div>
 
           {/* Card 3: Total Study Sessions */}

@@ -210,7 +210,7 @@ export async function logoutUser(): Promise<void> {
   }
 }
 
-// ── Usage & Quota APIs (30 msgs / 8 hours) ─────────────────
+// ── Usage & Quota APIs ──────────────────────────────────────
 
 export async function fetchUsage(): Promise<UsageStatus> {
   return request<UsageStatus>('/api/usage')
@@ -324,6 +324,28 @@ export async function streamChatMessage(
   const decoder = new TextDecoder('utf-8')
   let buffer = ''
   let accumulatedText = ''
+  let reportedError: Error | null = null
+
+  const processLine = (line: string) => {
+    const trimmed = line.trim()
+    if (!trimmed) return
+    const event: StreamEvent = JSON.parse(trimmed)
+    switch (event.type) {
+      case 'start': callbacks.onStart?.(event.session_id, event.request_id); break
+      case 'status': callbacks.onStatus?.(event.stage); break
+      case 'delta':
+        accumulatedText += event.text
+        callbacks.onDelta?.(event.text, accumulatedText)
+        break
+      case 'done': callbacks.onDone?.(event); break
+      case 'error': {
+        const streamErr = new ApiError(event.message, 500, event)
+        reportedError = streamErr
+        callbacks.onError?.(streamErr, accumulatedText)
+        throw streamErr
+      }
+    }
+  }
 
   try {
     while (true) {
@@ -335,51 +357,17 @@ export async function streamChatMessage(
       // Retain incomplete chunk in buffer
       buffer = lines.pop() || ''
 
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed) continue
-
-        try {
-          const event: StreamEvent = JSON.parse(trimmed)
-          switch (event.type) {
-            case 'start':
-              callbacks.onStart?.(event.session_id, event.request_id)
-              break
-            case 'status':
-              callbacks.onStatus?.(event.stage)
-              break
-            case 'delta':
-              accumulatedText += event.text
-              callbacks.onDelta?.(event.text, accumulatedText)
-              break
-            case 'done':
-              callbacks.onDone?.(event)
-              break
-            case 'error': {
-              const streamErr = new ApiError(event.message, 500, event)
-              callbacks.onError?.(streamErr, accumulatedText)
-              throw streamErr
-            }
-          }
-        } catch (parseErr) {
-          if (parseErr instanceof ApiError) throw parseErr
-          console.warn('[stream] Malformed JSON line in stream:', trimmed, parseErr)
-        }
-      }
+      for (const line of lines) processLine(line)
     }
 
-    // Flush any leftover line
+    // Flush any leftover line, including a valid final event without a newline.
+    buffer += decoder.decode()
     if (buffer.trim()) {
       try {
-        const event: StreamEvent = JSON.parse(buffer.trim())
-        if (event.type === 'delta') {
-          accumulatedText += event.text
-          callbacks.onDelta?.(event.text, accumulatedText)
-        } else if (event.type === 'done') {
-          callbacks.onDone?.(event)
-        }
-      } catch {
-        // ignore
+        processLine(buffer)
+      } catch (parseErr) {
+        if (parseErr instanceof ApiError) throw parseErr
+        throw new ApiError('The streaming response was malformed.', response.status)
       }
     }
 
@@ -388,9 +376,10 @@ export async function streamChatMessage(
     if (err?.name === 'AbortError') {
       return accumulatedText
     }
-    callbacks.onError?.(err, accumulatedText)
+    if (err !== reportedError) callbacks.onError?.(err, accumulatedText)
     throw err
   } finally {
+    if (signal?.aborted) reader.cancel().catch(() => {})
     reader.releaseLock()
   }
 }
@@ -413,19 +402,11 @@ export async function saveUserMemoryNote(note: string): Promise<void> {
 }
 
 export async function fetchModels(): Promise<ModelDefinition[]> {
-  try {
-    return await request<ModelDefinition[]>('/api/models')
-  } catch {
-    return []
-  }
+  return request<ModelDefinition[]>('/api/models')
 }
 
 export async function fetchUserPreferences(): Promise<Partial<UserPreferences>> {
-  try {
-    return await request<Partial<UserPreferences>>('/api/user/preferences')
-  } catch {
-    return {}
-  }
+  return request<Partial<UserPreferences>>('/api/user/preferences')
 }
 
 export async function saveUserPreferences(

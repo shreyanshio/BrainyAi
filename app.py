@@ -18,6 +18,7 @@ import urllib.parse
 import random
 import logging
 import time
+import threading
 import requests
 from datetime import datetime, timezone, timedelta
 from html import escape
@@ -34,7 +35,7 @@ import study_bot
 # Security module — input sanitization, rate limiting, blacklist, headers, token auth
 from security import (
     security_guard, login_required, sanitize_input,
-    is_blacklisted, check_rate_limit, log_security_event, security_headers,
+    is_blacklisted, check_rate_limit, rate_limit_retry_after, log_security_event, security_headers,
     create_auth_token, verify_auth_token, _get_auth_secret_key
 )
 
@@ -229,89 +230,37 @@ def unmask_secure_hash(stored_val: str) -> str:
 # ── GLOBAL USER MESSAGE QUOTA: 30 MESSAGES PER 5 HOURS ──
 GLOBAL_MESSAGE_LIMIT = 30
 QUOTA_WINDOW_HOURS = 5
-QUOTA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_quotas.json")
 
-import threading
-_quota_lock = threading.RLock()
-_user_quotas: dict = {}
-
-def _load_user_quotas():
-    global _user_quotas
-    if os.path.exists(QUOTA_FILE):
-        try:
-            with open(QUOTA_FILE, "r", encoding="utf-8") as f:
-                _user_quotas = json.load(f)
-        except Exception as e:
-            logger.warning("Could not load user_quotas.json: %s", e)
-            _user_quotas = {}
-
-def _save_user_quotas():
+def _quota_rpc(name: str, body: dict) -> dict:
+    response = _sb_request("POST", f"rpc/{name}", json_body=body, timeout=5)
     try:
-        with open(QUOTA_FILE, "w", encoding="utf-8") as f:
-            json.dump(_user_quotas, f, indent=2)
-    except Exception as e:
-        logger.warning("Could not save user_quotas.json: %s", e)
-
-_load_user_quotas()
+        value = response.json()
+    except ValueError as exc:
+        raise SupabaseOperationError(f"Quota RPC {name} returned malformed JSON") from exc
+    if not isinstance(value, dict):
+        raise SupabaseOperationError(f"Quota RPC {name} returned an unexpected response")
+    return value
 
 def get_user_quota(user_id: int | str) -> dict:
-    """Return current quota status, automatically rolling over expired 5-hour windows."""
-    with _quota_lock:
-        uid_str = str(user_id)
-        now = datetime.now(timezone.utc)
-        record = _user_quotas.get(uid_str)
-        if record:
-            try:
-                reset_at = datetime.fromisoformat(record["reset_at"])
-            except Exception:
-                reset_at = now
-            if now >= reset_at:
-                record = {
-                    "count": 0,
-                    "reset_at": (now + timedelta(hours=QUOTA_WINDOW_HOURS)).isoformat(),
-                    "window_start": now.isoformat()
-                }
-                _user_quotas[uid_str] = record
-                _save_user_quotas()
-        else:
-            record = {
-                "count": 0,
-                "reset_at": (now + timedelta(hours=QUOTA_WINDOW_HOURS)).isoformat(),
-                "window_start": now.isoformat()
-            }
-            _user_quotas[uid_str] = record
-            _save_user_quotas()
-
-        used = record["count"]
-        remaining = max(0, GLOBAL_MESSAGE_LIMIT - used)
-        return {
-            "used": used,
-            "limit": GLOBAL_MESSAGE_LIMIT,
-            "remaining": remaining,
-            "reset_at": record["reset_at"],
-            "window_hours": QUOTA_WINDOW_HOURS
-        }
+    """Read or initialize quota state using the shared atomic Supabase store."""
+    status = _quota_rpc("brainy_get_user_quota", {"p_user_id": int(user_id),
+        "p_limit": GLOBAL_MESSAGE_LIMIT, "p_window_hours": QUOTA_WINDOW_HOURS})
+    return {**status, "limit": GLOBAL_MESSAGE_LIMIT, "window_hours": QUOTA_WINDOW_HOURS}
 
 def consume_user_quota(user_id: int | str) -> tuple[bool, dict]:
-    """Atomically check and consume 1 message credit from the user's 5h quota."""
-    with _quota_lock:
-        status = get_user_quota(user_id)
-        if status["used"] >= GLOBAL_MESSAGE_LIMIT:
-            return False, status
-
-        uid_str = str(user_id)
-        _user_quotas[uid_str]["count"] += 1
-        _save_user_quotas()
-        return True, get_user_quota(user_id)
+    """Atomically consume a credit across workers and return current usage."""
+    status = _quota_rpc("brainy_consume_user_quota", {
+        "p_user_id": int(user_id), "p_limit": GLOBAL_MESSAGE_LIMIT,
+        "p_window_hours": QUOTA_WINDOW_HOURS,
+    })
+    status.update({"limit": GLOBAL_MESSAGE_LIMIT, "window_hours": QUOTA_WINDOW_HOURS})
+    return bool(status.pop("allowed", False)), status
 
 def refund_user_quota(user_id: int | str) -> dict:
-    """Refund 1 message credit if an AI generation call fails."""
-    with _quota_lock:
-        uid_str = str(user_id)
-        if uid_str in _user_quotas and _user_quotas[uid_str]["count"] > 0:
-            _user_quotas[uid_str]["count"] -= 1
-            _save_user_quotas()
-        return get_user_quota(user_id)
+    """Refund one previously consumed credit after a pre-generation failure."""
+    status = _quota_rpc("brainy_refund_user_quota", {"p_user_id": int(user_id),
+        "p_limit": GLOBAL_MESSAGE_LIMIT, "p_window_hours": QUOTA_WINDOW_HOURS})
+    return {**status, "limit": GLOBAL_MESSAGE_LIMIT, "window_hours": QUOTA_WINDOW_HOURS}
 
 # ── SUSPENDED USERS MANAGEMENT ──
 SUSPENDED_USERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "suspended_users.json")
@@ -428,6 +377,38 @@ def _sb_headers(prefer: str | None = None) -> dict:
     return headers
 
 
+class SupabaseOperationError(RuntimeError):
+    """A configured Supabase operation failed; never treat it as empty data."""
+
+
+def _sb_request(method: str, table: str, *, params: str = "", json_body=None,
+                prefer: str | None = None, timeout: int = 8):
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        raise SupabaseOperationError("Supabase is not configured")
+    try:
+        response = requests.request(method, f"{SUPABASE_URL}/rest/v1/{table}{params}",
+            headers=_sb_headers(prefer), json=json_body, timeout=timeout)
+        response.raise_for_status()
+        return response
+    except requests.RequestException as exc:
+        upstream = getattr(exc, "response", None)
+        logger.error("Supabase failure operation=%s table=%s status=%s request_id=%s category=%s",
+            method.lower(), table, getattr(upstream, "status_code", None) or "network",
+            upstream.headers.get("sb-request-id", "") if upstream is not None else "",
+            type(exc).__name__)
+        raise SupabaseOperationError(f"Supabase {method.lower()} {table} failed") from exc
+
+
+def _sb_json(response, table: str):
+    try:
+        rows = response.json()
+    except ValueError as exc:
+        raise SupabaseOperationError(f"Supabase returned malformed JSON for {table}") from exc
+    if not isinstance(rows, list):
+        raise SupabaseOperationError(f"Supabase returned an unexpected response for {table}")
+    return rows
+
+
 def sb_record_login(user_id: int, username: str, first_name: str, login_type: str = "web", ip: str = "", user_agent: str = "") -> None:
     """Record user login event in Supabase user_logins table and in-memory queue fallback."""
     login_entry = {
@@ -443,11 +424,7 @@ def sb_record_login(user_id: int, username: str, first_name: str, login_type: st
     if len(MEM_LOGINS) > 2000:
         del MEM_LOGINS[:-2000]
 
-    if not (SUPABASE_URL and SUPABASE_KEY):
-        return
-
-    try:
-        payload = {
+    payload = {
             "user_id": user_id,
             "username": username or "",
             "first_name": first_name or "",
@@ -455,40 +432,16 @@ def sb_record_login(user_id: int, username: str, first_name: str, login_type: st
             "ip_address": ip or "",
             "user_agent": user_agent[:250] if user_agent else ""
         }
-        r = requests.post(
-            f"{SUPABASE_URL}/rest/v1/user_logins",
-            headers=_sb_headers("return=minimal"), json=payload, timeout=5
-        )
-        if r.status_code not in (200, 201, 204):
-            logger.warning("Supabase record login status %s: %s", r.status_code, r.text[:200])
-    except Exception as e:
-        logger.warning("Supabase record login error (non-fatal): %s", e)
+    _sb_request("POST", "user_logins", json_body=payload, prefer="return=minimal", timeout=5)
 
 
 def sb_list_sessions(user_id: int) -> list:
-    if SUPABASE_URL and SUPABASE_KEY:
-        try:
-            r = requests.get(
-                f"{SUPABASE_URL}/rest/v1/chat_sessions"
-                f"?user_id=eq.{user_id}&select=id,title,created_at&order=created_at.desc",
-                headers=_sb_headers(), timeout=8
-            )
-            if r.status_code == 200:
-                rows = r.json()
-                for row in rows:
-                    if row.get("title"):
-                        row["title"] = unmask_secure_hash(row["title"])
-                # Merge with any local in-memory sessions that haven't synced yet
-                mem_list = MEM_SESSIONS.get(user_id, [])
-                seen_ids = {row["id"] for row in rows}
-                for m in mem_list:
-                    if m["id"] not in seen_ids:
-                        rows.append(m)
-                return rows
-        except Exception as e:
-            logger.warning("Supabase list_sessions error: %s", e)
-
-    return MEM_SESSIONS.get(user_id, [])
+    rows = _sb_json(_sb_request("GET", "chat_sessions",
+        params=f"?user_id=eq.{user_id}&select=id,title,created_at&order=created_at.desc"), "chat_sessions")
+    for row in rows:
+        if row.get("title"):
+            row["title"] = unmask_secure_hash(row["title"])
+    return rows
 
 
 def sb_create_session(user_id: int, title: str, session_id: str | None = None) -> dict:
@@ -497,157 +450,69 @@ def sb_create_session(user_id: int, title: str, session_id: str | None = None) -
     # Hash title before saving in Supabase so plain title never leaks
     payload = {"id": session_id, "user_id": user_id, "title": mask_secure_hash(title)}
 
-    # Save in memory cache with plain title
     sess_obj = {"id": session_id, "user_id": user_id, "title": title, "created_at": datetime.now(timezone.utc).isoformat()}
-    if user_id not in MEM_SESSIONS:
-        MEM_SESSIONS[user_id] = []
-    if not any(s["id"] == session_id for s in MEM_SESSIONS[user_id]):
-        MEM_SESSIONS[user_id].insert(0, sess_obj)
-
-    if not (SUPABASE_URL and SUPABASE_KEY):
-        return sess_obj
-
-    try:
-        r = requests.post(
-            f"{SUPABASE_URL}/rest/v1/chat_sessions",
-            headers=_sb_headers("return=representation"), json=payload, timeout=8
-        )
-        if r.status_code in (200, 201):
-            created = r.json()[0]
-            created["title"] = unmask_secure_hash(created.get("title", title))
-            return created
-    except Exception as e:
-        logger.warning("Supabase create_session error (using memory cache): %s", e)
-
-    return sess_obj
+    rows = _sb_json(_sb_request("POST", "chat_sessions", json_body=payload,
+        prefer="return=representation"), "chat_sessions")
+    if not rows or not rows[0].get("id"):
+        raise SupabaseOperationError("Supabase did not confirm session creation")
+    created = rows[0]
+    created["title"] = unmask_secure_hash(created.get("title", title))
+    MEM_SESSIONS.setdefault(user_id, []).insert(0, created)
+    return created
 
 
 def sb_get_session(session_id: str, user_id: int) -> dict | None:
-    if SUPABASE_URL and SUPABASE_KEY:
-        try:
-            r = requests.get(
-                f"{SUPABASE_URL}/rest/v1/chat_sessions"
-                f"?id=eq.{session_id}&user_id=eq.{user_id}&select=id,title,user_id",
-                headers=_sb_headers(), timeout=8
-            )
-            if r.status_code == 200:
-                rows = r.json()
-                if rows:
-                    row = rows[0]
-                    row["title"] = unmask_secure_hash(row.get("title", ""))
-                    return row
-        except Exception as e:
-            logger.warning("Supabase get_session error: %s", e)
-
-    # Check memory cache
-    user_sessions = MEM_SESSIONS.get(user_id, [])
-    for s in user_sessions:
-        if s["id"] == session_id:
-            return s
-
-    return None
+    rows = _sb_json(_sb_request("GET", "chat_sessions",
+        params=f"?id=eq.{session_id}&user_id=eq.{user_id}&select=id,title,user_id"), "chat_sessions")
+    if not rows:
+        return None
+    row = rows[0]
+    row["title"] = unmask_secure_hash(row.get("title", ""))
+    return row
 
 
 def sb_rename_session(session_id: str, user_id: int, title: str) -> None:
+    rows = _sb_json(_sb_request("PATCH", "chat_sessions",
+        params=f"?id=eq.{session_id}&user_id=eq.{user_id}",
+        json_body={"title": mask_secure_hash(title)}, prefer="return=representation"), "chat_sessions")
+    if not rows:
+        raise SupabaseOperationError("Session was not found or could not be renamed")
     for s in MEM_SESSIONS.get(user_id, []):
         if s["id"] == session_id:
             s["title"] = title
-    if not (SUPABASE_URL and SUPABASE_KEY):
-        return
-    try:
-        # Hash title before patching Supabase
-        requests.patch(
-            f"{SUPABASE_URL}/rest/v1/chat_sessions?id=eq.{session_id}&user_id=eq.{user_id}",
-            headers=_sb_headers(), json={"title": mask_secure_hash(title)}, timeout=8
-        )
-    except Exception as e:
-        logger.warning("Supabase rename_session error: %s", e)
 
 
 def sb_delete_session(session_id: str, user_id: int) -> None:
-    if user_id in MEM_SESSIONS:
-        MEM_SESSIONS[user_id] = [s for s in MEM_SESSIONS[user_id] if s["id"] != session_id]
+    _sb_request("DELETE", "chat_sessions", params=f"?id=eq.{session_id}&user_id=eq.{user_id}")
+    MEM_SESSIONS[user_id] = [s for s in MEM_SESSIONS.get(user_id, []) if s["id"] != session_id]
     MEM_MESSAGES.pop(session_id, None)
-
-    if not (SUPABASE_URL and SUPABASE_KEY):
-        return
-
-    try:
-        requests.delete(
-            f"{SUPABASE_URL}/rest/v1/chat_sessions?id=eq.{session_id}&user_id=eq.{user_id}",
-            headers=_sb_headers(), timeout=8
-        )
-        requests.delete(
-            f"{SUPABASE_URL}/rest/v1/chat_messages?session_id=eq.{session_id}",
-            headers=_sb_headers(), timeout=8
-        )
-    except Exception as e:
-        logger.warning("Supabase delete_session error: %s", e)
 
 
 def sb_get_messages(session_id: str) -> list:
-    if SUPABASE_URL and SUPABASE_KEY:
-        try:
-            r = requests.get(
-                f"{SUPABASE_URL}/rest/v1/chat_messages"
-                f"?session_id=eq.{session_id}&select=role,content,created_at&order=id.asc",
-                headers=_sb_headers(), timeout=8
-            )
-            if r.status_code == 200:
-                msgs = r.json()
-                if msgs:
-                    for m in msgs:
-                        if m.get("content"):
-                            m["content"] = unmask_secure_hash(m["content"])
-                    return msgs
-        except Exception as e:
-            logger.warning("Supabase get_messages error: %s", e)
-
-    return MEM_MESSAGES.get(session_id, [])
+    msgs = _sb_json(_sb_request("GET", "chat_messages",
+        params=f"?session_id=eq.{session_id}&select=role,content,created_at&order=id.asc"), "chat_messages")
+    for m in msgs:
+        if m.get("content"):
+            m["content"] = unmask_secure_hash(m["content"])
+    return msgs
 
 
 def sb_get_recent_messages(session_id: str, limit: int = 15) -> list:
-    if SUPABASE_URL and SUPABASE_KEY:
-        try:
-            r = requests.get(
-                f"{SUPABASE_URL}/rest/v1/chat_messages"
-                f"?session_id=eq.{session_id}&select=role,content,created_at&order=id.desc&limit={limit}",
-                headers=_sb_headers(), timeout=8
-            )
-            if r.status_code == 200:
-                raw_msgs = r.json()
-                if raw_msgs:
-                    msgs = list(reversed(raw_msgs))
-                    for m in msgs:
-                        if m.get("content"):
-                            m["content"] = unmask_secure_hash(m["content"])
-                    return msgs
-        except Exception as e:
-            logger.warning("Supabase get_recent_messages error: %s", e)
-
-    msgs = MEM_MESSAGES.get(session_id, [])
-    return msgs[-limit:]
+    raw_msgs = _sb_json(_sb_request("GET", "chat_messages",
+        params=f"?session_id=eq.{session_id}&select=role,content,created_at&order=id.desc&limit={limit}"), "chat_messages")
+    msgs = list(reversed(raw_msgs))
+    for m in msgs:
+        if m.get("content"):
+            m["content"] = unmask_secure_hash(m["content"])
+    return msgs
 
 
 def sb_insert_message(session_id: str, role: str, content: str) -> None:
     msg_obj = {"role": role, "content": content, "created_at": datetime.now(timezone.utc).isoformat()}
-    if session_id not in MEM_MESSAGES:
-        MEM_MESSAGES[session_id] = []
-    MEM_MESSAGES[session_id].append(msg_obj)
-
-    if not (SUPABASE_URL and SUPABASE_KEY):
-        return
-
-    try:
-        # Questions asked by the user are stored as secure hash values so they cannot leak from Supabase
-        stored_content = mask_secure_hash(content) if role == "user" else content
-        payload = {"session_id": session_id, "role": role, "content": stored_content}
-        requests.post(
-            f"{SUPABASE_URL}/rest/v1/chat_messages",
-            headers=_sb_headers("return=minimal"), json=payload, timeout=8
-        )
-    except Exception as e:
-        logger.warning("Supabase insert_message error (stored in memory): %s", e)
+    stored_content = mask_secure_hash(content) if role == "user" else content
+    payload = {"session_id": session_id, "role": role, "content": stored_content}
+    _sb_request("POST", "chat_messages", json_body=payload, prefer="return=minimal")
+    MEM_MESSAGES.setdefault(session_id, []).append(msg_obj)
 
 
 
@@ -1583,12 +1448,20 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
     """
     session_id = data.get("session_id")
     # Unified contract: accept both 'message' and 'content'
-    content = (data.get("message") or data.get("content") or "").strip()
+    raw_content = data.get("message") or data.get("content") or ""
+    if not isinstance(raw_content, str):
+        return None, jsonify({"error": "Message must be text", "code": "INVALID_MESSAGE"}), 400
+    content = raw_content.strip()
     model_id = (data.get("model") or "brainy-balanced").strip().lower()
     answer_length = (data.get("answer_length") or "medium").strip().lower()
 
     if not content:
         return None, jsonify({"error": "Message content cannot be empty"}), 400
+    if session_id:
+        try:
+            uuid.UUID(str(session_id))
+        except (ValueError, TypeError, AttributeError):
+            return None, jsonify({"error": "Invalid session identifier", "code": "INVALID_SESSION_ID"}), 400
 
     # Check if user account is suspended
     if is_user_suspended(user_id):
@@ -1597,17 +1470,13 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
             "message": "Your account has been suspended by an administrator."
         }), 403
 
-    # Ensure session exists or auto-create it
-    if not session_id:
-        new_sess = sb_create_session(user_id, "New Study Session")
-        session_id = new_sess["id"]
-        sess = new_sess
-    else:
-        sess = sb_get_session(session_id, user_id)
-        if not sess:
-            new_sess = sb_create_session(user_id, "New Study Session")
-            session_id = new_sess["id"]
-            sess = new_sess
+    # Validate an existing session against the durable store before charging quota.
+    try:
+        sess = sb_get_session(session_id, user_id) if session_id else None
+    except SupabaseOperationError:
+        return None, jsonify({"error": "Chat storage is temporarily unavailable. Please retry.", "code": "STORAGE_UNAVAILABLE", "retryable": True}), 503
+    if session_id and not sess:
+        return None, jsonify({"error": "Session not found", "code": "SESSION_NOT_FOUND"}), 404
 
     # Sanitize user input
     content = sanitize_input(content)
@@ -1620,24 +1489,55 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
     # Per-user rate limit: 10 messages per minute
     if not check_rate_limit("user_{}".format(user_id), limit=10, window=60):
         log_security_event("user_rate_limit", ip, user_id, "")
-        return None, jsonify({"error": "Message rate limit reached. Please wait a moment."}), 429
+        retry_after = rate_limit_retry_after("user_{}".format(user_id), window=60)
+        response = jsonify({"error": "Message rate limit reached. Please wait a moment.",
+            "code": "CHAT_RATE_LIMITED", "retry_after": retry_after, "limit": 10})
+        response.headers["Retry-After"] = str(retry_after)
+        return None, response, 429
 
-    # Enforce atomic 30 messages / 5 hours user quota BEFORE spending AI tokens
-    allowed, quota_status = consume_user_quota(user_id)
+    # Enforce quota before storing the accepted message or spending AI tokens.
+    try:
+        allowed, quota_status = consume_user_quota(user_id)
+    except SupabaseOperationError:
+        return None, jsonify({"error": "Usage tracking is temporarily unavailable. Please retry.", "code": "QUOTA_STORAGE_UNAVAILABLE", "retryable": True}), 503
     if not allowed:
         return None, jsonify({
             "error": "quota_exceeded",
+            "code": "QUOTA_EXCEEDED",
             "message": f"You have reached your {QUOTA_WINDOW_HOURS}-hour limit of {GLOBAL_MESSAGE_LIMIT} messages. Quota resets at {quota_status['reset_at']}.",
             "usage": quota_status,
             "user_message_count": quota_status["used"],
             "message_limit": GLOBAL_MESSAGE_LIMIT
         }), 429
 
-    # Save user message
-    sb_insert_message(session_id, "user", content)
+    # Create only after validation, rate limiting, and quota acceptance.
+    if not session_id:
+        try:
+            sess = sb_create_session(user_id, "New Study Session")
+            session_id = sess["id"]
+        except SupabaseOperationError:
+            refund_user_quota(user_id)
+            return None, jsonify({"error": "Could not create a durable chat session. Please retry.", "code": "SESSION_CREATE_FAILED", "retryable": True}), 503
+
+    try:
+        sb_insert_message(session_id, "user", content)
+    except SupabaseOperationError:
+        refund_user_quota(user_id)
+        return None, jsonify({"error": "Your message could not be saved. Please retry.", "code": "MESSAGE_SAVE_FAILED", "retryable": True}), 503
 
     # Fetch last 15 messages (including the one just saved) for context
-    messages_context = [{"role": m["role"], "content": m["content"]} for m in sb_get_recent_messages(session_id, 15)]
+    try:
+        messages_context = [{"role": m["role"], "content": m["content"]} for m in sb_get_recent_messages(session_id, 15)]
+    except SupabaseOperationError:
+        refund_user_quota(user_id)
+        return None, jsonify({"error": "Conversation history is temporarily unavailable. Please retry.", "code": "HISTORY_LOAD_FAILED", "retryable": True}), 503
+
+    # Durable personal profile is loaded before model context is assembled.
+    try:
+        study_bot.load_user_into_memory(user_id, first_name, username, refresh=True)
+    except Exception:
+        refund_user_quota(user_id)
+        return None, jsonify({"error": "Your study profile is temporarily unavailable. Please retry.", "code": "MEMORY_LOAD_FAILED", "retryable": True}), 503
 
     # Run intent detection
     intent, payload = study_bot.detect_intent(content)
@@ -1772,9 +1672,15 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
         system_prompt = study_bot.BANTER_SYSTEM_PROMPT or study_bot.SYSTEM_PROMPT
 
     # Inject learning contexts
-    learn_ctx = study_bot.get_learning_context(5)
     liked_ctx = study_bot.get_liked_context(user_id, 5)
-    extra = "\n\n".join(c for c in (learn_ctx, liked_ctx) if c)
+    user_memory = study_bot.get_user_data(user_id)
+    preferences = user_memory.get("preferences") or {}
+    preference_context = ""
+    if preferences:
+        preference_context = "The student's saved learning preferences (use when relevant):\n" + "\n".join(
+            f"- {str(key)[:60]}: {str(value)[:200]}" for key, value in preferences.items()
+        )
+    extra = "\n\n".join(c for c in (preference_context, liked_ctx) if c)
     if extra:
         system_prompt = system_prompt + "\n\n" + extra
 
@@ -1800,7 +1706,7 @@ def send_message():
     username = session["username"]
     ip = request.remote_addr or "unknown"
 
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     prep, err_resp, status = _prepare_chat_request(data, user_id, first_name, username, ip)
     if err_resp:
         return err_resp, status
@@ -1824,7 +1730,16 @@ def send_message():
         }), 502
 
     # Save assistant reply + auto-title the chat on its first exchange
-    sb_insert_message(session_id, "assistant", response_text)
+    try:
+        sb_insert_message(session_id, "assistant", response_text)
+    except SupabaseOperationError:
+        return jsonify({
+            "error": "The answer was generated but could not be saved to your chat.",
+            "code": "ASSISTANT_SAVE_FAILED",
+            "retryable": True,
+            "unsaved_response": format_for_web(response_text),
+            "session_id": session_id,
+        }), 503
 
     title_updated = None
     if sess.get("title") in ("New Chat", "New Study Session", "", None):
@@ -1832,17 +1747,6 @@ def send_message():
         new_title = " ".join(words) + ("..." if len(content.split()) > 5 else "")
         sb_rename_session(session_id, user_id, new_title)
         title_updated = new_title
-
-    # ── Sync to the Telegram bot's own memory/personalization store ──
-    try:
-        study_bot.load_user_into_memory(user_id, first_name, username)
-        if user_id in study_bot.user_conversations:
-            study_bot.user_conversations[user_id].append({"role": "user", "content": content})
-            study_bot.user_conversations[user_id].append({"role": "assistant", "content": response_text})
-            study_bot.trim_history(user_id)
-            study_bot.save_user_memory_async(user_id)
-    except Exception as se:
-        print(f"Sync to Supabase memory failed: {se}")
 
     # Return unified typed API response
     return jsonify({
@@ -1873,7 +1777,7 @@ def stream_message():
     ip = request.remote_addr or "unknown"
     t_start = time.perf_counter()
 
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     prep, err_resp, status = _prepare_chat_request(data, user_id, first_name, username, ip)
     if err_resp:
         return err_resp, status
@@ -1906,6 +1810,8 @@ def stream_message():
         tokens = []
         first_token_time = None
         has_yielded = False
+        persistence_started = False
+        assistant_saved = False
 
         try:
             for chunk in study_bot.ai_stream(
@@ -1925,15 +1831,18 @@ def stream_message():
                     "text": chunk
                 }) + "\n"
 
-            t_end = time.perf_counter()
-            total_duration_ms = round((t_end - t_start) * 1000, 2)
-            ttft_ms = round((first_token_time - t_start) * 1000, 2) if first_token_time else total_duration_ms
+            t_generation_done = time.perf_counter()
+            ttft_ms = round((first_token_time - t_start) * 1000, 2) if first_token_time else round((t_generation_done - t_start) * 1000, 2)
 
             full_text = "".join(tokens)
             clean_text = study_bot.clean_response(full_text)
 
+            yield json.dumps({"type": "status", "stage": "persisting"}) + "\n"
+            t_persist_start = time.perf_counter()
+            persistence_started = True
             # Insert assistant message into Supabase
             sb_insert_message(session_id, "assistant", clean_text)
+            assistant_saved = True
 
             # Auto-title if new session
             title_updated = None
@@ -1943,16 +1852,10 @@ def stream_message():
                 sb_rename_session(session_id, user_id, new_title)
                 title_updated = new_title
 
-            # Sync Telegram memory
-            try:
-                study_bot.load_user_into_memory(user_id, first_name, username)
-                if user_id in study_bot.user_conversations:
-                    study_bot.user_conversations[user_id].append({"role": "user", "content": content})
-                    study_bot.user_conversations[user_id].append({"role": "assistant", "content": clean_text})
-                    study_bot.trim_history(user_id)
-                    study_bot.save_user_memory_async(user_id)
-            except Exception as se:
-                logger.warning("Sync to memory failed: %s", se)
+            t_persist_done = time.perf_counter()
+            total_duration_ms = round((t_persist_done - t_start) * 1000, 2)
+            generation_ms = round((t_generation_done - t_start) * 1000, 2)
+            persistence_ms = round((t_persist_done - t_persist_start) * 1000, 2)
 
             yield json.dumps({
                 "type": "done",
@@ -1964,6 +1867,8 @@ def stream_message():
                 "latency_ms": {
                     "pre_gen_ms": pre_gen_ms,
                     "ttft_ms": ttft_ms,
+                    "generation_ms": generation_ms,
+                    "persistence_ms": persistence_ms,
                     "total_duration_ms": total_duration_ms
                 }
             }) + "\n"
@@ -1982,8 +1887,8 @@ def stream_message():
             else:
                 yield json.dumps({
                     "type": "error",
-                    "code": "stream_interrupted",
-                    "message": "Generation was interrupted.",
+                    "code": "assistant_save_failed" if persistence_started and not assistant_saved else "session_update_failed" if assistant_saved else "stream_interrupted",
+                    "message": "The generated answer could not be saved." if persistence_started and not assistant_saved else "The answer was saved, but chat details could not be updated." if assistant_saved else "Generation was interrupted before it could be saved.",
                     "partial": True
                 }) + "\n"
 
@@ -2022,11 +1927,12 @@ def get_user_memory():
     profile = study_bot.get_user_data(user_id)
     liked_notes = profile.get("liked_notes") or []
 
-    learn_history = study_bot.get_learning_context(10) or "No custom learning patterns registered yet."
+    preferences = profile.get("preferences") or {}
 
     return jsonify({
         "liked_notes": liked_notes,
-        "learn_context": learn_history
+        "learn_context": "Saved learning preferences are private to your account.",
+        "preferences": preferences,
     })
 
 

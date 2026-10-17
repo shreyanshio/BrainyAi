@@ -217,3 +217,10 @@ The complete database migration script is provided in [`supabase_schema.sql`](..
 3. Open `supabase_schema.sql` from this repository, copy its contents, and paste into the editor.
 4. Click **Run**.
 5. The script is fully idempotent: it uses `CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ADD COLUMN IF NOT EXISTS`, and `CREATE INDEX IF NOT EXISTS`. It can be safely executed against an existing database without overwriting or destroying existing data.
+# Durable quota migration
+
+Apply [`migrations/20261017_durable_quotas.sql`](../migrations/20261017_durable_quotas.sql) to the intended Supabase project before deploying the application changes. It creates `user_quotas` and service-role-only atomic read, consume, and refund RPCs. Keep the existing service-role key on the Flask server only.
+
+The previous `user_quotas.json` file was process-local and could not provide consistent limits across workers. The migration starts a new shared quota window for each user on first access; it does not import the per-instance file because multiple files cannot be merged safely. If preserving active quota usage is required, reconcile the file contents in a controlled staging migration before rollout.
+
+The backend now treats successful empty Supabase query results as empty and raises a storage error for failed requests. In-memory chat maps remain only as a small post-write cache; reads do not merge them into database results.

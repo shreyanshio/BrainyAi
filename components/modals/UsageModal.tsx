@@ -112,8 +112,7 @@ export function UsageModal({ isOpen, onClose, usage }: UsageModalProps) {
           <div className="flex items-start gap-2.5 p-3 rounded-2xl bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] text-[11px] text-[var(--text-secondary)] leading-relaxed">
             <Info size={14} className="text-[var(--text-muted)] flex-shrink-0 mt-0.5" />
             <p>
-              Every student gets 30 high-yield AI queries every 5 hours. This quota is enforced server-side
-              across all your sessions to guarantee high-speed, reliable responses during peak exam seasons.
+              Your account has {limit} AI messages in each {windowHours}-hour window, shared across your sessions.
             </p>
           </div>
         </div>

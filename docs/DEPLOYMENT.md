@@ -114,8 +114,12 @@ worker: python study_bot.py
    | `GEMINI_API_KEY` | `AIzaSy...` | Gemini AI key |
    | `OPENROUTER_API_KEY`| `sk-or-v1-...` | OpenRouter fallback key |
    | `TAVILY_API_KEY` | `tvly-...` | Tavily web search key |
-   | `GLOBAL_MESSAGE_LIMIT`| `30` | 5-hour quota limit |
+   | `GLOBAL_MESSAGE_LIMIT`| `30` | Message quota limit |
    | `QUOTA_WINDOW_HOURS`| `5` | Quota reset cycle (hours) |
+
+Before deploying the durable quota changes, apply `migrations/20261017_durable_quotas.sql` to the matching Supabase project. This enables the service-role-only atomic quota RPCs. Existing `user_quotas.json` usage is not imported; users start a shared quota window on first use after deployment. Validate the migration and RPC permissions in staging first. The Flask API now returns a controlled service error if Supabase or these RPCs are unavailable.
+
+The same migration adds a shared, atomic fixed-window request limiter keyed by a SHA-256 identifier. When Supabase is unavailable, the API logs a warning and uses a per-process fallback; that fallback is not globally consistent. Rate-limit requests add a small Supabase RPC to API traffic, so verify RPC permissions and latency in staging.
 
 ---
 

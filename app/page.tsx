@@ -10,6 +10,7 @@ import {
   fetchSessions,
   fetchUsage,
   fetchUserMemory,
+  fetchUserProfile,
   fetchUserPreferences,
   loginWithTelegramInitData,
   logoutUser,
@@ -26,6 +27,7 @@ import {
   UsageStatus,
   User,
   UserMemoryData,
+  UserProfileStats,
   UserPreferences,
 } from '@/types/api'
 import { DEFAULT_PREFERENCES, FONT_OPTIONS, THEME_PRESETS, ACCENT_PRESETS } from '@/lib/constants'
@@ -67,6 +69,7 @@ export default function BrainyApp() {
   // Global 30 msg / 5h Quota state
   const [usage, setUsage] = useState<UsageStatus | null>(null)
   const [memoryData, setMemoryData] = useState<UserMemoryData | null>(null)
+  const [profileStats, setProfileStats] = useState<UserProfileStats | null>(null)
 
   // Modal & Drawer state
   const [sidebarMobileOpen, setSidebarMobileOpen] = useState(false)
@@ -119,16 +122,18 @@ export default function BrainyApp() {
       }
 
       // 2. Fetch Sessions, Quota, Memory, and Server Preferences concurrently
-      const [sessList, usageStatus, mem, serverPrefs] = await Promise.all([
+      const [sessList, usageStatus, mem, serverPrefs, profile] = await Promise.all([
         fetchSessions().catch(() => []),
         fetchUsage().catch(() => null),
         fetchUserMemory().catch(() => null),
         fetchUserPreferences().catch(() => ({})),
+        fetchUserProfile().catch(() => null),
       ])
 
       setSessions(sessList)
       if (usageStatus) setUsage(usageStatus)
       if (mem) setMemoryData(mem)
+      if (profile) setProfileStats(profile)
 
       if (serverPrefs && Object.keys(serverPrefs).length > 0) {
         setPreferences((prev) => {
@@ -156,6 +161,7 @@ export default function BrainyApp() {
             const statusRes = await checkAuthSessionParam(authSessionParam)
             if (statusRes.status === 'authenticated' && statusRes.user) {
               setUser(statusRes.user)
+              setCurrentView('chat')
               window.history.replaceState({}, document.title, window.location.pathname)
               await loadInitialData()
               setAuthLoading(false)
@@ -171,6 +177,7 @@ export default function BrainyApp() {
           const loggedUser = await loginWithTelegramInitData(tg.initData)
           if (loggedUser) {
             setUser(loggedUser)
+            setCurrentView('chat')
             await loadInitialData()
             setAuthLoading(false)
             return
@@ -181,6 +188,7 @@ export default function BrainyApp() {
         const currentUser = await checkAuth()
         if (currentUser) {
           setUser(currentUser)
+          setCurrentView('chat')
           await loadInitialData()
         }
       } catch (err) {
@@ -363,26 +371,33 @@ export default function BrainyApp() {
           )
         )
       } else if (err?.status === 429) {
-        // Remove empty assistant placeholder
-        setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId))
-        const refreshedUsage = await fetchUsage().catch(() => null)
-        if (refreshedUsage) setUsage(refreshedUsage)
-        setUsageModalOpen(true)
-
-        setMessages((prev) => [
-          ...prev,
-          {
+        const code = err?.data?.code
+        if (code === 'QUOTA_EXCEEDED') {
+          setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId))
+          const refreshedUsage = await fetchUsage().catch(() => null)
+          if (refreshedUsage) setUsage(refreshedUsage)
+          setUsageModalOpen(true)
+          setMessages((prev) => [...prev, {
             role: 'assistant',
-            content: `⚠️ **5-Hour Quota Reached**: You have reached the limit of 30 questions for this 5-hour window. Please wait for the window to reset to continue studying.`,
+            content: `⚠️ **Study quota reached**: You have used the available messages for this ${usage?.window_hours ?? 5}-hour window. Please try again after it resets.`,
             created_at: new Date().toISOString(),
-          },
-        ])
+          }])
+        } else {
+          setMessages((prev) => prev.map((m) => m.id === assistantMsgId
+            ? { ...m, isStreaming: false, content: `⚠️ ${err?.message || 'Too many requests. Please wait before trying again.'}` }
+            : m))
+        }
       } else {
         setMessages((prev) =>
           prev.map((m) => {
             if (m.id === assistantMsgId) {
               if (m.content.trim()) {
-                return { ...m, isStreaming: false }
+                const note = err?.data?.code === 'assistant_save_failed'
+                  ? '\n\n⚠️ This answer could not be saved to your chat. Copy it before leaving this conversation.'
+                  : err?.data?.partial
+                    ? '\n\n⚠️ This response was interrupted and was not saved.'
+                    : ''
+                return { ...m, isStreaming: false, content: `${m.content}${note}` }
               }
               return {
                 ...m,
@@ -439,7 +454,9 @@ export default function BrainyApp() {
     setActiveSessionId(null)
     setMessages([])
     setUsage(null)
-    setCurrentView('overview')
+    setMemoryData(null)
+    setProfileStats(null)
+    setCurrentView('chat')
   }
 
   // Loading Screen
@@ -460,6 +477,7 @@ export default function BrainyApp() {
       <LoginView
         onLoginSuccess={(loggedInUser) => {
           setUser(loggedInUser)
+          setCurrentView('chat')
           loadInitialData()
         }}
       />
@@ -514,6 +532,7 @@ export default function BrainyApp() {
             sessions={sessions}
             usage={usage}
             memoryData={memoryData}
+            profileStats={profileStats}
             onStartStudyPrompt={handleStartStudyPrompt}
             onSelectSession={(id) => selectSession(id)}
             onNewSession={handleNewSession}

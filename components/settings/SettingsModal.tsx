@@ -566,8 +566,8 @@ export function SettingsModal({
                       <span className="font-medium text-[var(--text-primary)]">{sessions.length}</span>
                     </div>
                     <div>
-                      <span className="text-[var(--text-muted)]">8h Window Limit:</span>{' '}
-                      <span className="font-medium text-[var(--text-primary)]">30 Questions</span>
+                      <span className="text-[var(--text-muted)]">Message quota:</span>{' '}
+                      <span className="font-medium text-[var(--text-primary)]">{usage ? `${usage.limit} questions / ${usage.window_hours}h` : 'Unavailable'}</span>
                     </div>
                   </div>
                 </div>

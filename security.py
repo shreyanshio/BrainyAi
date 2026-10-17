@@ -12,8 +12,10 @@ import hmac
 import hashlib
 import base64
 import json
+import logging
 from functools import wraps
 from flask import request, jsonify, session
+import requests
 
 
 # ── 1. BLACKLIST PATTERNS ─────────────────────────────────
@@ -63,27 +65,49 @@ BLACKLIST_PATTERNS = [
 
 
 # ── 2. RATE LIMITING ─────────────────────────────────────
-# In-memory rate limiter with automatic IP blocking.
-# For production at scale, swap with Redis.
+# In-process fallback request limiter. It provides per-process protection only;
+# shared infrastructure is required for consistent limits across workers.
 
 rate_limits = {}  # In-memory sliding rate limiting table    # { identifier: [timestamp, timestamp, ...] }
 blocked_ips = {}    # { ip: unblock_timestamp }
 violation_counts = {}  # { ip: count } — for escalating blocks
+_rate_limit_warning_logged = False
+_shared_retry_after = {}
 
 
 def check_rate_limit(identifier: str, limit: int = 100, window: int = 60) -> bool:
     """Check if an identifier (IP or user key) is rate limited.
 
-    Returns True if allowed, False if blocked.
-    On violation: blocks the IP for 5 minutes.
-    On 3+ violations from the same IP: blocks for 24 hours.
+    Returns True if allowed, False while the identifier's sliding window is full.
+    Rate limits are namespaced by the caller and do not create longer bans.
     """
-    # Check if IP is currently blocked
-    if identifier in blocked_ips:
-        if time.time() < blocked_ips[identifier]:
-            return False
-        else:
-            del blocked_ips[identifier]
+    global _rate_limit_warning_logged
+    supabase_url = (os.getenv("SUPABASE_URL") or "").rstrip("/")
+    supabase_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY") or ""
+    if supabase_url and supabase_key:
+        bucket_key = hashlib.sha256(identifier.encode("utf-8")).hexdigest()
+        try:
+            response = requests.post(
+                f"{supabase_url}/rest/v1/rpc/brainy_check_rate_limit",
+                headers={"apikey": supabase_key, "Authorization": f"Bearer {supabase_key}", "Content-Type": "application/json"},
+                json={"p_bucket_key": bucket_key, "p_limit": limit, "p_window_seconds": window},
+                timeout=3,
+            )
+            response.raise_for_status()
+            result = response.json()
+            if not isinstance(result, dict) or "allowed" not in result:
+                raise ValueError("unexpected rate limit response")
+            _shared_retry_after[identifier] = int(result.get("retry_after", window))
+            return bool(result["allowed"])
+        except Exception as exc:
+            logging.getLogger(__name__).error("Shared rate limiter unavailable category=%s; using local fallback", type(exc).__name__)
+
+    environment = (os.getenv("FLASK_ENV") or os.getenv("ENVIRONMENT") or "").lower()
+    if environment == "production" and not _rate_limit_warning_logged:
+        logging.getLogger(__name__).warning(
+            "Rate limiting is process-local in production; limits are not shared across workers"
+        )
+        _rate_limit_warning_logged = True
 
     now = time.time()
     if identifier not in rate_limits:
@@ -93,30 +117,26 @@ def check_rate_limit(identifier: str, limit: int = 100, window: int = 60) -> boo
     rate_limits[identifier] = [t for t in rate_limits[identifier] if t > now - window]
 
     if len(rate_limits[identifier]) >= limit:
-        # Track violation count for escalating blocks
-        ip_key = identifier.split("_")[-1] if "_" in identifier else identifier
-        violation_counts[ip_key] = violation_counts.get(ip_key, 0) + 1
-
-        if violation_counts[ip_key] >= 3:
-            # Repeated offender — block for 24 hours
-            blocked_ips[identifier] = now + 86400
-            log_security_event("ip_blocked_24h", ip_key, None, f"Violations: {violation_counts[ip_key]}")
-        else:
-            # First/second offense — block for 5 minutes
-            blocked_ips[identifier] = now + 300
-            log_security_event("ip_blocked_5m", ip_key, None, f"Violations: {violation_counts[ip_key]}")
-
         return False
 
     rate_limits[identifier].append(now)
 
-    # Prevent unbounded growth: with many unique IPs over a long uptime,
-    # rate_limits/blocked_ips would otherwise never shrink. Sweep
+    # Prevent unbounded growth from many unique identifiers. Sweep
     # occasionally rather than on every call (cheap amortized cost).
     if random.random() < 0.01:
         _cleanup_rate_limit_state(now)
 
     return True
+
+
+def rate_limit_retry_after(identifier: str, window: int = 60) -> int:
+    """Return seconds until the oldest request exits a full sliding window."""
+    if identifier in _shared_retry_after:
+        return max(1, _shared_retry_after[identifier])
+    now = time.time()
+    timestamps = rate_limits.get(identifier, [])
+    active = [stamp for stamp in timestamps if stamp > now - window]
+    return max(1, int(active[0] + window - now + 0.999)) if active else window
 
 
 def _cleanup_rate_limit_state(now: float = None) -> None:
@@ -329,7 +349,11 @@ def security_guard(f):
         # Rate limit check (100 requests per minute per IP)
         if not check_rate_limit(ip):
             log_security_event("rate_limit_exceeded", ip, session.get("user_id"), "")
-            return jsonify({"error": "Too many requests. Try again later."}), 429
+            retry_after = rate_limit_retry_after(ip)
+            response = jsonify({"error": "Too many requests. Try again later.",
+                "code": "RATE_LIMITED", "retry_after": retry_after, "limit": 100})
+            response.headers["Retry-After"] = str(retry_after)
+            return response, 429
 
         # Check GET query parameters
         if request.method == 'GET':

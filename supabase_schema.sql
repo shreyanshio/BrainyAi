@@ -52,6 +52,7 @@ alter table user_memory add column if not exists joined_at timestamptz default n
 alter table user_memory add column if not exists history jsonb default '[]'::jsonb;
 alter table user_memory add column if not exists ask_history jsonb default '[]'::jsonb;
 alter table user_memory add column if not exists liked_notes jsonb default '[]'::jsonb;
+alter table user_memory add column if not exists preferences jsonb not null default '{}'::jsonb;
 alter table user_memory add column if not exists updated_at timestamptz default now();
 
 create index if not exists idx_user_memory_user_id on user_memory(user_id);
