@@ -554,7 +554,10 @@ def sb_record_login(user_id: int, username: str, first_name: str, login_type: st
         "ip_address": ip or "",
         "user_agent": user_agent[:250] if user_agent else ""
     }
-    _sb_request("POST", "user_logins", json_body=payload, prefer="return=minimal", timeout=5)
+    try:
+        _sb_request("POST", "user_logins", json_body=payload, prefer="return=minimal", timeout=5)
+    except Exception as exc:
+        logger.warning("Supabase record login failed for user_id=%s (non-fatal): %s", user_id, exc)
 
 
 def sb_list_sessions(user_id: int) -> list:
@@ -1138,8 +1141,10 @@ def auth_web():
     session["username"] = username
     session["email"] = ""
 
-    # Ensure user memory in study_bot / Supabase
-    study_bot.load_user_into_memory(user_id, name, username)
+    try:
+        study_bot.load_user_into_memory(user_id, name, username)
+    except Exception as me:
+        logger.warning("Could not sync user memory for user_id=%s during web auth (non-fatal): %s", user_id, me)
 
     # Record login in Supabase user_logins table
     sb_record_login(
@@ -1289,35 +1294,45 @@ def auth_google():
     session["email"] = email.strip().lower()
     session["photo_url"] = picture
 
-    # Ensure user memory in study_bot
-    study_bot.load_user_into_memory(user_id, name, username)
+    try:
+        # Ensure user memory in study_bot (non-fatal if database is slow/warming up)
+        try:
+            study_bot.load_user_into_memory(user_id, name, username)
+        except Exception as me:
+            logger.warning("Could not sync user memory for user_id=%s during Google auth (non-fatal): %s", user_id, me)
 
-    # Record login in Supabase
-    sb_record_login(
-        user_id=user_id,
-        username=username,
-        first_name=name,
-        login_type="google",
-        ip=request.remote_addr or "",
-        user_agent=request.headers.get("User-Agent", "")
-    )
+        # Record login in Supabase (non-fatal)
+        try:
+            sb_record_login(
+                user_id=user_id,
+                username=username,
+                first_name=name,
+                login_type="google",
+                ip=request.remote_addr or "",
+                user_agent=request.headers.get("User-Agent", "")
+            )
+        except Exception as re:
+            logger.warning("Could not record login event for user_id=%s (non-fatal): %s", user_id, re)
 
-    role = "admin" if is_admin_session() else "student"
-    token_str = create_auth_token(user_id, username, name, email, role)
+        role = "admin" if is_admin_session() else "student"
+        token_str = create_auth_token(user_id, username, name, email, role)
 
-    return jsonify({
-        "status": "authenticated",
-        "authenticated": True,
-        "user": {
-            "id": user_id,
-            "first_name": name,
-            "username": username,
-            "email": email,
-            "picture": picture,
-            "photo_url": picture
-        },
-        "token": token_str
-    })
+        return jsonify({
+            "status": "authenticated",
+            "authenticated": True,
+            "user": {
+                "id": user_id,
+                "first_name": name,
+                "username": username,
+                "email": email,
+                "picture": picture,
+                "photo_url": picture
+            },
+            "token": token_str
+        })
+    except Exception as exc:
+        logger.error("Unhandled error finalizing Google login: %s", exc, exc_info=True)
+        return jsonify({"error": "Failed to finalize Google login. Please try again or use Student Pass."}), 500
 
 
 @app.route("/api/auth/student_pass", methods=["POST"])
@@ -1335,8 +1350,10 @@ def auth_student_pass():
     session["email"] = ""
     session["photo_url"] = ""
 
-    # Ensure user memory in study_bot and Supabase
-    study_bot.load_user_into_memory(user_id, name, username)
+    try:
+        study_bot.load_user_into_memory(user_id, name, username)
+    except Exception as me:
+        logger.warning("Could not sync user memory for user_id=%s during student pass auth (non-fatal): %s", user_id, me)
 
     # Record login event in Supabase user_logins table
     sb_record_login(

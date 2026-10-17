@@ -311,6 +311,43 @@ class FullSuiteTests(unittest.TestCase):
         self.assertEqual(data["user"]["email"], "scholar@example.com")
         self.assertIn("token", data)
 
+    @patch("app.sb_record_login")
+    @patch("study_bot.load_user_into_memory")
+    @patch("requests.get")
+    def test_google_auth_resilient_to_background_failures(self, mock_get, mock_mem, mock_rec):
+        """POST /api/auth/google succeeds even if background audit/memory raises an error."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "sub": "999888777",
+            "email": "resilient@example.com",
+            "email_verified": True,
+            "name": "Resilient Scholar"
+        }
+        mock_get.return_value = mock_resp
+        mock_mem.side_effect = RuntimeError("Supabase connection timeout")
+        mock_rec.side_effect = RuntimeError("Supabase RLS violation")
+
+        resp = self.client.post("/api/auth/google", json={"credential": "token_with_sb_down"})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data.get("authenticated"))
+        self.assertEqual(data["user"]["first_name"], "Resilient Scholar")
+
+    @patch("requests.get")
+    def test_google_auth_invalid_token(self, mock_get):
+        """POST /api/auth/google returns 401 when token verification fails."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 400
+        mock_resp.text = "Invalid Value"
+        mock_get.return_value = mock_resp
+
+        resp = self.client.post("/api/auth/google", json={"credential": "invalid_junk_token"})
+        self.assertEqual(resp.status_code, 401)
+        data = resp.get_json()
+        self.assertIn("error", data)
+
 
 if __name__ == "__main__":
     unittest.main()
+
