@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { ExternalLink, ShieldCheck, ArrowRight, CheckCircle2, Lock } from 'lucide-react'
+import { ExternalLink, ShieldCheck, CheckCircle2, Lock, ArrowRight, Sparkles } from 'lucide-react'
 import {
   fetchPublicConfig,
   initTelegramLogin,
@@ -81,11 +81,11 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
           if (target) {
             target.innerHTML = ''
             g.accounts.id.renderButton(target, {
-              theme: 'filled_black',
+              theme: 'outline',
               size: 'large',
               text: 'continue_with',
               shape: 'rectangular',
-              width: 300,
+              width: 320,
             })
           }
         } catch (e) {
@@ -105,7 +105,7 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
       const user = await loginWithGoogle(response.credential)
       onLoginSuccess(user)
     } catch (err: any) {
-      setError(err?.message || 'Google verification failed. Use Telegram or Student Pass.')
+      setError(err?.message || 'Google verification failed. You can use Telegram or Student Pass.')
     } finally {
       setIsSubmitting(false)
     }
@@ -164,93 +164,101 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
   }
 
   return (
-    <div className="min-h-screen bg-[#040d07] text-[#f4fbf6] flex items-center justify-center p-4 sm:p-6 lg:p-8 font-sans antialiased relative overflow-hidden select-none">
-      {/* Botanical Forest Background Decorative Radiants */}
-      <div className="absolute -top-32 -left-32 w-96 h-96 bg-[#059669]/15 rounded-full blur-[140px] pointer-events-none" />
-      <div className="absolute -bottom-32 -right-32 w-[30rem] h-[30rem] bg-[#10b981]/10 rounded-full blur-[160px] pointer-events-none" />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-[radial-gradient(ellipse_at_center,_rgba(4,24,14,0.7)_0%,_rgba(3,10,6,0.98)_100%)] pointer-events-none" />
+    <div className="min-h-screen bg-[#0e1017] text-zinc-100 flex items-center justify-center p-4 sm:p-6 lg:p-8 font-sans antialiased relative overflow-hidden select-none">
+      {/* Background Subtle Tech Grid / Mesh */}
+      <div className="absolute inset-0 bg-[radial-gradient(#1c2230_1px,transparent_1px)] [background-size:24px_24px] opacity-40 pointer-events-none" />
+      <div className="absolute top-1/4 -left-32 w-96 h-96 bg-emerald-950/20 rounded-full blur-[140px] pointer-events-none" />
+      <div className="absolute bottom-1/4 -right-32 w-96 h-96 bg-cyan-950/20 rounded-full blur-[140px] pointer-events-none" />
 
-      {/* Main Botanical Card (2-Column Layout Matching User Reference Image) */}
-      <div className="w-full max-w-4xl rounded-2xl sm:rounded-3xl border border-[#143522] bg-[#07130b]/90 shadow-[0_25px_60px_-15px_rgba(0,0,0,0.85),0_0_40px_-10px_rgba(5,150,105,0.18)] backdrop-blur-xl overflow-hidden relative z-10 flex flex-col md:flex-row">
+      {/* Main Split Floating Card (Exact Design Inspired by Reference Image 1) */}
+      <div className="w-full max-w-4xl bg-white text-zinc-900 rounded-3xl shadow-[0_30px_90px_rgba(0,0,0,0.45)] border border-zinc-200/80 overflow-hidden relative z-10 flex flex-col md:flex-row p-3 sm:p-4">
         
-        {/* Left Column: "Let's Get Started" Botanical Showcase */}
-        <div className="md:w-1/2 p-8 sm:p-12 flex flex-col justify-between relative bg-gradient-to-b from-[#091f12]/80 via-[#07190e]/90 to-[#040f08]/95 border-b md:border-b-0 md:border-r border-[#143522]/80">
-          {/* Subtle leafy botanical overlay */}
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,_rgba(16,185,129,0.12),_transparent_65%)] pointer-events-none" />
+        {/* Left Dark Card (Matching Image 1 Left Textured Panel) */}
+        <div className="md:w-[45%] rounded-2xl bg-[#111319] text-white p-8 sm:p-10 flex flex-col justify-between relative overflow-hidden shadow-inner">
+          {/* Subtle curved mesh texture overlay */}
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_right,_rgba(5,150,105,0.18)_0%,_transparent_70%)] pointer-events-none" />
+          <div className="absolute -bottom-10 -right-10 w-64 h-64 bg-[radial-gradient(circle,_rgba(255,255,255,0.06)_1px,_transparent_1px)] [background-size:12px_12px] rounded-full pointer-events-none opacity-60" />
 
-          {/* Top Brand Tag */}
-          <div className="flex items-center gap-2 relative z-10 mb-8 md:mb-0">
-            <div className="w-7 h-7 rounded-lg bg-[#059669] border border-[#10b981]/40 flex items-center justify-center font-bold text-white text-xs shadow-md shadow-[#059669]/30">
+          {/* Top Brand Logo */}
+          <div className="flex items-center gap-2.5 relative z-10">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-600 to-emerald-400 flex items-center justify-center text-white font-black text-sm shadow-md shadow-emerald-950/40">
               B
             </div>
-            <span className="font-bold text-sm tracking-wide text-white uppercase">Brainy AI</span>
+            <span className="font-bold text-base tracking-tight text-white uppercase">Brainy</span>
           </div>
 
-          {/* Center Showcase Headline */}
-          <div className="relative z-10 my-auto py-6">
-            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold tracking-tight text-white leading-[1.15] mb-4">
-              Let&apos;s Get <br />
-              <span className="text-[#10b981]">Started</span>
+          {/* Center Welcome Headline */}
+          <div className="relative z-10 my-10 sm:my-14 space-y-3">
+            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white leading-tight">
+              Welcome <br />
+              Back!
             </h1>
-            <p className="text-xs sm:text-sm text-[#8aa995] leading-relaxed max-w-sm">
-              Your AI study companion. Master academic concepts, derive complex formulas, and retain knowledge with context.
+            <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed">
+              Your AI study companion. Understand deep concepts, derive formulas, and retain academic knowledge with ease.
             </p>
 
-            <div className="mt-6 flex flex-col gap-2.5 text-xs text-[#a3cbb1]">
+            <div className="pt-4 space-y-2 text-xs text-zinc-300">
               <div className="flex items-center gap-2">
-                <CheckCircle2 size={14} className="text-[#10b981]" />
-                <span>Zero manual entry of names or passwords</span>
+                <CheckCircle2 size={14} className="text-emerald-400 flex-shrink-0" />
+                <span>Zero passwords or manual data entry to leak</span>
               </div>
               <div className="flex items-center gap-2">
-                <CheckCircle2 size={14} className="text-[#10b981]" />
-                <span>Encrypted hash storage in Supabase</span>
+                <CheckCircle2 size={14} className="text-emerald-400 flex-shrink-0" />
+                <span>Encrypted hash storage in Supabase database</span>
               </div>
               <div className="flex items-center gap-2">
-                <CheckCircle2 size={14} className="text-[#10b981]" />
-                <span>30 high-yield questions every 8 hours</span>
+                <CheckCircle2 size={14} className="text-emerald-400 flex-shrink-0" />
+                <span>30 high-yield questions every 8-hour window</span>
               </div>
             </div>
           </div>
 
-          {/* Bottom attribution badge matching user reference image */}
-          <div className="relative z-10 pt-4 flex items-center gap-2">
-            <div className="px-3 py-1 rounded-full bg-[#051a0e] border border-[#143522] flex items-center gap-1.5 text-[11px] text-[#8aa995]">
-              <span>presented by</span>
-              <strong className="text-white font-semibold">Brainy</strong>
+          {/* Bottom Pill Badge Matching Reference Image 1 */}
+          <div className="relative z-10">
+            <div className="p-3 rounded-xl bg-white/5 border border-white/10 backdrop-blur-md flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 flex-shrink-0">
+                <ShieldCheck size={18} />
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-white">Platform 100% secure</div>
+                <div className="text-[11px] text-zinc-400">Fully protected & hashed data</div>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Right Column: Direct Secure Auth & Social Options (Matching Image Layout) */}
-        <div className="md:w-1/2 p-8 sm:p-12 flex flex-col justify-between bg-[#06110a]/95 relative">
+        {/* Right Light Card (Matching Image 1 Right Clean Form Panel) */}
+        <div className="md:w-[55%] p-6 sm:p-10 flex flex-col justify-between">
           <div>
             {/* Header */}
-            <div className="mb-6">
-              <h2 className="text-2xl font-bold tracking-tight text-white mb-1.5">Sign in</h2>
-              <p className="text-xs text-[#8aa995]">
-                Direct verified access — zero passwords or manual entries to leak.
+            <div className="text-center sm:text-left mb-8">
+              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 mb-2">
+                Login
+              </h2>
+              <p className="text-xs sm:text-sm text-zinc-500">
+                Instant verified access — no manual credentials or passwords required.
               </p>
             </div>
 
             {error && (
-              <div className="mb-5 p-3 rounded-xl bg-red-950/40 border border-red-800/60 text-red-300 text-xs text-center leading-relaxed">
+              <div className="mb-6 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs text-center leading-relaxed font-medium">
                 {error}
               </div>
             )}
 
-            {/* Telegram Waiting Handshake Mode */}
+            {/* Telegram Waiting Mode */}
             {telegramWaiting ? (
-              <div className="p-6 rounded-2xl bg-[#091b10] border border-[#143522] text-center space-y-4">
-                <div className="w-14 h-14 mx-auto rounded-full bg-[#059669]/15 border border-[#10b981]/30 flex items-center justify-center text-[#10b981]">
-                  <TelegramIcon className="w-7 h-7" />
+              <div className="p-6 rounded-2xl bg-zinc-50 border border-zinc-200 text-center space-y-4">
+                <div className="w-12 h-12 mx-auto rounded-full bg-emerald-100 border border-emerald-200 flex items-center justify-center text-emerald-700">
+                  <TelegramIcon className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white mb-1">
+                  <h3 className="text-sm font-bold text-zinc-900 mb-1">
                     Waiting for @AiChatExpert_bot
                   </h3>
-                  <p className="text-xs text-[#8aa995] leading-relaxed">
-                    Open <strong className="text-white">@AiChatExpert_bot</strong> in Telegram, send{' '}
-                    <code className="px-1.5 py-0.5 rounded bg-black/40 text-[#10b981] font-mono text-[11px]">
+                  <p className="text-xs text-zinc-600 leading-relaxed">
+                    Open <strong className="text-zinc-900">@AiChatExpert_bot</strong> on Telegram, type{' '}
+                    <code className="px-1.5 py-0.5 rounded bg-zinc-200 font-mono text-[11px] text-zinc-800">
                       /login
                     </code>
                     , and tap <strong>&ldquo;Authorize Web Login&rdquo;</strong>.
@@ -262,7 +270,7 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
                     href={telegramBotUrl || 'https://t.me/AiChatExpert_Bot'}
                     target="_blank"
                     rel="noreferrer"
-                    className="w-full py-2.5 px-4 rounded-xl bg-[#059669] hover:bg-[#10b981] text-white text-xs font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-[#059669]/20"
+                    className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition flex items-center justify-center gap-2 shadow-sm"
                   >
                     <span>Open @AiChatExpert_bot</span>
                     <ExternalLink size={13} />
@@ -274,99 +282,75 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
                       setTelegramWaiting(false)
                       setTelegramSessionId(null)
                     }}
-                    className="text-xs text-[#8aa995] hover:text-white py-1 transition underline"
+                    className="text-xs text-zinc-500 hover:text-zinc-800 py-1 transition underline cursor-pointer"
                   >
-                    Cancel
+                    Cancel Telegram Login
                   </button>
                 </div>
               </div>
             ) : (
-              /* Normal Auth Actions (Matching the Split + Right Icons Design) */
-              <div className="flex gap-4">
-                {/* Left side of right column: Primary CTA Buttons */}
-                <div className="flex-1 space-y-4">
-                  {/* Primary Button: Continue with Telegram (@AiChatExpert_bot) */}
-                  <button
-                    type="button"
-                    onClick={handleStartTelegram}
-                    disabled={isSubmitting}
-                    className="w-full py-3 px-4 rounded-xl bg-[#059669] hover:bg-[#10b981] active:bg-[#047857] text-white text-xs font-bold transition flex items-center justify-center gap-2.5 shadow-lg shadow-[#059669]/25 hover:shadow-[#059669]/40 cursor-pointer disabled:opacity-50"
-                  >
-                    <TelegramIcon className="w-4 h-4 text-white" />
-                    <span>Continue with Telegram</span>
-                  </button>
+              /* Verified Auth Actions */
+              <div className="space-y-4 max-w-sm mx-auto sm:mx-0">
+                
+                {/* 1. Continue with Telegram (@AiChatExpert_bot) */}
+                <button
+                  type="button"
+                  onClick={handleStartTelegram}
+                  disabled={isSubmitting}
+                  className="w-full py-3 px-4 rounded-xl bg-zinc-900 hover:bg-black text-white text-xs font-semibold transition flex items-center justify-center gap-2.5 shadow-md shadow-zinc-900/10 cursor-pointer disabled:opacity-50"
+                >
+                  <TelegramIcon className="w-4 h-4 text-emerald-400" />
+                  <span>Continue with Telegram (@AiChatExpert_bot)</span>
+                </button>
 
-                  {/* Secondary: 1-Click Secure Student Pass (Zero Passwords) */}
-                  <button
-                    type="button"
-                    onClick={handleStudentPassLogin}
-                    disabled={isSubmitting}
-                    className="w-full py-2.5 px-4 rounded-xl bg-[#091b10] hover:bg-[#0e2718] border border-[#143522] hover:border-[#10b981]/50 text-white text-xs font-medium transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                  >
-                    <ShieldCheck size={15} className="text-[#10b981]" />
-                    <span>Enter with Student Pass</span>
-                  </button>
-
-                  {/* Google OAuth Slot / Fallback Button */}
-                  <div className="w-full flex justify-center">
-                    <div id="google-signin-btn-target" className="w-full flex justify-center" />
-                    {!googleClientId && (
-                      <button
-                        type="button"
-                        onClick={handleStartTelegram}
-                        className="w-full py-2.5 px-4 rounded-xl bg-[#091b10] border border-[#143522] text-[#a3cbb1] text-xs font-medium flex items-center justify-center gap-2"
-                      >
-                        <GoogleIcon className="w-4 h-4" />
-                        <span>Google via Telegram verification</span>
-                      </button>
-                    )}
-                  </div>
+                {/* Divider */}
+                <div className="relative flex items-center justify-center my-4">
+                  <div className="border-t border-zinc-200 w-full" />
+                  <span className="bg-white px-3 text-[11px] font-medium text-zinc-400 uppercase tracking-wider">
+                    or
+                  </span>
                 </div>
 
-                {/* Right Divider & Circular Icons (Exact match from the uploaded reference image!) */}
-                <div className="hidden sm:flex flex-col items-center justify-center pl-3 border-l border-[#143522]/80 space-y-3">
-                  <span className="text-[10px] font-bold text-[#62806d] tracking-wider uppercase mb-1">
-                    OR
-                  </span>
+                {/* 2. Continue with Google */}
+                <div className="w-full flex flex-col items-center">
+                  <div id="google-signin-btn-target" className="w-full flex justify-center" />
+                  {!googleClientId && (
+                    <button
+                      type="button"
+                      onClick={handleStartTelegram}
+                      className="w-full py-2.5 px-4 rounded-xl border border-zinc-300 hover:border-zinc-400 hover:bg-zinc-50 text-zinc-700 text-xs font-medium flex items-center justify-center gap-2 transition cursor-pointer"
+                    >
+                      <GoogleIcon className="w-4 h-4" />
+                      <span>Continue with Google</span>
+                    </button>
+                  )}
+                </div>
 
-                  {/* Telegram Circular Icon Button */}
-                  <button
-                    onClick={handleStartTelegram}
-                    title="Telegram Login (@AiChatExpert_bot)"
-                    className="w-9 h-9 rounded-full bg-[#091b10] border border-[#143522] hover:border-[#10b981] hover:bg-[#059669]/20 flex items-center justify-center text-white transition cursor-pointer"
-                  >
-                    <TelegramIcon className="w-4 h-4 text-[#10b981]" />
-                  </button>
+                {/* 3. 1-Click Instant Student Pass */}
+                <button
+                  type="button"
+                  onClick={handleStudentPassLogin}
+                  disabled={isSubmitting}
+                  className="w-full py-2.5 px-4 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-semibold transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <ShieldCheck size={16} className="text-emerald-600" />
+                  <span>Instant 1-Click Student Pass</span>
+                </button>
 
-                  {/* Google Circular Icon Button */}
-                  <button
-                    onClick={handleStartTelegram}
-                    title="Google Account"
-                    className="w-9 h-9 rounded-full bg-[#091b10] border border-[#143522] hover:border-[#10b981] hover:bg-[#059669]/20 flex items-center justify-center text-white transition cursor-pointer"
-                  >
-                    <GoogleIcon className="w-4 h-4" />
-                  </button>
-
-                  {/* Secure Pass Circular Icon Button */}
-                  <button
-                    onClick={handleStudentPassLogin}
-                    title="1-Click Secure Student Pass"
-                    className="w-9 h-9 rounded-full bg-[#091b10] border border-[#143522] hover:border-[#10b981] hover:bg-[#059669]/20 flex items-center justify-center text-white transition cursor-pointer"
-                  >
-                    <ShieldCheck size={16} className="text-[#10b981]" />
-                  </button>
+                <div className="pt-2 text-center text-[11px] text-zinc-400">
+                  No account registration or password required.
                 </div>
               </div>
             )}
           </div>
 
-          {/* Bottom Security Note */}
-          <div className="mt-8 pt-4 border-t border-[#143522]/80 flex items-center justify-between text-[11px] text-[#62806d]">
-            <div className="flex items-center gap-1.5">
-              <Lock size={12} className="text-[#10b981]" />
-              <span>Hashed storage in Supabase</span>
+          {/* Bottom Security & Copyright Footer */}
+          <div className="mt-8 pt-4 border-t border-zinc-100 flex flex-col sm:flex-row items-center justify-between text-[11px] text-zinc-400 gap-2">
+            <div className="flex items-center gap-1.5 text-emerald-700 font-medium">
+              <Lock size={12} />
+              <span>AES & Hash Masked in Supabase</span>
             </div>
-            <span>@AiChatExpert_bot</span>
+            <span>Copyright ©2026 BrainyAi • Study Safe</span>
           </div>
         </div>
 

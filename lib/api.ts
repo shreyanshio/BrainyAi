@@ -9,6 +9,7 @@ import {
   User,
   UserMemoryData,
   UserProfileStats,
+  UserPreferences,
 } from '@/types/api'
 
 export const getApiBase = (): string => {
@@ -227,4 +228,21 @@ export async function fetchModels(): Promise<ModelDefinition[]> {
   } catch {
     return []
   }
+}
+
+export async function fetchUserPreferences(): Promise<Partial<UserPreferences>> {
+  try {
+    return await request<Partial<UserPreferences>>('/api/user/preferences')
+  } catch {
+    return {}
+  }
+}
+
+export async function saveUserPreferences(
+  preferences: Partial<UserPreferences>
+): Promise<void> {
+  await request('/api/user/preferences', {
+    method: 'POST',
+    body: JSON.stringify(preferences),
+  })
 }

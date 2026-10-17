@@ -10,10 +10,12 @@ import {
   fetchSessions,
   fetchUsage,
   fetchUserMemory,
+  fetchUserPreferences,
   loginWithTelegramInitData,
   logoutUser,
   renameSession,
   saveUserMemoryNote,
+  saveUserPreferences,
   sendChatMessage,
 } from '@/lib/api'
 import {
@@ -23,20 +25,30 @@ import {
   UsageStatus,
   User,
   UserMemoryData,
+  UserPreferences,
 } from '@/types/api'
+import { DEFAULT_PREFERENCES, FONT_OPTIONS, THEME_PRESETS, ACCENT_PRESETS } from '@/lib/constants'
 import { LoginView } from '@/components/auth/LoginView'
 import { AppHeader } from '@/components/app-shell/AppHeader'
 import { Sidebar } from '@/components/app-shell/Sidebar'
+import { StudentDashboard } from '@/components/dashboard/StudentDashboard'
 import { EmptyState } from '@/components/chat/EmptyState'
 import { MessageList } from '@/components/chat/MessageList'
 import { Composer } from '@/components/chat/Composer'
 import { UsageModal } from '@/components/modals/UsageModal'
 import { NotesModal } from '@/components/modals/NotesModal'
+import { SettingsModal } from '@/components/settings/SettingsModal'
 
 export default function BrainyApp() {
   // Auth state
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
+
+  // Active View: 'overview' (Aptivus Dashboard) vs 'chat' (Study Chat Workspace)
+  const [currentView, setCurrentView] = useState<'overview' | 'chat'>('overview')
+
+  // User Customization & Preferences
+  const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES)
 
   // Chat & Session state
   const [sessions, setSessions] = useState<ChatSession[]>([])
@@ -58,22 +70,72 @@ export default function BrainyApp() {
   const [sidebarMobileOpen, setSidebarMobileOpen] = useState(false)
   const [usageModalOpen, setUsageModalOpen] = useState(false)
   const [notesModalOpen, setNotesModalOpen] = useState(false)
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false)
+
+  // ── Apply Preferences to Document Root ────────────────────
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+
+    const root = document.documentElement
+
+    // 1. Theme Class
+    THEME_PRESETS.forEach((t) => root.classList.remove(`theme-${t.id}`))
+    root.classList.add(`theme-${preferences.theme}`)
+
+    // 2. Font Class
+    FONT_OPTIONS.forEach((f) => root.classList.remove(`font-${f.id}`))
+    root.classList.add(`font-${preferences.interfaceFont}`)
+
+    // 3. Accent Color Custom Property
+    const currentAccent = ACCENT_PRESETS.find((a) => a.id === preferences.accentColor)
+    const accentHex = preferences.customAccentHex || currentAccent?.hex || '#059669'
+    const accentHover = currentAccent?.hoverHex || '#10b981'
+    const accentSubtle = currentAccent?.subtleBg || 'rgba(5, 150, 105, 0.12)'
+
+    root.style.setProperty('--accent-primary', accentHex)
+    root.style.setProperty('--accent-hover', accentHover)
+    root.style.setProperty('--accent-subtle', accentSubtle)
+
+    // Sync active model/length from default preferences if set
+    if (preferences.defaultModel) setActiveModel(preferences.defaultModel)
+    if (preferences.defaultLength) setActiveLength(preferences.defaultLength)
+  }, [preferences])
 
   // ── Initial Auth & Bootstrap ──────────────────────────────
   const loadInitialData = useCallback(async () => {
     try {
-      const [sessList, usageStatus, mem] = await Promise.all([
+      // 1. Load Local Preferences from localStorage first
+      if (typeof window !== 'undefined') {
+        const savedPrefs = localStorage.getItem('brainy_user_preferences')
+        if (savedPrefs) {
+          try {
+            setPreferences((prev) => ({ ...prev, ...JSON.parse(savedPrefs) }))
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      // 2. Fetch Sessions, Quota, Memory, and Server Preferences concurrently
+      const [sessList, usageStatus, mem, serverPrefs] = await Promise.all([
         fetchSessions().catch(() => []),
         fetchUsage().catch(() => null),
         fetchUserMemory().catch(() => null),
+        fetchUserPreferences().catch(() => ({})),
       ])
 
       setSessions(sessList)
       if (usageStatus) setUsage(usageStatus)
       if (mem) setMemoryData(mem)
 
-      if (sessList.length > 0) {
-        await selectSession(sessList[0].id, sessList[0].title)
+      if (serverPrefs && Object.keys(serverPrefs).length > 0) {
+        setPreferences((prev) => {
+          const merged = { ...prev, ...serverPrefs }
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('brainy_user_preferences', JSON.stringify(merged))
+          }
+          return merged
+        })
       }
     } catch (err) {
       console.error('Failed to load initial data:', err)
@@ -133,6 +195,7 @@ export default function BrainyApp() {
   const selectSession = async (sessionId: string, title?: string) => {
     setActiveSessionId(sessionId)
     if (title) setActiveSessionTitle(title)
+    setCurrentView('chat')
     setSidebarMobileOpen(false)
 
     try {
@@ -150,6 +213,7 @@ export default function BrainyApp() {
     setActiveSessionTitle('New Study Session')
     setMessages([])
     setInputMessage('')
+    setCurrentView('chat')
     setSidebarMobileOpen(false)
   }
 
@@ -184,7 +248,10 @@ export default function BrainyApp() {
     const textToSend = (customPrompt || inputMessage).trim()
     if (!textToSend || isThinking) return
 
-    // Immediately add user message
+    // Immediately switch to chat workspace
+    setCurrentView('chat')
+
+    // Add user message to UI
     const userMsg: ChatMessage = {
       role: 'user',
       content: textToSend,
@@ -232,7 +299,7 @@ export default function BrainyApp() {
     } catch (err: any) {
       console.error('Failed to send message:', err)
 
-      // Handle 429 quota exhaustion specifically
+      // Handle 429 quota exhaustion
       if (err?.status === 429) {
         const refreshedUsage = await fetchUsage().catch(() => null)
         if (refreshedUsage) setUsage(refreshedUsage)
@@ -242,7 +309,7 @@ export default function BrainyApp() {
           ...prev,
           {
             role: 'assistant',
-            content: `⚠️ **8-Hour Quota Reached**: You have reached the limit of 30 messages for this 8-hour window. Please wait for the window to reset to continue studying.`,
+            content: `⚠️ **8-Hour Quota Reached**: You have reached the limit of 30 questions for this 8-hour window. Please wait for the window to reset to continue studying.`,
             created_at: new Date().toISOString(),
           },
         ])
@@ -261,6 +328,11 @@ export default function BrainyApp() {
     }
   }
 
+  const handleStartStudyPrompt = (promptText: string) => {
+    setCurrentView('chat')
+    setInputMessage(promptText)
+  }
+
   const handleSaveNote = async (noteText: string) => {
     try {
       await saveUserMemoryNote(noteText)
@@ -271,6 +343,17 @@ export default function BrainyApp() {
     }
   }
 
+  const handleUpdatePreferences = (updated: Partial<UserPreferences>) => {
+    setPreferences((prev) => {
+      const next = { ...prev, ...updated }
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('brainy_user_preferences', JSON.stringify(next))
+      }
+      saveUserPreferences(next).catch(() => {})
+      return next
+    })
+  }
+
   const handleLogout = async () => {
     await logoutUser()
     setUser(null)
@@ -278,13 +361,14 @@ export default function BrainyApp() {
     setActiveSessionId(null)
     setMessages([])
     setUsage(null)
+    setCurrentView('overview')
   }
 
   // Loading Screen
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-[#090a0f] flex flex-col items-center justify-center gap-3 text-zinc-400">
-        <div className="w-8 h-8 rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center font-bold text-white text-sm animate-pulse">
+      <div className="min-h-screen bg-[#0e1017] flex flex-col items-center justify-center gap-3 text-zinc-400">
+        <div className="w-8 h-8 rounded-xl bg-zinc-800 border border-zinc-700 flex items-center justify-center font-bold text-white text-sm animate-pulse">
           B
         </div>
         <p className="text-xs text-zinc-500 font-medium">Loading Brainy...</p>
@@ -292,7 +376,7 @@ export default function BrainyApp() {
     )
   }
 
-  // Unauthenticated: Show Clean SaaS Login View
+  // Unauthenticated: Show Origin Split-Card Login View
   if (!user) {
     return (
       <LoginView
@@ -306,10 +390,12 @@ export default function BrainyApp() {
 
   // Authenticated: Full Study Companion App Shell
   return (
-    <div className="flex h-screen h-[100dvh] overflow-hidden bg-[#090a0f] text-zinc-100 font-sans antialiased">
+    <div className="flex h-screen h-[100dvh] overflow-hidden bg-[var(--bg-app)] text-[var(--text-primary)] antialiased transition-colors">
       {/* Left Sidebar */}
       <Sidebar
         user={user}
+        currentView={currentView}
+        onSelectView={setCurrentView}
         sessions={sessions}
         activeSessionId={activeSessionId}
         onSelectSession={(id) => selectSession(id)}
@@ -319,6 +405,7 @@ export default function BrainyApp() {
         usage={usage}
         onOpenUsageModal={() => setUsageModalOpen(true)}
         onOpenNotesModal={() => setNotesModalOpen(true)}
+        onOpenSettingsModal={() => setSettingsModalOpen(true)}
         onLogout={handleLogout}
         mobileOpen={sidebarMobileOpen}
         onCloseMobile={() => setSidebarMobileOpen(false)}
@@ -329,43 +416,65 @@ export default function BrainyApp() {
         {/* Top App Header */}
         <AppHeader
           user={user}
+          currentView={currentView}
+          onSelectView={setCurrentView}
           activeModel={activeModel}
           onSelectModel={setActiveModel}
           activeLength={activeLength}
           onSelectLength={setActiveLength}
           usage={usage}
           onOpenUsageModal={() => setUsageModalOpen(true)}
+          onOpenSettingsModal={() => setSettingsModalOpen(true)}
           onToggleSidebar={() => setSidebarMobileOpen(!sidebarMobileOpen)}
           onLogout={handleLogout}
         />
 
-        {/* Chat Conversation Scroll Area */}
-        <main className="flex-1 overflow-y-auto scrollbar-thin">
-          {messages.length === 0 ? (
-            <EmptyState onSelectPrompt={(prompt) => handleSendMessage(prompt)} />
-          ) : (
-            <MessageList
-              messages={messages}
-              isThinking={isThinking}
-              user={user}
-              onSaveNote={handleSaveNote}
-            />
-          )}
-        </main>
+        {/* View 1: Student Overview Dashboard (Aptivus Inspired) */}
+        {currentView === 'overview' ? (
+          <StudentDashboard
+            user={user}
+            sessions={sessions}
+            usage={usage}
+            memoryData={memoryData}
+            onStartStudyPrompt={handleStartStudyPrompt}
+            onSelectSession={(id) => selectSession(id)}
+            onNewSession={handleNewSession}
+            onOpenUsageModal={() => setUsageModalOpen(true)}
+            onOpenNotesModal={() => setNotesModalOpen(true)}
+          />
+        ) : (
+          /* View 2: Focused Chat Workspace */
+          <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+            <main className="flex-1 overflow-y-auto scrollbar-thin">
+              {messages.length === 0 ? (
+                <EmptyState onSelectPrompt={(prompt) => handleSendMessage(prompt)} />
+              ) : (
+                <MessageList
+                  messages={messages}
+                  isThinking={isThinking}
+                  user={user}
+                  chatWidth={preferences.chatWidth}
+                  onSaveNote={handleSaveNote}
+                />
+              )}
+            </main>
 
-        {/* Bottom Input Composer */}
-        <Composer
-          inputMessage={inputMessage}
-          onInputChange={setInputMessage}
-          onSendMessage={() => handleSendMessage()}
-          isThinking={isThinking}
-          usage={usage}
-          activeModel={activeModel}
-          onSelectModel={setActiveModel}
-          activeLength={activeLength}
-          onSelectLength={setActiveLength}
-          onOpenUsageModal={() => setUsageModalOpen(true)}
-        />
+            {/* Bottom Input Composer */}
+            <Composer
+              inputMessage={inputMessage}
+              onInputChange={setInputMessage}
+              onSendMessage={() => handleSendMessage()}
+              isThinking={isThinking}
+              usage={usage}
+              activeModel={activeModel}
+              onSelectModel={setActiveModel}
+              activeLength={activeLength}
+              onSelectLength={setActiveLength}
+              chatWidth={preferences.chatWidth}
+              onOpenUsageModal={() => setUsageModalOpen(true)}
+            />
+          </div>
+        )}
       </div>
 
       {/* Modals */}
@@ -379,6 +488,18 @@ export default function BrainyApp() {
         isOpen={notesModalOpen}
         onClose={() => setNotesModalOpen(false)}
         memoryData={memoryData}
+      />
+
+      <SettingsModal
+        isOpen={settingsModalOpen}
+        onClose={() => setSettingsModalOpen(false)}
+        user={user}
+        preferences={preferences}
+        onUpdatePreferences={handleUpdatePreferences}
+        sessions={sessions}
+        usage={usage}
+        memoryData={memoryData}
+        onLogout={handleLogout}
       />
     </div>
   )

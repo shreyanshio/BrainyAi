@@ -12,12 +12,15 @@ import {
   Clock,
   BookMarked,
   LogOut,
-  ChevronRight,
+  Sliders,
+  LayoutDashboard,
 } from 'lucide-react'
 import { ChatSession, UsageStatus, User } from '@/types/api'
 
 interface SidebarProps {
   user: User
+  currentView: 'overview' | 'chat'
+  onSelectView: (view: 'overview' | 'chat') => void
   sessions: ChatSession[]
   activeSessionId: string | null
   onSelectSession: (sessionId: string) => void
@@ -27,6 +30,7 @@ interface SidebarProps {
   usage: UsageStatus | null
   onOpenUsageModal: () => void
   onOpenNotesModal: () => void
+  onOpenSettingsModal: () => void
   onLogout: () => void
   mobileOpen: boolean
   onCloseMobile: () => void
@@ -34,6 +38,8 @@ interface SidebarProps {
 
 export function Sidebar({
   user,
+  currentView,
+  onSelectView,
   sessions,
   activeSessionId,
   onSelectSession,
@@ -43,6 +49,7 @@ export function Sidebar({
   usage,
   onOpenUsageModal,
   onOpenNotesModal,
+  onOpenSettingsModal,
   onLogout,
   mobileOpen,
   onCloseMobile,
@@ -109,12 +116,12 @@ export function Sidebar({
     if (items.length === 0) return null
     return (
       <div className="mb-4">
-        <div className="px-2.5 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+        <div className="px-2.5 mb-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
           {title}
         </div>
         <div className="space-y-0.5">
           {items.map((sess) => {
-            const isSelected = activeSessionId === sess.id
+            const isSelected = activeSessionId === sess.id && currentView === 'chat'
             const isEditing = editingSessionId === sess.id
 
             if (isEditing) {
@@ -122,18 +129,18 @@ export function Sidebar({
                 <form
                   key={sess.id}
                   onSubmit={(e) => saveEdit(sess.id, e)}
-                  className="flex items-center gap-1.5 px-2 py-1 bg-zinc-800 rounded-lg text-xs"
+                  className="flex items-center gap-1.5 px-2 py-1.5 bg-[var(--bg-surface-elevated)] border border-[var(--border-strong)] rounded-xl text-xs"
                 >
                   <input
                     type="text"
                     value={editTitle}
                     onChange={(e) => setEditTitle(e.target.value)}
                     autoFocus
-                    className="flex-1 bg-transparent text-white focus:outline-none text-xs"
+                    className="flex-1 bg-transparent text-[var(--text-primary)] focus:outline-none text-xs"
                   />
                   <button
                     type="submit"
-                    className="p-1 hover:text-emerald-400 text-zinc-300 transition"
+                    className="p-1 hover:text-emerald-500 text-[var(--text-secondary)] transition cursor-pointer"
                     title="Save"
                   >
                     <Check size={12} />
@@ -141,7 +148,7 @@ export function Sidebar({
                   <button
                     type="button"
                     onClick={cancelEdit}
-                    className="p-1 hover:text-rose-400 text-zinc-400 transition"
+                    className="p-1 hover:text-rose-500 text-[var(--text-muted)] transition cursor-pointer"
                     title="Cancel"
                   >
                     <X size={12} />
@@ -155,23 +162,24 @@ export function Sidebar({
                 key={sess.id}
                 onClick={() => {
                   onSelectSession(sess.id)
+                  onSelectView('chat')
                   onCloseMobile()
                 }}
-                className={`group flex items-center justify-between px-2.5 py-2 rounded-lg text-xs cursor-pointer transition ${
+                className={`group flex items-center justify-between px-3 py-2 rounded-xl text-xs cursor-pointer transition ${
                   isSelected
-                    ? 'bg-zinc-800/90 text-white font-medium'
-                    : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                    ? 'bg-[var(--bg-surface-elevated)] text-[var(--text-primary)] font-bold shadow-xs'
+                    : 'text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text-primary)]'
                 }`}
               >
-                <div className="flex items-center gap-2 truncate pr-2">
-                  <MessageSquare size={13} className={isSelected ? 'text-zinc-200' : 'text-zinc-500'} />
+                <div className="flex items-center gap-2.5 truncate pr-2">
+                  <MessageSquare size={13} className={isSelected ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'} />
                   <span className="truncate">{sess.title || 'Untitled Session'}</span>
                 </div>
 
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={(e) => startEditing(sess, e)}
-                    className="p-1 hover:text-zinc-200 text-zinc-500 rounded"
+                    className="p-1 hover:text-[var(--text-primary)] text-[var(--text-muted)] rounded cursor-pointer"
                     title="Rename session"
                   >
                     <Edit2 size={11} />
@@ -181,7 +189,7 @@ export function Sidebar({
                       e.stopPropagation()
                       onDeleteSession(sess.id)
                     }}
-                    className="p-1 hover:text-rose-400 text-zinc-500 rounded"
+                    className="p-1 hover:text-rose-500 text-[var(--text-muted)] rounded cursor-pointer"
                     title="Delete session"
                   >
                     <Trash2 size={11} />
@@ -211,56 +219,77 @@ export function Sidebar({
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed top-0 bottom-0 left-0 w-64 bg-[#090a0f] border-r border-zinc-800/80 flex flex-col z-50 transition-transform duration-200 ease-in-out lg:translate-x-0 ${
+        className={`fixed top-0 bottom-0 left-0 w-64 bg-[var(--bg-surface)] border-r border-[var(--border-subtle)] flex flex-col z-50 transition-transform duration-200 ease-in-out lg:translate-x-0 ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
-        {/* Top Brand & New Chat */}
-        <div className="p-3.5 border-b border-zinc-800/60 space-y-3">
+        {/* Top Brand & Actions */}
+        <div className="p-4 border-b border-[var(--border-subtle)] space-y-3">
           <div className="flex items-center justify-between px-1">
             <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-md bg-zinc-800 border border-zinc-700 flex items-center justify-center font-bold text-white text-xs">
+              <div className="w-6 h-6 rounded-md bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 flex items-center justify-center font-black text-xs">
                 B
               </div>
-              <span className="font-semibold text-sm tracking-tight text-white">Brainy</span>
+              <span className="font-extrabold text-sm tracking-tight text-[var(--text-primary)] uppercase">
+                Brainy
+              </span>
             </div>
             <button
               onClick={onCloseMobile}
-              className="p-1 text-zinc-400 hover:text-white rounded-lg lg:hidden"
+              className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg lg:hidden cursor-pointer"
               aria-label="Close sidebar"
             >
               <X size={16} />
             </button>
           </div>
 
-          <button
-            onClick={() => {
-              onNewSession()
-              onCloseMobile()
-            }}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-zinc-100 hover:bg-white text-zinc-900 text-xs font-semibold shadow-sm transition"
-          >
-            <Plus size={14} />
-            <span>New Study Session</span>
-          </button>
+          {/* View Switcher: Overview vs New Session */}
+          <div className="space-y-1.5">
+            <button
+              onClick={() => {
+                onSelectView('overview')
+                onCloseMobile()
+              }}
+              className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition cursor-pointer ${
+                currentView === 'overview'
+                  ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 shadow-sm'
+                  : 'bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] text-[var(--text-primary)]'
+              }`}
+            >
+              <LayoutDashboard size={14} />
+              <span>Student Overview</span>
+            </button>
+
+            <button
+              onClick={() => {
+                onNewSession()
+                onSelectView('chat')
+                onCloseMobile()
+              }}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] text-[var(--text-primary)] text-xs font-semibold transition cursor-pointer"
+            >
+              <Plus size={14} />
+              <span>New Study Chat</span>
+            </button>
+          </div>
 
           {/* Search Box */}
           <div className="relative">
-            <Search size={13} className="absolute left-2.5 top-2.5 text-zinc-500" />
+            <Search size={13} className="absolute left-3 top-2.5 text-[var(--text-muted)]" />
             <input
               type="text"
-              placeholder="Search chats..."
+              placeholder="Search study chats..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-700"
+              className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--border-strong)]"
             />
           </div>
         </div>
 
         {/* Chat History List */}
-        <div className="flex-1 overflow-y-auto px-2 py-3 scrollbar-thin">
+        <div className="flex-1 overflow-y-auto px-3 py-3 scrollbar-thin">
           {filteredSessions.length === 0 ? (
-            <div className="text-center py-8 text-xs text-zinc-500">
+            <div className="text-center py-8 text-xs text-[var(--text-muted)]">
               {searchQuery ? 'No matching study chats' : 'No study sessions yet'}
             </div>
           ) : (
@@ -273,26 +302,26 @@ export function Sidebar({
           )}
         </div>
 
-        {/* Bottom Quota & User Profile */}
-        <div className="p-3 border-t border-zinc-800/80 bg-[#0c0d13] space-y-2.5">
+        {/* Bottom Quota & Navigation */}
+        <div className="p-3.5 border-t border-[var(--border-subtle)] bg-[var(--bg-surface-elevated)] space-y-2.5">
           {/* 8-Hour Quota Meter */}
           <div
             onClick={onOpenUsageModal}
-            className="p-2.5 rounded-lg bg-zinc-900/80 border border-zinc-800 cursor-pointer hover:border-zinc-700 transition"
+            className="p-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] cursor-pointer hover:border-[var(--border-strong)] transition"
           >
             <div className="flex items-center justify-between text-[11px] mb-1.5">
-              <span className="text-zinc-400 font-medium">8-Hour Quota</span>
-              <span className="text-zinc-200 font-mono">
+              <span className="text-[var(--text-muted)] font-medium">8-Hour Quota</span>
+              <span className="text-[var(--text-primary)] font-mono font-bold">
                 {used} / {limit}
               </span>
             </div>
-            <div className="w-full h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+            <div className="w-full h-1.5 rounded-full bg-[var(--bg-surface-elevated)] overflow-hidden">
               <div
                 className={`h-full transition-all duration-300 ${
                   progressPercent >= 100
                     ? 'bg-rose-500'
                     : progressPercent >= 80
-                    ? 'bg-amber-400'
+                    ? 'bg-amber-500'
                     : 'bg-emerald-500'
                 }`}
                 style={{ width: `${progressPercent}%` }}
@@ -300,23 +329,33 @@ export function Sidebar({
             </div>
           </div>
 
-          {/* Quick Actions (Saved Notes, Sign Out) */}
+          {/* Quick Actions (Saved Notes, Settings, Sign Out) */}
           <div className="flex items-center justify-between text-xs pt-1">
             <button
               onClick={onOpenNotesModal}
-              className="flex items-center gap-1.5 text-zinc-400 hover:text-white transition py-1"
+              className="flex items-center gap-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition py-1 cursor-pointer font-medium"
             >
               <BookMarked size={13} />
               <span>Saved Notes</span>
             </button>
 
-            <button
-              onClick={onLogout}
-              className="flex items-center gap-1.5 text-zinc-400 hover:text-rose-400 transition py-1"
-              title="Sign Out"
-            >
-              <LogOut size={13} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={onOpenSettingsModal}
+                className="p-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition rounded-lg hover:bg-[var(--bg-surface-hover)] cursor-pointer"
+                title="Settings & Customization"
+              >
+                <Sliders size={14} />
+              </button>
+
+              <button
+                onClick={onLogout}
+                className="p-1.5 text-[var(--text-secondary)] hover:text-rose-500 transition rounded-lg hover:bg-[var(--bg-surface-hover)] cursor-pointer"
+                title="Sign Out"
+              >
+                <LogOut size={14} />
+              </button>
+            </div>
           </div>
         </div>
       </aside>

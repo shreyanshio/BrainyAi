@@ -99,3 +99,41 @@ export interface QuickPrompt {
   prompt: string
   category: 'concept' | 'problem' | 'code' | 'exam'
 }
+
+export type AppTheme = 'warm-paper' | 'pure-light' | 'midnight' | 'graphite' | 'oled'
+
+export type AccentColor = 'emerald' | 'sapphire' | 'amber' | 'crimson' | 'slate' | string
+
+export type InterfaceFont =
+  | 'inter'
+  | 'geist'
+  | 'jakarta'
+  | 'dmsans'
+  | 'manrope'
+  | 'ibm'
+  | 'lora'
+  | 'sourceserif'
+  | 'jetbrains'
+
+export type FontSizeOption = 'sm' | 'md' | 'lg' | 'xl'
+
+export type LineSpacingOption = 'compact' | 'comfortable' | 'relaxed'
+
+export type ChatWidthOption = 'standard' | 'wide'
+
+export type LayoutDensity = 'comfortable' | 'compact'
+
+export interface UserPreferences {
+  theme: AppTheme
+  accentColor: AccentColor
+  customAccentHex?: string
+  interfaceFont: InterfaceFont
+  fontSize: FontSizeOption
+  lineSpacing: LineSpacingOption
+  chatWidth: ChatWidthOption
+  density: LayoutDensity
+  readabilityMode: boolean
+  defaultModel: string
+  defaultLength: AnswerLength
+  focusTimerMinutes: number
+}

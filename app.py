@@ -1541,6 +1541,47 @@ def get_user_memory():
     })
 
 
+@app.route("/api/user/memory", methods=["POST"])
+@login_required
+def save_user_memory():
+    user_id = session["user_id"]
+    data = request.get_json(silent=True) or {}
+    note = (data.get("note") or "").strip()
+    if note:
+        study_bot.load_user_into_memory(user_id, session["first_name"], session["username"])
+        profile = study_bot.get_user_data(user_id)
+        if "liked_notes" not in profile:
+            profile["liked_notes"] = []
+        if note not in profile["liked_notes"]:
+            profile["liked_notes"].append(note)
+            study_bot.save_user_memory_async(user_id)
+    return jsonify({"success": True})
+
+
+@app.route("/api/user/preferences", methods=["GET"])
+@login_required
+def get_user_preferences():
+    user_id = session["user_id"]
+    study_bot.load_user_into_memory(user_id, session["first_name"], session["username"])
+    profile = study_bot.get_user_data(user_id)
+    prefs = profile.get("preferences") or {}
+    return jsonify(prefs)
+
+
+@app.route("/api/user/preferences", methods=["POST"])
+@login_required
+def update_user_preferences():
+    user_id = session["user_id"]
+    data = request.get_json(silent=True) or {}
+    study_bot.load_user_into_memory(user_id, session["first_name"], session["username"])
+    profile = study_bot.get_user_data(user_id)
+    if "preferences" not in profile:
+        profile["preferences"] = {}
+    profile["preferences"].update(data)
+    study_bot.save_user_memory_async(user_id)
+    return jsonify({"success": True, "preferences": profile["preferences"]})
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)

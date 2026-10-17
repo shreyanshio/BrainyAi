@@ -1,8 +1,8 @@
 'use client'
 
 import React, { useRef, useEffect, useState } from 'react'
-import { ArrowUp, Mic, MicOff, Clock, ShieldAlert } from 'lucide-react'
-import { AnswerLength, ModelDefinition, UsageStatus } from '@/types/api'
+import { ArrowUp, Mic, MicOff, Clock } from 'lucide-react'
+import { AnswerLength, ChatWidthOption, UsageStatus } from '@/types/api'
 import { ANSWER_LENGTH_OPTIONS, CAPABILITY_MODELS } from '@/lib/constants'
 
 interface ComposerProps {
@@ -15,6 +15,7 @@ interface ComposerProps {
   onSelectModel: (modelId: string) => void
   activeLength: AnswerLength
   onSelectLength: (length: AnswerLength) => void
+  chatWidth?: ChatWidthOption
   onOpenUsageModal: () => void
 }
 
@@ -28,6 +29,7 @@ export function Composer({
   onSelectModel,
   activeLength,
   onSelectLength,
+  chatWidth = 'standard',
   onOpenUsageModal,
 }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -99,21 +101,23 @@ export function Composer({
     }
   }
 
+  const maxWidthClass = chatWidth === 'wide' ? 'max-w-5xl' : 'max-w-3xl'
+
   return (
-    <div className="w-full max-w-3xl mx-auto px-4 pb-4">
+    <div className={`w-full ${maxWidthClass} mx-auto px-4 pb-4`}>
       {/* Quota Exhausted Warning */}
       {isExhausted && (
-        <div className="mb-2.5 p-3 rounded-xl bg-rose-950/40 border border-rose-800/60 text-rose-300 text-xs flex items-center justify-between">
+        <div className="mb-2.5 p-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Clock size={14} className="text-rose-400 flex-shrink-0" />
+            <Clock size={14} className="text-rose-500 flex-shrink-0" />
             <span>
-              You've used your 8-hour quota (30 messages). Resets at{' '}
+              You&apos;ve used your 8-hour quota (30 questions). Resets at{' '}
               <strong>{formatResetTime(usage?.reset_at)}</strong>.
             </span>
           </div>
           <button
             onClick={onOpenUsageModal}
-            className="text-[11px] underline hover:text-white font-medium ml-2"
+            className="text-[11px] underline hover:opacity-80 font-medium ml-2 cursor-pointer"
           >
             Details
           </button>
@@ -121,7 +125,7 @@ export function Composer({
       )}
 
       {/* Input Card Container */}
-      <div className="rounded-2xl border border-zinc-800 bg-[#10121a] focus-within:border-zinc-700 transition p-2.5 shadow-lg">
+      <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] focus-within:border-[var(--border-strong)] transition p-2.5 shadow-[var(--card-shadow)]">
         <textarea
           ref={textareaRef}
           value={inputMessage}
@@ -134,28 +138,28 @@ export function Composer({
               : 'Ask a question, enter code, or paste a problem... (Shift+Enter for new line)'
           }
           rows={1}
-          className="w-full bg-transparent text-zinc-100 placeholder-zinc-500 text-sm leading-relaxed px-2 py-1 focus:outline-none resize-none disabled:opacity-50"
+          className="w-full bg-transparent text-[var(--text-primary)] placeholder-[var(--text-muted)] text-xs sm:text-sm leading-relaxed px-2 py-1 focus:outline-none resize-none disabled:opacity-50"
         />
 
         {/* Composer Controls Bar */}
-        <div className="flex items-center justify-between pt-2 border-t border-zinc-800/60 mt-1 px-1">
+        <div className="flex items-center justify-between pt-2 border-t border-[var(--border-subtle)] mt-1 px-1">
           {/* Left: Quick options (Model & Length pills) */}
           <div className="flex items-center gap-2 text-[11px]">
             {/* Quick model indicator */}
-            <span className="text-zinc-500 hidden sm:inline">
-              Model: <strong className="text-zinc-400">{CAPABILITY_MODELS.find((m) => m.id === activeModel)?.name}</strong>
+            <span className="text-[var(--text-muted)] hidden sm:inline">
+              Model: <strong className="text-[var(--text-primary)]">{CAPABILITY_MODELS.find((m) => m.id === activeModel)?.name}</strong>
             </span>
 
             {/* Quick length selector */}
-            <div className="flex items-center gap-1 bg-zinc-900/90 rounded-md p-0.5 border border-zinc-800">
+            <div className="flex items-center gap-1 bg-[var(--bg-surface-elevated)] rounded-xl p-0.5 border border-[var(--border-subtle)]">
               {ANSWER_LENGTH_OPTIONS.map((opt) => (
                 <button
                   key={opt.id}
                   onClick={() => onSelectLength(opt.id as AnswerLength)}
-                  className={`px-2 py-0.5 rounded text-[10px] font-medium transition ${
+                  className={`px-2 py-0.5 rounded-lg text-[10px] font-semibold transition cursor-pointer ${
                     activeLength === opt.id
-                      ? 'bg-zinc-800 text-zinc-100'
-                      : 'text-zinc-500 hover:text-zinc-300'
+                      ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-xs'
+                      : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                   }`}
                 >
                   {opt.label}
@@ -171,10 +175,10 @@ export function Composer({
               onClick={toggleVoice}
               disabled={isThinking || isExhausted}
               title={isListening ? 'Stop listening' : 'Dictate with voice'}
-              className={`p-2 rounded-lg transition ${
+              className={`p-2 rounded-xl transition cursor-pointer ${
                 isListening
-                  ? 'bg-rose-500/20 text-rose-400 animate-pulse'
-                  : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+                  ? 'bg-rose-500/20 text-rose-500 animate-pulse'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)]'
               } disabled:opacity-40`}
             >
               {isListening ? <MicOff size={15} /> : <Mic size={15} />}
@@ -185,7 +189,7 @@ export function Composer({
               onClick={onSendMessage}
               disabled={!inputMessage.trim() || isThinking || isExhausted}
               aria-label="Send message"
-              className="p-2 rounded-lg bg-zinc-100 hover:bg-white text-zinc-900 disabled:opacity-30 disabled:hover:bg-zinc-100 transition shadow-xs"
+              className="p-2 rounded-xl bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 hover:opacity-90 disabled:opacity-30 transition shadow-xs cursor-pointer"
             >
               <ArrowUp size={15} />
             </button>
@@ -193,8 +197,8 @@ export function Composer({
         </div>
       </div>
 
-      <div className="text-center text-[10px] text-zinc-500 mt-2">
-        Brainy provides educational assistance. Verify critical academic formulas & sources.
+      <div className="text-center text-[10px] text-[var(--text-muted)] mt-2">
+        Brainy provides academic assistance. Verify critical formulas & solutions.
       </div>
     </div>
   )

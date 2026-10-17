@@ -12,55 +12,55 @@ interface EmptyStateProps {
 const getCategoryIcon = (category: string) => {
   switch (category) {
     case 'concept':
-      return <Lightbulb size={16} className="text-amber-400" />
+      return <Lightbulb size={16} className="text-amber-500" />
     case 'problem':
-      return <Target size={16} className="text-emerald-400" />
+      return <Target size={16} className="text-emerald-500" />
     case 'code':
-      return <Code2 size={16} className="text-teal-400" />
+      return <Code2 size={16} className="text-teal-500" />
     case 'exam':
-      return <Sparkles size={16} className="text-emerald-300" />
+      return <Sparkles size={16} className="text-blue-500" />
     default:
-      return <Lightbulb size={16} className="text-zinc-400" />
+      return <Lightbulb size={16} className="text-[var(--text-muted)]" />
   }
 }
 
 export function EmptyState({ onSelectPrompt }: EmptyStateProps) {
   return (
     <div className="w-full max-w-2xl mx-auto px-4 py-12 sm:py-16 text-center">
-      <div className="w-10 h-10 mx-auto mb-4 rounded-xl bg-zinc-800 border border-zinc-700 flex items-center justify-center font-bold text-white text-base shadow-sm">
+      <div className="w-10 h-10 mx-auto mb-4 rounded-2xl bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 flex items-center justify-center font-black text-base shadow-sm">
         B
       </div>
 
-      <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-white mb-2">
+      <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-[var(--text-primary)] mb-2">
         What are you studying today?
       </h2>
 
-      <p className="text-xs sm:text-sm text-zinc-400 max-w-md mx-auto mb-8 leading-relaxed">
+      <p className="text-xs sm:text-sm text-[var(--text-secondary)] max-w-md mx-auto mb-8 leading-relaxed">
         Ask conceptual doubts, step-by-step mathematical proofs, code reviews, or exam-style drills.
       </p>
 
       {/* 2x2 Clean Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
-        {STUDY_QUICK_PROMPTS.map((item: QuickPrompt) => (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-left">
+        {STUDY_QUICK_PROMPTS.slice(0, 4).map((item: QuickPrompt) => (
           <button
             key={item.id}
             onClick={() => onSelectPrompt(item.prompt)}
-            className="group p-4 rounded-xl bg-[#10121a] hover:bg-[#141722] border border-zinc-800/80 hover:border-zinc-700 transition flex flex-col justify-between text-left"
+            className="group p-4.5 rounded-2xl bg-[var(--bg-surface)] hover:bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] hover:border-[var(--border-strong)] shadow-[var(--card-shadow)] transition flex flex-col justify-between text-left cursor-pointer"
           >
             <div>
-              <div className="w-8 h-8 rounded-lg bg-zinc-800/80 border border-zinc-700/60 flex items-center justify-center mb-3">
+              <div className="w-8 h-8 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] flex items-center justify-center mb-3">
                 {getCategoryIcon(item.category)}
               </div>
-              <h3 className="text-xs font-semibold text-zinc-100 group-hover:text-white transition">
+              <h3 className="text-xs font-bold text-[var(--text-primary)] group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
                 {item.title}
               </h3>
-              <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">
+              <p className="text-[11px] text-[var(--text-secondary)] mt-1 leading-relaxed">
                 {item.description}
               </p>
             </div>
 
-            <div className="mt-4 flex items-center gap-1 text-[11px] text-zinc-500 group-hover:text-zinc-300 transition">
-              <span>Use template</span>
+            <div className="mt-4 pt-3 border-t border-[var(--border-subtle)] flex items-center justify-between text-[11px] text-[var(--text-muted)] group-hover:text-[var(--text-primary)] transition">
+              <span>Use prompt template</span>
               <ArrowRight size={12} className="group-hover:translate-x-0.5 transition-transform" />
             </div>
           </button>

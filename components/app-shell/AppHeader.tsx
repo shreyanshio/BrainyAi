@@ -10,20 +10,24 @@ import {
   Code2,
   BookOpen,
   LogOut,
-  User as UserIcon,
-  ShieldAlert,
+  Sliders,
+  LayoutDashboard,
+  MessageSquare,
 } from 'lucide-react'
 import { AnswerLength, ModelDefinition, UsageStatus, User } from '@/types/api'
 import { CAPABILITY_MODELS, ANSWER_LENGTH_OPTIONS } from '@/lib/constants'
 
 interface AppHeaderProps {
   user: User
+  currentView: 'overview' | 'chat'
+  onSelectView: (view: 'overview' | 'chat') => void
   activeModel: string
   onSelectModel: (modelId: string) => void
   activeLength: AnswerLength
   onSelectLength: (length: AnswerLength) => void
   usage: UsageStatus | null
   onOpenUsageModal: () => void
+  onOpenSettingsModal: () => void
   onToggleSidebar: () => void
   onLogout: () => void
 }
@@ -31,26 +35,29 @@ interface AppHeaderProps {
 const getModelIcon = (id: string) => {
   switch (id) {
     case 'brainy-fast':
-      return <Zap size={14} className="text-amber-400" />
+      return <Zap size={14} className="text-amber-500" />
     case 'brainy-reasoning':
-      return <Sparkles size={14} className="text-emerald-400" />
+      return <Sparkles size={14} className="text-emerald-500" />
     case 'brainy-coding':
-      return <Code2 size={14} className="text-teal-400" />
+      return <Code2 size={14} className="text-teal-500" />
     case 'brainy-exam':
-      return <BookOpen size={14} className="text-emerald-300" />
+      return <BookOpen size={14} className="text-blue-500" />
     default:
-      return <Sparkles size={14} className="text-emerald-400" />
+      return <Sparkles size={14} className="text-emerald-500" />
   }
 }
 
 export function AppHeader({
   user,
+  currentView,
+  onSelectView,
   activeModel,
   onSelectModel,
   activeLength,
   onSelectLength,
   usage,
   onOpenUsageModal,
+  onOpenSettingsModal,
   onToggleSidebar,
   onLogout,
 }: AppHeaderProps) {
@@ -65,130 +72,153 @@ export function AppHeader({
   const isExhausted = remaining === 0
 
   return (
-    <header className="h-14 border-b border-zinc-800/80 bg-[#0c0d13]/90 backdrop-blur-md px-4 flex items-center justify-between z-20 flex-shrink-0">
+    <header className="h-14 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] backdrop-blur-md px-4 sm:px-6 flex items-center justify-between z-20 flex-shrink-0 transition-colors">
       {/* Left: Mobile hamburger & Brand */}
       <div className="flex items-center gap-3">
         <button
           onClick={onToggleSidebar}
-          className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition lg:hidden"
+          className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition lg:hidden cursor-pointer"
           aria-label="Toggle sidebar"
         >
           <Menu size={18} />
         </button>
 
-        <div className="hidden sm:flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-zinc-800 border border-zinc-700 flex items-center justify-center font-bold text-white text-xs">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-md bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 flex items-center justify-center font-black text-xs">
             B
           </div>
-          <span className="font-semibold text-sm tracking-tight text-white">Brainy</span>
+          <span className="font-extrabold text-sm tracking-tight text-[var(--text-primary)] hidden xs:inline uppercase">
+            Brainy
+          </span>
         </div>
 
-        {/* Model Selector Dropdown */}
-        <div className="relative">
-          <button
-            onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
-            className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-200 transition"
-          >
-            {getModelIcon(currentModel.id)}
-            <span className="font-medium hidden xs:inline">{currentModel.name}</span>
-            <ChevronDown size={13} className="text-zinc-500" />
-          </button>
-
-          {modelDropdownOpen && (
-            <>
-              <div
-                className="fixed inset-0 z-30"
-                onClick={() => setModelDropdownOpen(false)}
-              />
-              <div className="absolute left-0 top-full mt-1.5 w-64 rounded-xl bg-[#12141c] border border-zinc-800 shadow-2xl p-1.5 z-40 space-y-1">
-                <div className="px-2.5 py-1 text-[10px] uppercase tracking-wider font-semibold text-zinc-500">
-                  Study Capability Models
-                </div>
-                {CAPABILITY_MODELS.map((m) => (
-                  <button
-                    key={m.id}
-                    onClick={() => {
-                      onSelectModel(m.id)
-                      setModelDropdownOpen(false)
-                    }}
-                    className={`w-full text-left p-2 rounded-lg text-xs flex items-start gap-2.5 transition ${
-                      activeModel === m.id
-                        ? 'bg-zinc-800/90 text-white'
-                        : 'text-zinc-300 hover:bg-zinc-800/50 hover:text-white'
-                    }`}
-                  >
-                    <div className="mt-0.5">{getModelIcon(m.id)}</div>
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-medium">{m.name}</span>
-                        {m.badge && (
-                          <span className="px-1.5 py-0.2 rounded text-[10px] bg-zinc-700/60 text-zinc-300 font-mono">
-                            {m.badge}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-zinc-400 mt-0.5 leading-snug">
-                        {m.tagline}
-                      </p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Answer Length Pill Toggle */}
-        <div className="hidden md:flex items-center p-0.5 rounded-lg bg-zinc-900 border border-zinc-800 text-[11px]">
-          {ANSWER_LENGTH_OPTIONS.map((opt) => (
+        {/* Model Selector Dropdown (When in Chat Workspace) */}
+        {currentView === 'chat' && (
+          <div className="relative ml-1 sm:ml-2">
             <button
-              key={opt.id}
-              onClick={() => onSelectLength(opt.id as AnswerLength)}
-              title={opt.desc}
-              className={`px-2.5 py-1 rounded-md transition font-medium ${
-                activeLength === opt.id
-                  ? 'bg-zinc-800 text-white shadow-sm'
-                  : 'text-zinc-400 hover:text-zinc-200'
-              }`}
+              onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] transition cursor-pointer"
             >
-              {opt.label}
+              {getModelIcon(currentModel.id)}
+              <span className="font-semibold hidden sm:inline">{currentModel.name}</span>
+              <ChevronDown size={12} className="text-[var(--text-muted)]" />
             </button>
-          ))}
-        </div>
+
+            {modelDropdownOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-30"
+                  onClick={() => setModelDropdownOpen(false)}
+                />
+                <div className="absolute left-0 top-full mt-1.5 w-64 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-2xl p-1.5 z-40 space-y-1">
+                  <div className="px-2.5 py-1 text-[10px] uppercase tracking-wider font-semibold text-[var(--text-muted)]">
+                    Study Capability Models
+                  </div>
+                  {CAPABILITY_MODELS.map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => {
+                        onSelectModel(m.id)
+                        setModelDropdownOpen(false)
+                      }}
+                      className={`w-full text-left p-2 rounded-xl text-xs flex items-start gap-2.5 transition cursor-pointer ${
+                        activeModel === m.id
+                          ? 'bg-[var(--bg-surface-elevated)] text-[var(--text-primary)] font-bold'
+                          : 'text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text-primary)]'
+                      }`}
+                    >
+                      <div className="mt-0.5">{getModelIcon(m.id)}</div>
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-semibold">{m.name}</span>
+                          {m.badge && (
+                            <span className="px-1.5 py-0.2 rounded text-[10px] bg-[var(--bg-surface-elevated)] text-[var(--text-muted)] font-mono">
+                              {m.badge}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-[var(--text-muted)] mt-0.5 leading-snug">
+                          {m.tagline}
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Right: Usage Quota & User Profile */}
-      <div className="flex items-center gap-2 sm:gap-3">
+      {/* Center: Segmented Switcher Pill (Inspired by Aptivus Image 2) */}
+      <div className="flex items-center p-1 rounded-2xl bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] text-xs shadow-sm">
+        <button
+          onClick={() => onSelectView('overview')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold transition cursor-pointer ${
+            currentView === 'overview'
+              ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-sm'
+              : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+          }`}
+        >
+          <LayoutDashboard size={13} />
+          <span>Overview</span>
+        </button>
+
+        <button
+          onClick={() => onSelectView('chat')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold transition cursor-pointer ${
+            currentView === 'chat'
+              ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-sm'
+              : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+          }`}
+        >
+          <MessageSquare size={13} />
+          <span>Chat Workspace</span>
+        </button>
+      </div>
+
+      {/* Right: 8-Hour Quota, Settings & User Profile */}
+      <div className="flex items-center gap-2 sm:gap-2.5">
         {/* Quota Button / Indicator */}
         <button
           onClick={onOpenUsageModal}
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition ${
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition cursor-pointer ${
             isExhausted
-              ? 'bg-rose-950/40 border-rose-800/60 text-rose-300 hover:bg-rose-900/40'
+              ? 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
               : isNearLimit
-              ? 'bg-amber-950/40 border-amber-800/60 text-amber-300 hover:bg-amber-900/40'
-              : 'bg-zinc-900/80 border-zinc-800 text-zinc-300 hover:bg-zinc-800'
+              ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
+              : 'bg-[var(--bg-surface-elevated)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
           }`}
-          title="Global message quota: 30 messages per 8 hours"
+          title="Global message quota: 30 questions per 8 hours"
         >
-          <Clock size={12} className={isExhausted ? 'text-rose-400' : isNearLimit ? 'text-amber-400' : 'text-zinc-400'} />
+          <Clock size={12} className={isExhausted ? 'text-rose-500' : isNearLimit ? 'text-amber-500' : 'text-emerald-500'} />
           <span>
             {usage ? `${remaining}/${usage.limit}` : '30/30'}
           </span>
-          <span className="hidden sm:inline text-zinc-500 font-normal">left</span>
+          <span className="hidden md:inline text-[var(--text-muted)] font-normal">left</span>
+        </button>
+
+        {/* Settings Button */}
+        <button
+          onClick={onOpenSettingsModal}
+          className="p-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition cursor-pointer"
+          title="Customization & Settings"
+          aria-label="Open settings"
+        >
+          <Sliders size={15} />
         </button>
 
         {/* User Avatar & Dropdown */}
         <div className="relative">
           <button
             onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-            className="flex items-center gap-2 p-1 rounded-lg hover:bg-zinc-800 transition"
+            className="flex items-center gap-1.5 p-1 rounded-xl hover:bg-[var(--bg-surface-elevated)] transition cursor-pointer"
             aria-label="User account menu"
           >
-            <div className="w-7 h-7 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-xs font-semibold text-zinc-200">
+            <div className="w-7 h-7 rounded-full bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 flex items-center justify-center text-xs font-bold">
               {user.first_name ? user.first_name[0].toUpperCase() : 'U'}
             </div>
-            <ChevronDown size={12} className="text-zinc-500 hidden sm:block" />
+            <ChevronDown size={12} className="text-[var(--text-muted)] hidden sm:block" />
           </button>
 
           {userDropdownOpen && (
@@ -197,33 +227,44 @@ export function AppHeader({
                 className="fixed inset-0 z-30"
                 onClick={() => setUserDropdownOpen(false)}
               />
-              <div className="absolute right-0 top-full mt-1.5 w-48 rounded-xl bg-[#12141c] border border-zinc-800 shadow-2xl p-1.5 z-40 space-y-1 text-xs">
-                <div className="px-3 py-2 border-b border-zinc-800/80">
-                  <div className="font-semibold text-white truncate">{user.first_name}</div>
+              <div className="absolute right-0 top-full mt-1.5 w-52 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-2xl p-1.5 z-40 space-y-1 text-xs">
+                <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
+                  <div className="font-bold text-[var(--text-primary)] truncate">{user.first_name}</div>
                   {user.username && (
-                    <div className="text-[11px] text-zinc-400 truncate">@{user.username}</div>
+                    <div className="text-[11px] text-[var(--text-muted)] truncate">@{user.username}</div>
                   )}
                 </div>
 
                 <button
                   onClick={() => {
                     setUserDropdownOpen(false)
+                    onOpenSettingsModal()
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition cursor-pointer"
+                >
+                  <Sliders size={13} />
+                  <span>Settings & Preferences</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setUserDropdownOpen(false)
                     onOpenUsageModal()
                   }}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-300 hover:text-white hover:bg-zinc-800/60 transition"
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition cursor-pointer"
                 >
                   <Clock size={13} />
                   <span>8-Hour Quota Details</span>
                 </button>
 
-                <div className="border-t border-zinc-800/80 my-1" />
+                <div className="border-t border-[var(--border-subtle)] my-1" />
 
                 <button
                   onClick={() => {
                     setUserDropdownOpen(false)
                     onLogout()
                   }}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-rose-300 hover:bg-rose-950/40 transition"
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 transition cursor-pointer"
                 >
                   <LogOut size={13} />
                   <span>Sign Out</span>

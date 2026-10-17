@@ -1,23 +1,126 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=IBM+Plex+Sans:ital,wght@0,100..700;1,100..700&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Lora:ital,wght@0,400..700;1,400..700&family=Manrope:wght@200..800&family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&family=Source+Serif+4:ital,opsz,wght@0,8..60,200..900;1,8..60,200..900&display=swap');
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
-:root {
-  --background: #060e0a;
-  --foreground: #f4fbf6;
-  --surface: #0a1711;
-  --surface-border: #143522;
-  --text-muted: #8aa995;
-  --primary: #059669;
-  --accent: #10b981;
+/* ==========================================================================
+   THEME DESIGN TOKENS
+   ========================================================================== */
+
+/* 1. Theme: Warm Paper (Default - Aptivus inspired) */
+:root,
+.theme-warm-paper {
+  --bg-app: #faf8f5;
+  --bg-surface: #ffffff;
+  --bg-surface-elevated: #f5f2eb;
+  --bg-surface-hover: #ede8df;
+  --border-subtle: #e8e3da;
+  --border-strong: #d6cec2;
+  --text-primary: #1c1917;
+  --text-secondary: #57534e;
+  --text-muted: #78716c;
+  --card-shadow: 0 4px 20px -2px rgba(28, 25, 23, 0.05), 0 2px 6px -1px rgba(28, 25, 23, 0.03);
+  --color-scheme: light;
 }
 
+/* 2. Theme: Pure Light */
+.theme-pure-light {
+  --bg-app: #ffffff;
+  --bg-surface: #f8fafc;
+  --bg-surface-elevated: #f1f5f9;
+  --bg-surface-hover: #e2e8f0;
+  --border-subtle: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --card-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.06), 0 2px 6px -1px rgba(15, 23, 42, 0.03);
+  --color-scheme: light;
+}
+
+/* 3. Theme: Midnight */
+.theme-midnight {
+  --bg-app: #080c14;
+  --bg-surface: #0e1524;
+  --bg-surface-elevated: #162035;
+  --bg-surface-hover: #1e2c47;
+  --border-subtle: #1c2842;
+  --border-strong: #2a3a5c;
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --card-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.6);
+  --color-scheme: dark;
+}
+
+/* 4. Theme: Graphite */
+.theme-graphite {
+  --bg-app: #121214;
+  --bg-surface: #18181b;
+  --bg-surface-elevated: #27272a;
+  --bg-surface-hover: #323236;
+  --border-subtle: #27272a;
+  --border-strong: #3f3f46;
+  --text-primary: #f4f4f5;
+  --text-secondary: #d4d4d8;
+  --text-muted: #a1a1aa;
+  --card-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.7);
+  --color-scheme: dark;
+}
+
+/* 5. Theme: OLED Dark */
+.theme-oled {
+  --bg-app: #000000;
+  --bg-surface: #09090b;
+  --bg-surface-elevated: #141416;
+  --bg-surface-hover: #202024;
+  --border-subtle: #1f1f23;
+  --border-strong: #2e2e33;
+  --text-primary: #ffffff;
+  --text-secondary: #e4e4e7;
+  --text-muted: #71717a;
+  --card-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.9);
+  --color-scheme: dark;
+}
+
+/* Dynamic Accent Variable Fallback */
+:root {
+  --accent-primary: #059669;
+  --accent-hover: #10b981;
+  --accent-subtle: rgba(5, 150, 105, 0.12);
+}
+
+/* Typography Font Families */
+.font-inter {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+.font-geist {
+  font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.font-jakarta {
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+.font-dmsans {
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+.font-manrope {
+  font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+.font-ibm {
+  font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+.font-lora {
+  font-family: 'Lora', Georgia, serif;
+}
+.font-sourceserif {
+  font-family: 'Source Serif 4', Georgia, serif;
+}
+.font-jetbrains {
+  font-family: 'JetBrains Mono', Consolas, monospace;
+}
+
+/* Global resets & typography */
 * {
   box-sizing: border-box;
-}
-
-::selection {
-  background-color: #059669;
-  color: #ffffff;
 }
 
 html,
@@ -26,29 +129,33 @@ body {
   padding: 0;
   min-height: 100%;
   min-height: 100dvh;
-  background-color: var(--background);
-  color: var(--foreground);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  color-scheme: var(--color-scheme);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-/* Custom subtle emerald-tinted scrollbar */
+::selection {
+  background-color: var(--accent-primary);
+  color: #ffffff;
+}
+
+/* Custom Adaptive Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
-
 ::-webkit-scrollbar-track {
   background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
-  background: #173824;
+  background: var(--border-strong);
   border-radius: 9999px;
 }
-
 ::-webkit-scrollbar-thumb:hover {
-  background: #245236;
+  background: var(--text-muted);
 }
 
 /* KaTeX equations safe wrapper & math styling */
