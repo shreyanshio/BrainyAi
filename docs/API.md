@@ -337,6 +337,77 @@ Submits a query to the multi-provider study AI engine within a session.
   }
   ```
 
+### `POST /api/chat/stream`
+Streams real-time tokens from the upstream LLM provider using Newline-Delimited JSON (NDJSON) over HTTP/1.1 or HTTP/2.
+
+* **Authentication**: 🔒 Authenticated
+* **Content-Type**: `application/json`
+* **Response Media Type**: `application/x-ndjson; charset=utf-8`
+* **Response Headers**:
+  * `X-Accel-Buffering: no`
+  * `Cache-Control: no-cache, no-transform`
+  * `Connection: keep-alive`
+* **Request Body**:
+  ```json
+  {
+    "session_id": "e4b6c3d2-8f1a-4d7e-9c2b-1a3f5e7d9c1b",
+    "message": "Explain Fermat's Little Theorem and prove it using modular arithmetic.",
+    "model": "brainy-reasoning",
+    "answer_length": "medium"
+  }
+  ```
+* **Streaming Protocol & Event Format**:
+  Each line sent over the connection is an individual JSON object terminated by `\n`.
+
+  1. **Start Event**:
+     ```json
+     {"type": "start", "request_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d", "session_id": "e4b6c3d2-8f1a-4d7e-9c2b-1a3f5e7d9c1b"}
+     ```
+  2. **Status Event**:
+     ```json
+     {"type": "status", "stage": "generating"}
+     ```
+  3. **Delta Event** (repeated for each token chunk received):
+     ```json
+     {"type": "delta", "text": "Fermat's"}
+     {"type": "delta", "text": " Little"}
+     {"type": "delta", "text": " Theorem"}
+     ```
+  4. **Done Event** (emitted upon generation finish and persistence):
+     ```json
+     {
+       "type": "done",
+       "session_id": "e4b6c3d2-8f1a-4d7e-9c2b-1a3f5e7d9c1b",
+       "new_title": "Fermat's Little Theorem",
+       "model": "brainy-reasoning",
+       "answer_length": "medium",
+       "usage": {
+         "used": 5,
+         "limit": 30,
+         "remaining": 25,
+         "reset_at": "2026-10-17T23:30:00.000Z",
+         "window_hours": 5
+       },
+       "latency_ms": {
+         "pre_gen_ms": 42.1,
+         "ttft_ms": 284.5,
+         "total_duration_ms": 1940.2
+       }
+     }
+     ```
+  5. **Error Event** (emitted if provider or network errors occur):
+     ```json
+     {
+       "type": "error",
+       "code": "ai_provider_error",
+       "message": "AI service temporarily unavailable. Please try again in a few moments.",
+       "partial": false
+     }
+     ```
+
+* **Client Cancellation**:
+  Clients can abort generation at any time by closing the HTTP stream or calling `abort()` on their `AbortController`. In-flight assistant generation will stop, and the client retains any streamed tokens up to the cancellation point.
+
 ---
 
 ## 5. Student Profile & Memory Endpoints

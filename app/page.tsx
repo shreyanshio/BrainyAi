@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   checkAuth,
   checkAuthSessionParam,
@@ -17,6 +17,7 @@ import {
   saveUserMemoryNote,
   saveUserPreferences,
   sendChatMessage,
+  streamChatMessage,
 } from '@/lib/api'
 import {
   AnswerLength,
@@ -57,6 +58,7 @@ export default function BrainyApp() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [inputMessage, setInputMessage] = useState('')
   const [isThinking, setIsThinking] = useState(false)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   // Capabilities & Preferences state
   const [activeModel, setActiveModel] = useState('brainy-balanced')
@@ -248,6 +250,13 @@ export default function BrainyApp() {
     const textToSend = (customPrompt || inputMessage).trim()
     if (!textToSend || isThinking) return
 
+    // Cancel any ongoing stream
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    const abortController = new AbortController()
+    abortControllerRef.current = abortController
+
     // Immediately switch to chat workspace
     setCurrentView('chat')
 
@@ -258,57 +267,104 @@ export default function BrainyApp() {
       created_at: new Date().toISOString(),
     }
 
-    setMessages((prev) => [...prev, userMsg])
+    // Add optimistic assistant message placeholder for streaming
+    const assistantMsgId = `assistant-${Date.now()}`
+    const initialAssistantMsg: ChatMessage = {
+      id: assistantMsgId,
+      role: 'assistant',
+      content: '',
+      created_at: new Date().toISOString(),
+      model: activeModel,
+      answer_length: activeLength,
+      isStreaming: true,
+    }
+
+    setMessages((prev) => [...prev, userMsg, initialAssistantMsg])
     if (!customPrompt) setInputMessage('')
     setIsThinking(true)
 
     try {
-      const res = await sendChatMessage({
-        session_id: activeSessionId,
-        message: textToSend,
-        model: activeModel,
-        answer_length: activeLength,
-      })
+      await streamChatMessage(
+        {
+          session_id: activeSessionId,
+          message: textToSend,
+          model: activeModel,
+          answer_length: activeLength,
+        },
+        {
+          onStart: (sessionId, requestId) => {
+            if (sessionId && sessionId !== activeSessionId) {
+              setActiveSessionId(sessionId)
+            }
+          },
+          onDelta: (deltaText, accumulatedText) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId ? { ...m, content: accumulatedText } : m
+              )
+            )
+          },
+          onDone: (doneEvent) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId
+                  ? {
+                      ...m,
+                      isStreaming: false,
+                      model: doneEvent.model,
+                      answer_length: doneEvent.answer_length,
+                    }
+                  : m
+              )
+            )
 
-      // If backend created a new session
-      if (res.session_id && res.session_id !== activeSessionId) {
-        setActiveSessionId(res.session_id)
-        const sessionTitle = res.new_title || 'New Study Session'
-        if (res.new_title) setActiveSessionTitle(res.new_title)
-        const optimisticSession: ChatSession = {
-          id: res.session_id,
-          title: sessionTitle,
-          created_at: new Date().toISOString(),
-        }
-        setSessions((prev) => [optimisticSession, ...prev.filter((s) => s.id !== res.session_id)])
-        fetchSessions().then((updated) => {
-          if (updated && updated.length > 0) setSessions(updated)
-        }).catch(() => {})
-      } else if (res.new_title) {
-        setActiveSessionTitle(res.new_title)
-        setSessions((prev) =>
-          prev.map((s) =>
-            s.id === activeSessionId ? { ...s, title: res.new_title || s.title } : s
+            // If backend created a new session
+            if (doneEvent.session_id && doneEvent.session_id !== activeSessionId) {
+              setActiveSessionId(doneEvent.session_id)
+              const sessionTitle = doneEvent.new_title || 'New Study Session'
+              if (doneEvent.new_title) setActiveSessionTitle(doneEvent.new_title)
+              const optimisticSession: ChatSession = {
+                id: doneEvent.session_id,
+                title: sessionTitle,
+                created_at: new Date().toISOString(),
+              }
+              setSessions((prev) => [
+                optimisticSession,
+                ...prev.filter((s) => s.id !== doneEvent.session_id),
+              ])
+              fetchSessions()
+                .then((updated) => {
+                  if (updated && updated.length > 0) setSessions(updated)
+                })
+                .catch(() => {})
+            } else if (doneEvent.new_title) {
+              setActiveSessionTitle(doneEvent.new_title)
+              setSessions((prev) =>
+                prev.map((s) =>
+                  s.id === activeSessionId ? { ...s, title: doneEvent.new_title || s.title } : s
+                )
+              )
+            }
+
+            if (doneEvent.usage) setUsage(doneEvent.usage)
+          },
+          onError: (err, partialText) => {
+            console.error('Streaming error callback:', err)
+          },
+        },
+        abortController.signal
+      )
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        console.log('User stopped generation')
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId ? { ...m, isStreaming: false } : m
           )
         )
-      }
-
-      // Append assistant reply
-      const assistantMsg: ChatMessage = {
-        role: 'assistant',
-        content: res.content || res.response || 'No response generated.',
-        created_at: new Date().toISOString(),
-        model: res.model,
-        answer_length: res.answer_length,
-      }
-
-      setMessages((prev) => [...prev, assistantMsg])
-      if (res.usage) setUsage(res.usage)
-    } catch (err: any) {
-      console.error('Failed to send message:', err)
-
-      // Handle 429 quota exhaustion
-      if (err?.status === 429) {
+      } else if (err?.status === 429) {
+        // Remove empty assistant placeholder
+        setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId))
         const refreshedUsage = await fetchUsage().catch(() => null)
         if (refreshedUsage) setUsage(refreshedUsage)
         setUsageModalOpen(true)
@@ -322,17 +378,31 @@ export default function BrainyApp() {
           },
         ])
       } else {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: 'assistant',
-            content: `⚠️ ${err?.message || 'Could not generate an answer. Please check connection and retry.'}`,
-            created_at: new Date().toISOString(),
-          },
-        ])
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id === assistantMsgId) {
+              if (m.content.trim()) {
+                return { ...m, isStreaming: false }
+              }
+              return {
+                ...m,
+                isStreaming: false,
+                content: `⚠️ ${err?.message || 'Could not generate an answer. Please check connection and retry.'}`,
+              }
+            }
+            return m
+          })
+        )
       }
     } finally {
       setIsThinking(false)
+      abortControllerRef.current = null
+    }
+  }
+
+  const handleStopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
     }
   }
 
@@ -472,6 +542,7 @@ export default function BrainyApp() {
               inputMessage={inputMessage}
               onInputChange={setInputMessage}
               onSendMessage={() => handleSendMessage()}
+              onStop={handleStopGeneration}
               isThinking={isThinking}
               usage={usage}
               activeModel={activeModel}

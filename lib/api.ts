@@ -13,6 +13,8 @@ import {
   UserMemoryData,
   UserProfileStats,
   UserPreferences,
+  StreamEvent,
+  StreamChatCallbacks,
 } from '@/types/api'
 
 export const AUTH_TOKEN_KEY = 'brainy_auth_token'
@@ -260,6 +262,137 @@ export async function sendChatMessage(req: ChatSendRequest): Promise<ChatSendRes
       tone: req.tone,
     }),
   })
+}
+
+export async function streamChatMessage(
+  req: ChatSendRequest,
+  callbacks: StreamChatCallbacks,
+  signal?: AbortSignal
+): Promise<string> {
+  const base = getApiBase()
+  const url = `${base}/api/chat/stream`
+  const token = getStoredToken()
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/x-ndjson',
+  }
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: JSON.stringify({
+      session_id: req.session_id,
+      message: req.message,
+      content: req.message,
+      model: req.model,
+      answer_length: req.answer_length,
+      tone: req.tone,
+    }),
+    signal,
+  })
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearStoredToken()
+    }
+    let errorData: any = null
+    try {
+      errorData = await response.json()
+    } catch {
+      // ignore non-json error body
+    }
+    const message =
+      errorData?.error || errorData?.message || `Streaming request failed (${response.status})`
+    const err = new ApiError(message, response.status, errorData)
+    callbacks.onError?.(err)
+    throw err
+  }
+
+  if (!response.body) {
+    const err = new ApiError('No response body for streaming', response.status)
+    callbacks.onError?.(err)
+    throw err
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+  let accumulatedText = ''
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      // Retain incomplete chunk in buffer
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+
+        try {
+          const event: StreamEvent = JSON.parse(trimmed)
+          switch (event.type) {
+            case 'start':
+              callbacks.onStart?.(event.session_id, event.request_id)
+              break
+            case 'status':
+              callbacks.onStatus?.(event.stage)
+              break
+            case 'delta':
+              accumulatedText += event.text
+              callbacks.onDelta?.(event.text, accumulatedText)
+              break
+            case 'done':
+              callbacks.onDone?.(event)
+              break
+            case 'error': {
+              const streamErr = new ApiError(event.message, 500, event)
+              callbacks.onError?.(streamErr, accumulatedText)
+              throw streamErr
+            }
+          }
+        } catch (parseErr) {
+          if (parseErr instanceof ApiError) throw parseErr
+          console.warn('[stream] Malformed JSON line in stream:', trimmed, parseErr)
+        }
+      }
+    }
+
+    // Flush any leftover line
+    if (buffer.trim()) {
+      try {
+        const event: StreamEvent = JSON.parse(buffer.trim())
+        if (event.type === 'delta') {
+          accumulatedText += event.text
+          callbacks.onDelta?.(event.text, accumulatedText)
+        } else if (event.type === 'done') {
+          callbacks.onDone?.(event)
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    return accumulatedText
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      return accumulatedText
+    }
+    callbacks.onError?.(err, accumulatedText)
+    throw err
+  } finally {
+    reader.releaseLock()
+  }
 }
 
 // ── Profile, Notes & Models ────────────────────────────────

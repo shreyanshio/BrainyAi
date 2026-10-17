@@ -54,6 +54,7 @@ export interface ChatMessage {
   model?: string
   answer_length?: AnswerLength
   keyTakeaway?: string
+  isStreaming?: boolean
 }
 
 export interface ChatSendRequest {
@@ -76,6 +77,38 @@ export interface ChatSendResponse {
   usage: UsageStatus
   user_message_count?: number
   message_limit?: number
+  latency_ms?: StreamLatencyMetrics
+}
+
+export type StreamStage = 'preparing' | 'searching' | 'generating'
+
+export interface StreamLatencyMetrics {
+  pre_gen_ms?: number
+  ttft_ms?: number
+  total_duration_ms?: number
+}
+
+export type StreamEvent =
+  | { type: 'start'; request_id: string; session_id: string }
+  | { type: 'status'; stage: StreamStage }
+  | { type: 'delta'; text: string }
+  | {
+      type: 'done'
+      session_id: string
+      new_title: string | null
+      model: string
+      answer_length: AnswerLength
+      usage: UsageStatus
+      latency_ms?: StreamLatencyMetrics
+    }
+  | { type: 'error'; code: string; message: string; partial?: boolean }
+
+export interface StreamChatCallbacks {
+  onStart?: (sessionId: string, requestId: string) => void
+  onStatus?: (stage: StreamStage) => void
+  onDelta?: (deltaText: string, accumulatedText: string) => void
+  onDone?: (event: Extract<StreamEvent, { type: 'done' }>) => void
+  onError?: (error: Error, partialText?: string) => void
 }
 
 export interface UserProfileStats {

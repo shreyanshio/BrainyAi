@@ -55,7 +55,7 @@ export function MarkdownRenderer({ content, className = '' }: MarkdownRendererPr
     <div className={`prose-container overflow-hidden break-words text-sm leading-relaxed ${className}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}
         components={{
           code({ className, children, ...props }) {
             const match = /language-(\w+)/.exec(className || '')

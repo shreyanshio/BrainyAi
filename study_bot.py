@@ -1151,13 +1151,27 @@ def _is_rate_err(e: Exception) -> bool:
     s = str(e).lower()
     return any(w in s for w in ["rate limit", "quota", "exceeded", "429", "402", "too many"])
 
+import threading
+import json
+
+_groq_client_pool = {}
+_groq_pool_lock = threading.Lock()
+
+def _get_groq_client(api_key: str) -> Groq:
+    with _groq_pool_lock:
+        client = _groq_client_pool.get(api_key)
+        if client is None:
+            client = Groq(api_key=api_key, timeout=30.0)
+            _groq_client_pool[api_key] = client
+        return client
+
 def _call_groq(messages, system_prompt, max_tokens):
     if not GROQ_API_KEYS:
         raise Exception("NO_KEYS: groq")
     for _ in range(len(GROQ_API_KEYS)):
         try:
             key = _rotate_key("groq", GROQ_API_KEYS)
-            client = Groq(api_key=key)
+            client = _get_groq_client(key)
             kwargs = dict(
                 model="llama-3.3-70b-versatile",
                 max_tokens=max_tokens,
@@ -1174,6 +1188,194 @@ def _call_groq(messages, system_prompt, max_tokens):
                 continue
             raise
     raise Exception("All Groq keys exhausted")
+
+def _stream_groq(messages, system_prompt, max_tokens, model_id=None):
+    if not GROQ_API_KEYS:
+        raise Exception("NO_KEYS: groq")
+
+    # High performance model routing
+    if model_id == "brainy-fast":
+        model_name = "llama-3.1-8b-instant"
+    else:
+        model_name = "llama-3.3-70b-versatile"
+
+    for _ in range(len(GROQ_API_KEYS)):
+        try:
+            key = _rotate_key("groq", GROQ_API_KEYS)
+            client = _get_groq_client(key)
+            kwargs = dict(
+                model=model_name,
+                max_tokens=max_tokens or 1024,
+                messages=[{"role": "system", "content": system_prompt}] + messages,
+                stream=True
+            )
+            response_stream = client.chat.completions.create(**kwargs)
+            for chunk in response_stream:
+                if chunk.choices and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta
+                    if delta and delta.content:
+                        yield delta.content
+            return
+        except Exception as e:
+            if _is_rate_err(e):
+                print("[groq_stream] Groq key exhausted, rotating...")
+                continue
+            raise
+    raise Exception("All Groq keys exhausted")
+
+def _stream_cerebras(messages, system_prompt, max_tokens, model_id=None):
+    if not CEREBRAS_API_KEYS:
+        raise Exception("NO_KEYS: cerebras")
+    CEREBRAS_MODELS = ["gpt-oss-120b", "zai-glm-4.7"]
+    for _ in range(len(CEREBRAS_API_KEYS)):
+        try:
+            key = _rotate_key("cerebras", CEREBRAS_API_KEYS)
+            for model in CEREBRAS_MODELS:
+                try:
+                    payload = {
+                        "model": model,
+                        "max_tokens": min(max_tokens or 1024, 2048),
+                        "messages": [{"role": "system", "content": system_prompt}] + messages,
+                        "stream": True
+                    }
+                    resp = requests.post(
+                        "https://api.cerebras.ai/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                        json=payload,
+                        stream=True,
+                        timeout=25
+                    )
+                    resp.raise_for_status()
+                    for line in resp.iter_lines():
+                        if line:
+                            line_str = line.decode("utf-8")
+                            if line_str.startswith("data: "):
+                                data_str = line_str[6:].strip()
+                                if data_str == "[DONE]":
+                                    break
+                                try:
+                                    chunk_obj = json.loads(data_str)
+                                    delta = chunk_obj["choices"][0]["delta"].get("content")
+                                    if delta:
+                                        yield delta
+                                except Exception:
+                                    continue
+                    return
+                except Exception as me:
+                    if "404" in str(me) or "not found" in str(me).lower() or "model" in str(me).lower():
+                        continue
+                    raise me
+        except Exception as e:
+            if _is_rate_err(e):
+                continue
+            raise
+    raise Exception("NO_KEYS: cerebras")
+
+def _stream_openrouter(messages, system_prompt, max_tokens, model_id=None):
+    if not OPENROUTER_API_KEYS:
+        raise Exception("NO_KEYS: openrouter")
+    OPENROUTER_MODELS = [
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "deepseek/deepseek-chat-v3.1:free",
+        "google/gemma-3-27b-it:free",
+        "qwen/qwen3-235b-a22b:free",
+    ]
+    for _ in range(len(OPENROUTER_API_KEYS)):
+        key = _rotate_key("openrouter", OPENROUTER_API_KEYS)
+        for model in OPENROUTER_MODELS:
+            try:
+                payload = {
+                    "model": model,
+                    "max_tokens": max_tokens or 1024,
+                    "messages": [{"role": "system", "content": system_prompt}] + messages,
+                    "stream": True
+                }
+                resp = requests.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {key}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "https://brainyai.cenai.workers.dev",
+                        "X-Title": "BrainyAi"
+                    },
+                    json=payload,
+                    stream=True,
+                    timeout=25
+                )
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if line:
+                        line_str = line.decode("utf-8")
+                        if line_str.startswith("data: "):
+                            data_str = line_str[6:].strip()
+                            if data_str == "[DONE]":
+                                break
+                            try:
+                                chunk_obj = json.loads(data_str)
+                                delta = chunk_obj["choices"][0]["delta"].get("content")
+                                if delta:
+                                    yield delta
+                            except Exception:
+                                continue
+                return
+            except Exception as e:
+                if _is_rate_err(e) or "404" in str(e):
+                    continue
+                raise
+    raise Exception("NO_KEYS: openrouter")
+
+def _stream_gemini(messages, system_prompt, max_tokens, model_id=None):
+    if not GEMINI_API_KEYS:
+        raise Exception("NO_KEYS: gemini")
+    GEMINI_MODELS = [
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-3-flash-preview",
+    ]
+    for _ in range(len(GEMINI_API_KEYS)):
+        try:
+            key = _rotate_key("gemini", GEMINI_API_KEYS)
+            contents = []
+            for m in messages:
+                role = "user" if m["role"] == "user" else "model"
+                contents.append({"role": role, "parts": [{"text": m["content"]}]})
+            payload = {
+                "system_instruction": {"parts": [{"text": system_prompt}]},
+                "contents": contents,
+                "generationConfig": {"maxOutputTokens": max_tokens or 1024}
+            }
+            for model in GEMINI_MODELS:
+                try:
+                    resp = requests.post(
+                        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse&key={key}",
+                        json=payload,
+                        stream=True,
+                        timeout=25
+                    )
+                    resp.raise_for_status()
+                    for line in resp.iter_lines():
+                        if line:
+                            line_str = line.decode("utf-8")
+                            if line_str.startswith("data: "):
+                                try:
+                                    chunk_obj = json.loads(line_str[6:].strip())
+                                    candidates = chunk_obj.get("candidates", [])
+                                    if candidates:
+                                        parts = candidates[0].get("content", {}).get("parts", [])
+                                        if parts and "text" in parts[0]:
+                                            yield parts[0]["text"]
+                                except Exception:
+                                    continue
+                    return
+                except Exception as me:
+                    if "404" in str(me):
+                        continue
+                    raise me
+        except Exception as e:
+            if _is_rate_err(e):
+                continue
+            raise
+    raise Exception("NO_KEYS: gemini")
 
 def _call_gemini(messages, system_prompt, max_tokens):
     if not GEMINI_API_KEYS:
@@ -2080,9 +2282,69 @@ def ai_call(messages, system_prompt=None, max_tokens=None):
         except Exception as e:
             if "NO_KEYS:" in str(e):
                 continue
-            print(f"❌ {name}: {str(e)[:60]}")
-            last_err = e
     raise Exception(f"All providers failed: {last_err}")
+
+def ai_stream(messages, system_prompt=None, max_tokens=None, model_id=None):
+    """
+    Real-time streaming token generator with zero mock delay and pre-output provider failover.
+    Yields string text chunks as they arrive from the upstream model.
+    If the active provider encounters an error before yielding the first chunk,
+    it automatically falls back to the next eligible provider without dropping the stream.
+    """
+    prompt = system_prompt or SYSTEM_PROMPT
+    q_type = detect_question_type(messages)
+
+    if max_tokens is None:
+        TOKEN_MAP = {
+            "numerical": 1200,
+            "detailed":  1000,
+            "gk":        700,
+            "creative":  800,
+            "simple":    500,
+        }
+        max_tokens = TOKEN_MAP.get(q_type, 600)
+
+    # Streaming provider hierarchy: Groq is fastest (~250-700 tok/s), followed by Cerebras, Gemini, OpenRouter
+    streaming_providers = [
+        ("Groq", _stream_groq),
+        ("Cerebras", _stream_cerebras),
+        ("Gemini", _stream_gemini),
+        ("OpenRouter", _stream_openrouter),
+    ]
+
+    last_err = None
+    for name, stream_fn in streaming_providers:
+        started = False
+        try:
+            for delta in stream_fn(messages, prompt, max_tokens, model_id=model_id):
+                if delta:
+                    started = True
+                    yield delta
+            if started:
+                return
+        except Exception as e:
+            if started:
+                # Broken midway: notify caller of interruption
+                print(f"[ai_stream] Interrupted mid-stream on {name}: {e}")
+                raise
+            else:
+                # Failed before first token: can safely fall back to next provider
+                if "NO_KEYS:" not in str(e):
+                    print(f"[ai_stream] Provider {name} failed before start ({e}), trying next provider...")
+                last_err = e
+                continue
+
+    # Resilient fallback: If no streaming provider could yield, fall back to ai_call
+    try:
+        print("[ai_stream] All streaming providers exhausted, attempting non-streaming ai_call fallback...")
+        fallback_text = ai_call(messages, system_prompt=prompt, max_tokens=max_tokens)
+        if fallback_text:
+            yield fallback_text
+            return
+    except Exception as fe:
+        last_err = fe
+
+    raise Exception(f"All AI streaming providers failed: {last_err}")
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #   IMAGE ANALYSIS ENGINE

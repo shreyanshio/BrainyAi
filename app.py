@@ -17,11 +17,12 @@ import json
 import urllib.parse
 import random
 import logging
+import time
 import requests
 from datetime import datetime, timezone, timedelta
 from html import escape
 from functools import wraps
-from flask import Flask, request, jsonify, session, send_from_directory, redirect
+from flask import Flask, request, jsonify, session, send_from_directory, redirect, Response, stream_with_context
 from flask_cors import CORS
 
 logging.basicConfig(level=logging.INFO)
@@ -1574,16 +1575,12 @@ def view_shared_answer(share_id):
 </html>"""
 
 
-@app.route("/api/chat/send", methods=["POST"])
-@login_required
-@security_guard
-def send_message():
-    user_id = session["user_id"]
-    first_name = session["first_name"]
-    username = session["username"]
-    ip = request.remote_addr or "unknown"
-
-    data = request.json or {}
+def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: str, ip: str):
+    """
+    Shared pre-generation pipeline for both /api/chat/send and /api/chat/stream.
+    Ensures identical sanitization, quota consumption, intent detection,
+    and prompt construction without any code divergence.
+    """
     session_id = data.get("session_id")
     # Unified contract: accept both 'message' and 'content'
     content = (data.get("message") or data.get("content") or "").strip()
@@ -1591,11 +1588,11 @@ def send_message():
     answer_length = (data.get("answer_length") or "medium").strip().lower()
 
     if not content:
-        return jsonify({"error": "Message content cannot be empty"}), 400
+        return None, jsonify({"error": "Message content cannot be empty"}), 400
 
     # Check if user account is suspended
     if is_user_suspended(user_id):
-        return jsonify({
+        return None, jsonify({
             "error": "account_suspended",
             "message": "Your account has been suspended by an administrator."
         }), 403
@@ -1618,17 +1615,17 @@ def send_message():
     # Blacklist check
     if is_blacklisted(content):
         log_security_event("blacklist_blocked", ip, user_id, content[:100])
-        return jsonify({"error": "Invalid input detected."}), 403
+        return None, jsonify({"error": "Invalid input detected."}), 403
 
     # Per-user rate limit: 10 messages per minute
     if not check_rate_limit("user_{}".format(user_id), limit=10, window=60):
         log_security_event("user_rate_limit", ip, user_id, "")
-        return jsonify({"error": "Message rate limit reached. Please wait a moment."}), 429
+        return None, jsonify({"error": "Message rate limit reached. Please wait a moment."}), 429
 
     # Enforce atomic 30 messages / 5 hours user quota BEFORE spending AI tokens
     allowed, quota_status = consume_user_quota(user_id)
     if not allowed:
-        return jsonify({
+        return None, jsonify({
             "error": "quota_exceeded",
             "message": f"You have reached your {QUOTA_WINDOW_HOURS}-hour limit of {GLOBAL_MESSAGE_LIMIT} messages. Quota resets at {quota_status['reset_at']}.",
             "usage": quota_status,
@@ -1639,7 +1636,7 @@ def send_message():
     # Save user message
     sb_insert_message(session_id, "user", content)
 
-    # Fetch last 15 messages (now including the one we just saved) for context
+    # Fetch last 15 messages (including the one just saved) for context
     messages_context = [{"role": m["role"], "content": m["content"]} for m in sb_get_recent_messages(session_id, 15)]
 
     # Run intent detection
@@ -1781,8 +1778,42 @@ def send_message():
     if extra:
         system_prompt = system_prompt + "\n\n" + extra
 
+    return {
+        "session_id": session_id,
+        "sess": sess,
+        "content": content,
+        "model_id": model_id,
+        "answer_length": answer_length,
+        "messages_context": messages_context,
+        "system_prompt": system_prompt,
+        "max_tok": max_tok,
+        "quota_status": quota_status,
+    }, None, 200
+
+
+@app.route("/api/chat/send", methods=["POST"])
+@login_required
+@security_guard
+def send_message():
+    user_id = session["user_id"]
+    first_name = session["first_name"]
+    username = session["username"]
+    ip = request.remote_addr or "unknown"
+
+    data = request.json or {}
+    prep, err_resp, status = _prepare_chat_request(data, user_id, first_name, username, ip)
+    if err_resp:
+        return err_resp, status
+
+    session_id = prep["session_id"]
+    content = prep["content"]
+    model_id = prep["model_id"]
+    answer_length = prep["answer_length"]
+    quota_status = prep["quota_status"]
+    sess = prep["sess"]
+
     try:
-        response_text = study_bot.ai_call(messages_context, system_prompt, max_tok)
+        response_text = study_bot.ai_call(prep["messages_context"], prep["system_prompt"], prep["max_tok"])
         response_text = study_bot.clean_response(response_text)
     except Exception as e:
         logger.error("AI Call failed in Web App: %s", e)
@@ -1826,6 +1857,141 @@ def send_message():
         "user_message_count": quota_status["used"],
         "message_limit": GLOBAL_MESSAGE_LIMIT
     })
+
+
+@app.route("/api/chat/stream", methods=["POST"])
+@login_required
+@security_guard
+def stream_message():
+    """
+    Real-time NDJSON token streaming endpoint with precise latency profiling.
+    Yields start, status, delta, done, and error events as newline-delimited JSON.
+    """
+    user_id = session["user_id"]
+    first_name = session["first_name"]
+    username = session["username"]
+    ip = request.remote_addr or "unknown"
+    t_start = time.perf_counter()
+
+    data = request.json or {}
+    prep, err_resp, status = _prepare_chat_request(data, user_id, first_name, username, ip)
+    if err_resp:
+        return err_resp, status
+
+    t_prep_done = time.perf_counter()
+    pre_gen_ms = round((t_prep_done - t_start) * 1000, 2)
+
+    def generate():
+        request_id = str(uuid.uuid4())
+        session_id = prep["session_id"]
+        model_id = prep["model_id"]
+        answer_length = prep["answer_length"]
+        quota_status = prep["quota_status"]
+        sess = prep["sess"]
+        content = prep["content"]
+
+        # Yield start event
+        yield json.dumps({
+            "type": "start",
+            "request_id": request_id,
+            "session_id": session_id
+        }) + "\n"
+
+        # Yield status event
+        yield json.dumps({
+            "type": "status",
+            "stage": "generating"
+        }) + "\n"
+
+        tokens = []
+        first_token_time = None
+        has_yielded = False
+
+        try:
+            for chunk in study_bot.ai_stream(
+                prep["messages_context"],
+                system_prompt=prep["system_prompt"],
+                max_tokens=prep["max_tok"],
+                model_id=model_id
+            ):
+                if not chunk:
+                    continue
+                if not has_yielded:
+                    first_token_time = time.perf_counter()
+                    has_yielded = True
+                tokens.append(chunk)
+                yield json.dumps({
+                    "type": "delta",
+                    "text": chunk
+                }) + "\n"
+
+            t_end = time.perf_counter()
+            total_duration_ms = round((t_end - t_start) * 1000, 2)
+            ttft_ms = round((first_token_time - t_start) * 1000, 2) if first_token_time else total_duration_ms
+
+            full_text = "".join(tokens)
+            clean_text = study_bot.clean_response(full_text)
+
+            # Insert assistant message into Supabase
+            sb_insert_message(session_id, "assistant", clean_text)
+
+            # Auto-title if new session
+            title_updated = None
+            if sess.get("title") in ("New Chat", "New Study Session", "", None):
+                words = content.split()[:5]
+                new_title = " ".join(words) + ("..." if len(content.split()) > 5 else "")
+                sb_rename_session(session_id, user_id, new_title)
+                title_updated = new_title
+
+            # Sync Telegram memory
+            try:
+                study_bot.load_user_into_memory(user_id, first_name, username)
+                if user_id in study_bot.user_conversations:
+                    study_bot.user_conversations[user_id].append({"role": "user", "content": content})
+                    study_bot.user_conversations[user_id].append({"role": "assistant", "content": clean_text})
+                    study_bot.trim_history(user_id)
+                    study_bot.save_user_memory_async(user_id)
+            except Exception as se:
+                logger.warning("Sync to memory failed: %s", se)
+
+            yield json.dumps({
+                "type": "done",
+                "session_id": session_id,
+                "new_title": title_updated,
+                "model": model_id,
+                "answer_length": answer_length,
+                "usage": quota_status,
+                "latency_ms": {
+                    "pre_gen_ms": pre_gen_ms,
+                    "ttft_ms": ttft_ms,
+                    "total_duration_ms": total_duration_ms
+                }
+            }) + "\n"
+
+        except Exception as e:
+            logger.error("Error during streaming generation: %s", e)
+            if not has_yielded:
+                # Refund quota if error happened before any tokens emitted
+                refund_user_quota(user_id)
+                yield json.dumps({
+                    "type": "error",
+                    "code": "ai_provider_error",
+                    "message": "AI service temporarily unavailable. Please try again in a few moments.",
+                    "partial": False
+                }) + "\n"
+            else:
+                yield json.dumps({
+                    "type": "error",
+                    "code": "stream_interrupted",
+                    "message": "Generation was interrupted.",
+                    "partial": True
+                }) + "\n"
+
+    response = Response(stream_with_context(generate()), mimetype="application/x-ndjson; charset=utf-8")
+    response.headers["X-Accel-Buffering"] = "no"
+    response.headers["Cache-Control"] = "no-cache, no-transform"
+    response.headers["Connection"] = "keep-alive"
+    return response
 
 
 # ── PROFILE & STATS APIS ──

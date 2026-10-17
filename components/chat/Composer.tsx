@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useRef, useEffect, useState } from 'react'
-import { ArrowUp, Mic, MicOff, Clock } from 'lucide-react'
+import { ArrowUp, Mic, MicOff, Clock, Square } from 'lucide-react'
 import { AnswerLength, ChatWidthOption, UsageStatus } from '@/types/api'
 import { ANSWER_LENGTH_OPTIONS, CAPABILITY_MODELS } from '@/lib/constants'
 
@@ -9,6 +9,7 @@ interface ComposerProps {
   inputMessage: string
   onInputChange: (val: string) => void
   onSendMessage: () => void
+  onStop?: () => void
   isThinking: boolean
   usage: UsageStatus | null
   activeModel: string
@@ -23,6 +24,7 @@ export function Composer({
   inputMessage,
   onInputChange,
   onSendMessage,
+  onStop,
   isThinking,
   usage,
   activeModel,
@@ -184,15 +186,27 @@ export function Composer({
               {isListening ? <MicOff size={15} /> : <Mic size={15} />}
             </button>
 
-            <button
-              type="button"
-              onClick={onSendMessage}
-              disabled={!inputMessage.trim() || isThinking || isExhausted}
-              aria-label="Send message"
-              className="p-2 rounded-xl bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 hover:opacity-90 disabled:opacity-30 transition shadow-xs cursor-pointer"
-            >
-              <ArrowUp size={15} />
-            </button>
+            {isThinking ? (
+              <button
+                type="button"
+                onClick={onStop}
+                aria-label="Stop generation"
+                title="Stop generation"
+                className="p-2 rounded-xl bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 hover:opacity-90 transition shadow-xs cursor-pointer flex items-center justify-center"
+              >
+                <Square size={13} className="fill-current" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onSendMessage}
+                disabled={!inputMessage.trim() || isExhausted}
+                aria-label="Send message"
+                className="p-2 rounded-xl bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 hover:opacity-90 disabled:opacity-30 transition shadow-xs cursor-pointer"
+              >
+                <ArrowUp size={15} />
+              </button>
+            )}
           </div>
         </div>
       </div>
