@@ -23,28 +23,42 @@ logger = logging.getLogger(__name__)
 # Import AI + Supabase helpers from study_bot (same Supabase project the Telegram bot uses)
 import study_bot
 
-# Security module — input sanitization, rate limiting, blacklist, headers
+# Security module — input sanitization, rate limiting, blacklist, headers, token auth
 from security import (
     security_guard, login_required, sanitize_input,
-    is_blacklisted, check_rate_limit, log_security_event, security_headers
+    is_blacklisted, check_rate_limit, log_security_event, security_headers,
+    create_auth_token, verify_auth_token, _get_auth_secret_key
 )
 
 app = Flask(__name__)
 
-_allowed_origins = os.getenv("ALLOWED_ORIGINS")
-if _allowed_origins:
-    CORS(app, supports_credentials=True, origins=[o.strip() for o in _allowed_origins.split(",")])
-else:
-    CORS(app, supports_credentials=True)  # Enable cross-origin session authentication
+DEFAULT_ALLOWED_ORIGINS = [
+    "https://brainyai.cenai.workers.dev",
+    "https://brainy.cenai.workers.dev",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5000",
+    "http://127.0.0.1:5000",
+]
 
-import secrets as _secrets
-_secret_key = os.getenv("FLASK_SECRET_KEY")
-if not _secret_key:
-    _secret_key = _secrets.token_hex(32)
-    print("[WARNING] FLASK_SECRET_KEY is not set! Using a random one-off key for this "
-          "process — all users will be logged out on every restart/deploy. Set "
-          "FLASK_SECRET_KEY in Railway's environment variables to fix this.")
-app.secret_key = _secret_key
+_custom_origins = os.getenv("ALLOWED_ORIGINS")
+if _custom_origins:
+    for o in _custom_origins.split(","):
+        clean_o = o.strip()
+        if clean_o and clean_o not in DEFAULT_ALLOWED_ORIGINS:
+            DEFAULT_ALLOWED_ORIGINS.append(clean_o)
+
+CORS(
+    app,
+    supports_credentials=True,
+    origins=DEFAULT_ALLOWED_ORIGINS,
+    allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
+    expose_headers=["Content-Type", "Authorization"],
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+)
+
+# Persistent, synchronized secret key for sessions and tokens
+app.secret_key = _get_auth_secret_key()
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = os.getenv("SESSION_COOKIE_SAMESITE", "None")
 app.config["SESSION_COOKIE_SECURE"] = os.getenv("SESSION_COOKIE_SECURE", "True").lower() == "true"
@@ -94,13 +108,28 @@ def is_admin_session() -> bool:
 
 
 def admin_required(f):
-    """Decorator: only allow logged-in users on the admin allowlist."""
+    """Decorator: strictly enforce authenticated administrator access.
+    Supports both Authorization: Bearer <token> and verified Flask session cookies.
+    """
     @wraps(f)
     def decorated(*args, **kwargs):
+        # 1. Check Bearer token from Authorization header if session not yet set
+        if "user_id" not in session:
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:].strip()
+                payload = verify_auth_token(token)
+                if payload and payload.get("sub"):
+                    session["user_id"] = payload["sub"]
+                    session["username"] = payload.get("username", "")
+                    session["first_name"] = payload.get("name", "Admin")
+                    session["email"] = payload.get("email", "")
+                    session["role"] = payload.get("role", "")
+
         if "user_id" not in session:
             return jsonify({"error": "Authentication required"}), 401
         if not is_admin_session():
-            return jsonify({"error": "Admin access required"}), 403
+            return jsonify({"error": "Forbidden - Administrator access required"}), 403
         return f(*args, **kwargs)
     return decorated
 
@@ -186,9 +215,9 @@ def unmask_secure_hash(stored_val: str) -> str:
         logger.warning("Decryption of masked hash failed: %s", e)
         return stored_val
 
-# ── GLOBAL USER MESSAGE QUOTA: 30 MESSAGES PER 8 HOURS ──
+# ── GLOBAL USER MESSAGE QUOTA: 30 MESSAGES PER 5 HOURS ──
 GLOBAL_MESSAGE_LIMIT = 30
-QUOTA_WINDOW_HOURS = 8
+QUOTA_WINDOW_HOURS = 5
 QUOTA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_quotas.json")
 
 import threading
@@ -215,7 +244,7 @@ def _save_user_quotas():
 _load_user_quotas()
 
 def get_user_quota(user_id: int | str) -> dict:
-    """Return current quota status, automatically rolling over expired 8-hour windows."""
+    """Return current quota status, automatically rolling over expired 5-hour windows."""
     with _quota_lock:
         uid_str = str(user_id)
         now = datetime.now(timezone.utc)
@@ -253,7 +282,7 @@ def get_user_quota(user_id: int | str) -> dict:
         }
 
 def consume_user_quota(user_id: int | str) -> tuple[bool, dict]:
-    """Atomically check and consume 1 message credit from the user's 8h quota."""
+    """Atomically check and consume 1 message credit from the user's 5h quota."""
     with _quota_lock:
         status = get_user_quota(user_id)
         if status["used"] >= GLOBAL_MESSAGE_LIMIT:
@@ -263,6 +292,38 @@ def consume_user_quota(user_id: int | str) -> tuple[bool, dict]:
         _user_quotas[uid_str]["count"] += 1
         _save_user_quotas()
         return True, get_user_quota(user_id)
+
+# ── SUSPENDED USERS MANAGEMENT ──
+SUSPENDED_USERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "suspended_users.json")
+_suspended_users = set()
+_suspend_lock = threading.Lock()
+
+def _load_suspended_users():
+    global _suspended_users
+    if os.path.exists(SUSPENDED_USERS_FILE):
+        try:
+            with open(SUSPENDED_USERS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                _suspended_users = set(int(uid) for uid in data)
+        except Exception as e:
+            logger.warning("Error loading suspended users: %s", e)
+
+def _save_suspended_users():
+    try:
+        with open(SUSPENDED_USERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(list(_suspended_users), f)
+    except Exception as e:
+        logger.warning("Error saving suspended users: %s", e)
+
+_load_suspended_users()
+
+def is_user_suspended(user_id: int | str) -> bool:
+    try:
+        uid = int(user_id)
+        with _suspend_lock:
+            return uid in _suspended_users
+    except Exception:
+        return False
 
 MODELS_CATALOG = [
     {
@@ -751,6 +812,7 @@ def auth_init():
 
 
 @app.route("/api/auth/status/<session_id>", methods=["GET"])
+@app.route("/api/auth/poll/<session_id>", methods=["GET"])
 def auth_status(session_id):
     sess = auth_sessions.get(session_id)
     if not sess:
@@ -765,8 +827,10 @@ def auth_status(session_id):
         if user.get("username"):
             user["photo_url"] = f"https://t.me/i/userpic/320/{user['username']}.jpg"
         session["photo_url"] = user.get("photo_url", "")
+        role = "admin" if is_admin_session() else "student"
+        token = create_auth_token(user["id"], user.get("username", ""), user["first_name"], "", role)
         auth_sessions.pop(session_id, None)
-        return jsonify({"status": "authenticated", "user": user})
+        return jsonify({"status": "authenticated", "user": user, "token": token})
 
     return jsonify({"status": "pending"})
 
@@ -915,7 +979,9 @@ def auth_initdata():
             user_agent=request.headers.get("User-Agent", "")
         )
 
-        return jsonify({"status": "authenticated", "user": user_data})
+        role = "admin" if is_admin_session() else "student"
+        token = create_auth_token(user_data["id"], user_data.get("username", ""), user_data.get("first_name", ""), "", role)
+        return jsonify({"status": "authenticated", "user": user_data, "token": token})
     return jsonify({"error": "Invalid signature"}), 401
 
 
@@ -954,22 +1020,46 @@ def auth_web():
         user_agent=request.headers.get("User-Agent", "")
     )
 
+    role = "admin" if is_admin_session() else "student"
+    token = create_auth_token(user_id, username, name, "", role)
+
     return jsonify({
         "status": "authenticated",
         "user": {
             "id": user_id,
             "first_name": name,
             "username": username
-        }
+        },
+        "token": token
     })
 
 
 @app.route("/api/auth/me", methods=["GET"])
 def auth_me():
-    """Check current authentication status."""
+    """Check current authentication status. Supports Bearer token or session cookie."""
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        payload = verify_auth_token(auth_header[7:].strip())
+        if payload and payload.get("sub"):
+            session["user_id"] = payload["sub"]
+            session["username"] = payload.get("username", "")
+            session["first_name"] = payload.get("name", "Student")
+            session["email"] = payload.get("email", "")
+            session["role"] = payload.get("role", "student")
+
     user_id = session.get("user_id")
     if not user_id:
         return jsonify({"authenticated": False}), 401
+
+    role = "admin" if is_admin_session() else "student"
+    token = create_auth_token(
+        user_id,
+        session.get("username", ""),
+        session.get("first_name", "Student"),
+        session.get("email", ""),
+        role
+    )
+
     return jsonify({
         "authenticated": True,
         "user": {
@@ -977,7 +1067,8 @@ def auth_me():
             "first_name": session.get("first_name", "Student"),
             "username": session.get("username", ""),
             "photo_url": session.get("photo_url", "")
-        }
+        },
+        "token": token
     })
 
 
@@ -1051,6 +1142,9 @@ def auth_google():
         user_agent=request.headers.get("User-Agent", "")
     )
 
+    role = "admin" if is_admin_session() else "student"
+    token_str = create_auth_token(user_id, username, name, email, role)
+
     return jsonify({
         "status": "authenticated",
         "user": {
@@ -1060,7 +1154,8 @@ def auth_google():
             "email": email,
             "picture": picture,
             "photo_url": picture
-        }
+        },
+        "token": token_str
     })
 
 
@@ -1092,13 +1187,17 @@ def auth_student_pass():
         user_agent=request.headers.get("User-Agent", "")
     )
 
+    role = "admin" if is_admin_session() else "student"
+    token = create_auth_token(user_id, username, name, "", role)
+
     return jsonify({
         "status": "authenticated",
         "user": {
             "id": user_id,
             "first_name": name,
             "username": username
-        }
+        },
+        "token": token
     })
 
 
@@ -1118,15 +1217,156 @@ def admin_check():
     return jsonify({"is_admin": is_admin_session()})
 
 
+@app.route("/api/admin/overview", methods=["GET"])
 @app.route("/api/admin/usage", methods=["GET"])
 @admin_required
-def admin_usage():
-    """Admin-only: registered users, login activity, and message counts."""
+def admin_overview():
+    """Admin-only: registered users, login activity, session and message counts from Supabase."""
     try:
         return jsonify(build_usage_report())
     except Exception as e:
-        logger.error("admin_usage error: %s", e)
+        logger.error("admin_overview error: %s", e)
         return jsonify({"error": "Failed to build usage report"}), 500
+
+
+@app.route("/api/admin/users", methods=["GET"])
+@admin_required
+def admin_users():
+    """Admin-only: list registered users with optional search query (?q=), pagination, and suspension state."""
+    try:
+        q = (request.args.get("q") or "").strip().lower()
+        report = build_usage_report()
+        users = report.get("users", [])
+
+        for u in users:
+            uid = u.get("user_id")
+            u["is_suspended"] = is_user_suspended(uid)
+            u["is_admin"] = uid in ADMIN_USER_IDS or (u.get("username") or "").lower() in ADMIN_USERNAMES
+
+        if q:
+            users = [
+                u for u in users
+                if q in str(u.get("user_id", "")).lower()
+                or q in (u.get("username") or "").lower()
+                or q in (u.get("first_name") or "").lower()
+                or any(q in lt.lower() for lt in u.get("login_types", []))
+            ]
+
+        try:
+            page = max(1, int(request.args.get("page", 1)))
+        except (ValueError, TypeError):
+            page = 1
+        try:
+            limit = min(100, max(1, int(request.args.get("limit", 25))))
+        except (ValueError, TypeError):
+            limit = 25
+
+        total = len(users)
+        start = (page - 1) * limit
+        paged_users = users[start : start + limit]
+
+        return jsonify({
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "users": paged_users
+        })
+    except Exception as e:
+        logger.error("admin_users error: %s", e)
+        return jsonify({"error": "Failed to fetch users"}), 500
+
+
+@app.route("/api/admin/users/<int:target_user_id>/suspend", methods=["POST"])
+@admin_required
+def admin_toggle_suspend(target_user_id: int):
+    """Admin-only: toggle suspension status for a user."""
+    current_admin_id = session.get("user_id")
+    if target_user_id == current_admin_id:
+        return jsonify({"error": "Cannot suspend your own admin account"}), 400
+
+    with _suspend_lock:
+        if target_user_id in _suspended_users:
+            _suspended_users.remove(target_user_id)
+            state = False
+        else:
+            _suspended_users.add(target_user_id)
+            state = True
+        _save_suspended_users()
+
+    logger.info("Admin %s toggled suspension for user %s -> %s", current_admin_id, target_user_id, state)
+    return jsonify({
+        "status": "ok",
+        "user_id": target_user_id,
+        "is_suspended": state
+    })
+
+
+@app.route("/api/admin/users/<int:target_user_id>", methods=["DELETE"])
+@admin_required
+def admin_delete_user(target_user_id: int):
+    """Admin-only: permanently delete a user and their sessions/messages across Supabase & memory."""
+    current_admin_id = session.get("user_id")
+    if target_user_id == current_admin_id:
+        return jsonify({"error": "Cannot delete your own admin account"}), 400
+
+    MEM_SESSIONS.pop(target_user_id, None)
+    with _suspend_lock:
+        _suspended_users.discard(target_user_id)
+        _save_suspended_users()
+
+    try:
+        requests.delete(f"{SUPABASE_URL}/rest/v1/chat_sessions?user_id=eq.{target_user_id}", headers=_sb_headers(), timeout=8)
+        requests.delete(f"{SUPABASE_URL}/rest/v1/user_logins?user_id=eq.{target_user_id}", headers=_sb_headers(), timeout=8)
+        requests.delete(f"{SUPABASE_URL}/rest/v1/user_memory?user_id=eq.{target_user_id}", headers=_sb_headers(), timeout=8)
+    except Exception as e:
+        logger.warning("Supabase cleanup on delete user %s error: %s", target_user_id, e)
+
+    logger.info("Admin %s deleted user %s", current_admin_id, target_user_id)
+    return jsonify({"status": "ok", "deleted_user_id": target_user_id})
+
+
+@app.route("/api/admin/health", methods=["GET"])
+@admin_required
+def admin_health():
+    """Real system health telemetry: Supabase status, latency, AI provider configuration, and server metrics."""
+    now = datetime.now(timezone.utc).isoformat()
+    sb_status = "unconfigured"
+    sb_latency_ms = None
+    if SUPABASE_URL and SUPABASE_KEY:
+        t0 = time.time()
+        try:
+            r = requests.get(f"{SUPABASE_URL}/rest/v1/user_logins?limit=1", headers=_sb_headers(), timeout=5)
+            sb_latency_ms = round((time.time() - t0) * 1000, 2)
+            sb_status = "healthy" if r.status_code in (200, 206) else f"status_{r.status_code}"
+        except Exception as e:
+            sb_status = "unreachable"
+            sb_latency_ms = round((time.time() - t0) * 1000, 2)
+
+    groq_configured = bool(os.getenv("GROQ_API_KEY") or getattr(study_bot, "GROQ_API_KEY", None))
+    openrouter_configured = bool(os.getenv("OPENROUTER_API_KEY") or getattr(study_bot, "OPENROUTER_API_KEY", None))
+    gemini_configured = bool(os.getenv("GEMINI_API_KEY") or getattr(study_bot, "GEMINI_API_KEY", None))
+
+    return jsonify({
+        "status": "healthy" if sb_status == "healthy" else "degraded",
+        "timestamp": now,
+        "supabase": {
+            "configured": bool(SUPABASE_URL and SUPABASE_KEY),
+            "status": sb_status,
+            "latency_ms": sb_latency_ms
+        },
+        "providers": {
+            "groq": {"configured": groq_configured, "status": "active" if groq_configured else "missing_key"},
+            "openrouter": {"configured": openrouter_configured, "status": "active" if openrouter_configured else "missing_key"},
+            "gemini": {"configured": gemini_configured, "status": "active" if gemini_configured else "missing_key"}
+        },
+        "server": {
+            "quota_window_hours": QUOTA_WINDOW_HOURS,
+            "global_message_limit": GLOBAL_MESSAGE_LIMIT,
+            "sessions_cached": len(MEM_SESSIONS),
+            "messages_cached": len(MEM_MESSAGES),
+            "suspended_users_count": len(_suspended_users)
+        }
+    })
 
 
 # login_required and security_guard are imported from security.py
@@ -1182,7 +1422,7 @@ def delete_session(session_id):
 @app.route("/api/usage", methods=["GET"])
 @login_required
 def get_usage():
-    """Returns the user's global 8-hour window quota status."""
+    """Returns the user's global 5-hour window quota status."""
     user_id = session["user_id"]
     return jsonify(get_user_quota(user_id))
 
@@ -1283,6 +1523,13 @@ def send_message():
     if not content:
         return jsonify({"error": "Message content cannot be empty"}), 400
 
+    # Check if user account is suspended
+    if is_user_suspended(user_id):
+        return jsonify({
+            "error": "account_suspended",
+            "message": "Your account has been suspended by an administrator."
+        }), 403
+
     # Ensure session exists or auto-create it
     if not session_id:
         new_sess = sb_create_session(user_id, "New Study Session")
@@ -1306,12 +1553,12 @@ def send_message():
         log_security_event("user_rate_limit", ip, user_id, "")
         return jsonify({"error": "Message rate limit reached. Please wait a moment."}), 429
 
-    # Enforce atomic 30 messages / 8 hours user quota BEFORE spending AI tokens
+    # Enforce atomic 30 messages / 5 hours user quota BEFORE spending AI tokens
     allowed, quota_status = consume_user_quota(user_id)
     if not allowed:
         return jsonify({
             "error": "quota_exceeded",
-            "message": f"You have reached your 8-hour limit of {GLOBAL_MESSAGE_LIMIT} messages. Quota resets at {quota_status['reset_at']}.",
+            "message": f"You have reached your {QUOTA_WINDOW_HOURS}-hour limit of {GLOBAL_MESSAGE_LIMIT} messages. Quota resets at {quota_status['reset_at']}.",
             "usage": quota_status,
             "user_message_count": quota_status["used"],
             "message_limit": GLOBAL_MESSAGE_LIMIT
@@ -1381,7 +1628,7 @@ def send_message():
     # Ground the model in real facts about this user's quota
     system_prompt += (
         f"\n\nFACTS ABOUT THIS USER (answer accurately if asked, don't guess):\n"
-        f"- The user has an 8-hour quota of {GLOBAL_MESSAGE_LIMIT} messages total across Brainy.\n"
+        f"- The user has a {QUOTA_WINDOW_HOURS}-hour quota of {GLOBAL_MESSAGE_LIMIT} messages total across Brainy.\n"
         f"- {quota_status['used']} messages used so far in this window, {quota_status['remaining']} remaining.\n"
         f"- The window resets at {quota_status['reset_at']}.\n"
         f"- The last 15 messages of a session are kept as context."

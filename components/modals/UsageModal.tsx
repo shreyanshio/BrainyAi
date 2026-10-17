@@ -16,7 +16,7 @@ export function UsageModal({ isOpen, onClose, usage }: UsageModalProps) {
   const used = usage ? usage.used : 0
   const limit = usage ? usage.limit : 30
   const remaining = usage ? usage.remaining : 30
-  const windowHours = usage ? usage.window_hours : 8
+  const windowHours = usage ? usage.window_hours : 5
 
   // Calculate remaining time countdown
   const resetInfo = useMemo(() => {
@@ -58,7 +58,7 @@ export function UsageModal({ isOpen, onClose, usage }: UsageModalProps) {
         <div className="flex items-center justify-between pb-4 border-b border-[var(--border-subtle)]">
           <div className="flex items-center gap-2">
             <Clock size={16} className="text-emerald-500" />
-            <h3 className="font-bold text-sm text-[var(--text-primary)]">8-Hour Message Quota</h3>
+            <h3 className="font-bold text-sm text-[var(--text-primary)]">5-Hour Message Quota</h3>
           </div>
           <button
             onClick={onClose}
@@ -112,7 +112,7 @@ export function UsageModal({ isOpen, onClose, usage }: UsageModalProps) {
           <div className="flex items-start gap-2.5 p-3 rounded-2xl bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] text-[11px] text-[var(--text-secondary)] leading-relaxed">
             <Info size={14} className="text-[var(--text-muted)] flex-shrink-0 mt-0.5" />
             <p>
-              Every student gets 30 high-yield AI queries every 8 hours. This quota is enforced server-side
+              Every student gets 30 high-yield AI queries every 5 hours. This quota is enforced server-side
               across all your sessions to guarantee high-speed, reliable responses during peak exam seasons.
             </p>
           </div>

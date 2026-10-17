@@ -9,12 +9,14 @@ export interface User {
   email?: string
   photo_url?: string
   role?: 'student' | 'admin'
+  token?: string
 }
 
 export interface AuthResponse {
   authenticated: boolean
   user: User | null
   status?: string
+  token?: string
 }
 
 export interface UsageStatus {
@@ -136,4 +138,71 @@ export interface UserPreferences {
   defaultModel: string
   defaultLength: AnswerLength
   focusTimerMinutes: number
+}
+
+export interface AdminSummary {
+  total_users: number
+  total_logins: number
+  total_sessions: number
+  total_messages: number
+  active_today: number
+  active_7d: number
+}
+
+export interface AdminUserRecord {
+  user_id: number
+  first_name: string
+  username: string
+  login_types: string[]
+  login_count: number
+  message_count: number
+  first_seen: string | null
+  last_seen: string | null
+  is_suspended?: boolean
+  is_admin?: boolean
+}
+
+export interface AdminRecentLogin {
+  user_id: number
+  first_name: string
+  username: string
+  login_type: string
+  ip_address: string
+  created_at: string
+}
+
+export interface AdminUsageReport {
+  summary: AdminSummary
+  login_type_breakdown: Record<string, number>
+  users: AdminUserRecord[]
+  recent_logins: AdminRecentLogin[]
+}
+
+export interface AdminUsersResponse {
+  total: number
+  page: number
+  limit: number
+  users: AdminUserRecord[]
+}
+
+export interface SystemHealthStatus {
+  status: 'healthy' | 'degraded' | 'down'
+  timestamp: string
+  supabase: {
+    configured: boolean
+    status: string
+    latency_ms: number | null
+  }
+  providers: {
+    groq: { configured: boolean; status: string }
+    openrouter: { configured: boolean; status: string }
+    gemini: { configured: boolean; status: string }
+  }
+  server: {
+    quota_window_hours: number
+    global_message_limit: number
+    sessions_cached: number
+    messages_cached: number
+    suspended_users_count: number
+  }
 }

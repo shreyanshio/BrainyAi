@@ -254,8 +254,18 @@ export function AppHeader({
                   className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition cursor-pointer"
                 >
                   <Clock size={13} />
-                  <span>8-Hour Quota Details</span>
+                  <span>5-Hour Quota Details</span>
                 </button>
+
+                {user.role === 'admin' && (
+                  <a
+                    href="/admin"
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-amber-500 hover:bg-amber-500/10 transition cursor-pointer font-semibold"
+                  >
+                    <LayoutDashboard size={13} />
+                    <span>Admin Control Panel</span>
+                  </a>
+                )}
 
                 <div className="border-t border-[var(--border-subtle)] my-1" />
 

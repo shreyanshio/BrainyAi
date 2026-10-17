@@ -44,8 +44,8 @@ export default function BrainyApp() {
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
 
-  // Active View: 'overview' (Aptivus Dashboard) vs 'chat' (Study Chat Workspace)
-  const [currentView, setCurrentView] = useState<'overview' | 'chat'>('overview')
+  // Active View: 'chat' (Study Chat Workspace by default) vs 'overview' (Aptivus Dashboard)
+  const [currentView, setCurrentView] = useState<'overview' | 'chat'>('chat')
 
   // User Customization & Preferences
   const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES)
@@ -62,7 +62,7 @@ export default function BrainyApp() {
   const [activeModel, setActiveModel] = useState('brainy-balanced')
   const [activeLength, setActiveLength] = useState<AnswerLength>('medium')
 
-  // Global 30 msg / 8h Quota state
+  // Global 30 msg / 5h Quota state
   const [usage, setUsage] = useState<UsageStatus | null>(null)
   const [memoryData, setMemoryData] = useState<UserMemoryData | null>(null)
 
@@ -309,7 +309,7 @@ export default function BrainyApp() {
           ...prev,
           {
             role: 'assistant',
-            content: `⚠️ **8-Hour Quota Reached**: You have reached the limit of 30 questions for this 8-hour window. Please wait for the window to reset to continue studying.`,
+            content: `⚠️ **5-Hour Quota Reached**: You have reached the limit of 30 questions for this 5-hour window. Please wait for the window to reset to continue studying.`,
             created_at: new Date().toISOString(),
           },
         ])

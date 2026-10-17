@@ -304,13 +304,13 @@ export function Sidebar({
 
         {/* Bottom Quota & Navigation */}
         <div className="p-3.5 border-t border-[var(--border-subtle)] bg-[var(--bg-surface-elevated)] space-y-2.5">
-          {/* 8-Hour Quota Meter */}
+          {/* 5-Hour Quota Meter */}
           <div
             onClick={onOpenUsageModal}
             className="p-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] cursor-pointer hover:border-[var(--border-strong)] transition"
           >
             <div className="flex items-center justify-between text-[11px] mb-1.5">
-              <span className="text-[var(--text-muted)] font-medium">8-Hour Quota</span>
+              <span className="text-[var(--text-muted)] font-medium">5-Hour Quota</span>
               <span className="text-[var(--text-primary)] font-mono font-bold">
                 {used} / {limit}
               </span>

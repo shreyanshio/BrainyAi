@@ -8,6 +8,10 @@ import re
 import time
 import os
 import random
+import hmac
+import hashlib
+import base64
+import json
 from functools import wraps
 from flask import request, jsonify, session
 
@@ -183,19 +187,121 @@ def is_blacklisted(text: str) -> bool:
     return False
 
 
-# ── 4. SECURITY DECORATORS ───────────────────────────────
+# ── 4. CRYPTOGRAPHIC AUTH TOKEN UTILITIES ────────────────
+# Stateless, tamper-proof bearer tokens (HS256 HMAC-SHA256)
+# Solves cross-origin third-party cookie blocking across Cloudflare & Railway
+
+def _get_auth_secret_key() -> str:
+    key = os.getenv("FLASK_SECRET_KEY")
+    if not key:
+        secret_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".auth_secret")
+        if os.path.exists(secret_file):
+            try:
+                with open(secret_file, "r", encoding="utf-8") as f:
+                    key = f.read().strip()
+            except Exception:
+                pass
+        if not key:
+            import secrets
+            key = secrets.token_hex(32)
+            try:
+                with open(secret_file, "w", encoding="utf-8") as f:
+                    f.write(key)
+            except Exception:
+                pass
+    return key
+
+
+def create_auth_token(user_id: int, username: str, first_name: str, email: str = "", role: str = "student", expires_in_secs: int = 86400 * 7) -> str:
+    """Create a signed, tamper-proof bearer token (HS256) valid for expires_in_secs."""
+    now = int(time.time())
+    payload = {
+        "sub": int(user_id),
+        "username": username or "",
+        "name": first_name or "",
+        "email": email or "",
+        "role": role or "student",
+        "iat": now,
+        "exp": now + expires_in_secs
+    }
+    header = {"alg": "HS256", "typ": "JWT"}
+    h_b64 = base64.urlsafe_b64encode(json.dumps(header).encode()).decode().rstrip("=")
+    p_b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    sig_content = f"{h_b64}.{p_b64}".encode()
+    sig = hmac.new(_get_auth_secret_key().encode(), sig_content, hashlib.sha256).digest()
+    sig_b64 = base64.urlsafe_b64encode(sig).decode().rstrip("=")
+    return f"{h_b64}.{p_b64}.{sig_b64}"
+
+
+def verify_auth_token(token: str) -> dict | None:
+    """Verify signature and expiry of a bearer token. Returns payload dict or None."""
+    if not token or not isinstance(token, str):
+        return None
+    try:
+        parts = token.strip().split(".")
+        if len(parts) != 3:
+            return None
+        h_b64, p_b64, sig_b64 = parts
+        sig_content = f"{h_b64}.{p_b64}".encode()
+        expected_sig = hmac.new(_get_auth_secret_key().encode(), sig_content, hashlib.sha256).digest()
+
+        # Pad base64 for decoding
+        pad = len(sig_b64) % 4
+        if pad:
+            sig_b64 += "=" * (4 - pad)
+        actual_sig = base64.urlsafe_b64decode(sig_b64.encode())
+
+        if not hmac.compare_digest(expected_sig, actual_sig):
+            return None
+
+        # Decode payload
+        p_pad = len(p_b64) % 4
+        if p_pad:
+            p_b64 += "=" * (4 - p_pad)
+        payload = json.loads(base64.urlsafe_b64decode(p_b64.encode()).decode())
+
+        if payload.get("exp", 0) < time.time():
+            return None
+
+        return payload
+    except Exception:
+        return None
+
+
+# ── 5. SECURITY DECORATORS ───────────────────────────────
 
 def login_required(f):
-    """Decorator: reject requests that don't have a valid session.
+    """Decorator: enforce valid authentication via Authorization Bearer token or session cookie.
 
-    Checks for 'user_id' in the Flask session cookie.
+    Checks in order:
+    1. Authorization: Bearer <token> (JWT / HMAC signed)
+    2. Flask session cookie ('user_id' in session)
+
+    Populates session and request context with authenticated user details.
     Returns 401 if not authenticated.
     """
     @wraps(f)
     def decorated(*args, **kwargs):
-        if "user_id" not in session:
-            return jsonify({"error": "Authentication required"}), 401
-        return f(*args, **kwargs)
+        # 1. Check Bearer token from Authorization header
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:].strip()
+            payload = verify_auth_token(token)
+            if payload and payload.get("sub"):
+                session["user_id"] = payload["sub"]
+                session["username"] = payload.get("username", "")
+                session["first_name"] = payload.get("name", "Student")
+                session["email"] = payload.get("email", "")
+                session["role"] = payload.get("role", "student")
+                request.authenticated_user_id = payload["sub"]
+                return f(*args, **kwargs)
+
+        # 2. Check Flask session cookie
+        if "user_id" in session:
+            request.authenticated_user_id = session["user_id"]
+            return f(*args, **kwargs)
+
+        return jsonify({"error": "Authentication required"}), 401
     return decorated
 
 

@@ -1,16 +1,52 @@
 import {
+  AdminUsageReport,
+  AdminUsersResponse,
   AuthResponse,
   ChatMessage,
   ChatSendRequest,
   ChatSendResponse,
   ChatSession,
   ModelDefinition,
+  SystemHealthStatus,
   UsageStatus,
   User,
   UserMemoryData,
   UserProfileStats,
   UserPreferences,
 } from '@/types/api'
+
+export const AUTH_TOKEN_KEY = 'brainy_auth_token'
+
+export function getStoredToken(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return localStorage.getItem(AUTH_TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function setStoredToken(token: string): void {
+  if (typeof window === 'undefined') return
+  try {
+    if (token) {
+      localStorage.setItem(AUTH_TOKEN_KEY, token)
+    } else {
+      localStorage.removeItem(AUTH_TOKEN_KEY)
+    }
+  } catch {
+    // ignore
+  }
+}
+
+export function clearStoredToken(): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.removeItem(AUTH_TOKEN_KEY)
+  } catch {
+    // ignore
+  }
+}
 
 export const getApiBase = (): string => {
   return (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '')
@@ -30,15 +66,22 @@ export class ApiError extends Error {
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const base = getApiBase()
   const url = `${base}${path}`
+  const token = getStoredToken()
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    ...(options.headers as Record<string, string>),
+  }
+
+  if (token && !headers['Authorization']) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
 
   const response = await fetch(url, {
     ...options,
     credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      ...options.headers,
-    },
+    headers,
   })
 
   if (!response.ok) {
@@ -67,15 +110,16 @@ export async function fetchPublicConfig(): Promise<{ google_client_id?: string }
 
 export async function checkAuth(): Promise<User | null> {
   try {
-    const res = await request<{ authenticated: boolean; user?: User }>('/api/auth/me')
+    const res = await request<{ authenticated: boolean; user?: User; token?: string }>('/api/auth/me')
     if (res?.authenticated && res.user) {
+      if (res.token) setStoredToken(res.token)
       return res.user
     }
   } catch {
     // Session not found or 401
   }
 
-  // Fallback to checking /api/user/profile if session cookie is valid
+  // Fallback to checking /api/user/profile if session cookie/token is valid
   try {
     const prof = await request<UserProfileStats>('/api/user/profile')
     if (prof?.user_id) {
@@ -99,6 +143,7 @@ export async function loginWithTelegramInitData(initData: string): Promise<User>
     body: JSON.stringify({ initData }),
   })
   if (!res.user) throw new ApiError('Authentication failed: no user returned', 401)
+  if (res.token) setStoredToken(res.token)
   return res.user
 }
 
@@ -108,6 +153,7 @@ export async function loginWithGoogle(credential: string): Promise<User> {
     body: JSON.stringify({ credential }),
   })
   if (!res.user) throw new ApiError('Authentication failed: no user returned', 401)
+  if (res.token) setStoredToken(res.token)
   return res.user
 }
 
@@ -117,6 +163,7 @@ export async function loginWeb(name: string, username?: string): Promise<User> {
     body: JSON.stringify({ name, username }),
   })
   if (!res.user) throw new ApiError('Authentication failed: no user returned', 401)
+  if (res.token) setStoredToken(res.token)
   return res.user
 }
 
@@ -125,6 +172,7 @@ export async function loginStudentPass(): Promise<User> {
     method: 'POST',
   })
   if (!res.user) throw new ApiError('Authentication failed: no user returned', 401)
+  if (res.token) setStoredToken(res.token)
   return res.user
 }
 
@@ -135,12 +183,16 @@ export async function initTelegramLogin(): Promise<{ session_id: string; bot_url
   })
 }
 
-export async function pollTelegramLogin(sessionId: string): Promise<{ status: string; user?: User }> {
-  return request<{ status: string; user?: User }>(`/api/auth/poll/${sessionId}`)
+export async function pollTelegramLogin(sessionId: string): Promise<{ status: string; user?: User; token?: string }> {
+  const res = await request<{ status: string; user?: User; token?: string }>(`/api/auth/poll/${sessionId}`)
+  if (res?.token) setStoredToken(res.token)
+  return res
 }
 
-export async function checkAuthSessionParam(sessionId: string): Promise<{ status: string; user?: User }> {
-  return request<{ status: string; user?: User }>(`/api/auth/status/${sessionId}`)
+export async function checkAuthSessionParam(sessionId: string): Promise<{ status: string; user?: User; token?: string }> {
+  const res = await request<{ status: string; user?: User; token?: string }>(`/api/auth/status/${sessionId}`)
+  if (res?.token) setStoredToken(res.token)
+  return res
 }
 
 export async function logoutUser(): Promise<void> {
@@ -148,6 +200,8 @@ export async function logoutUser(): Promise<void> {
     await request('/api/auth/logout', { method: 'POST' })
   } catch {
     // ignore
+  } finally {
+    clearStoredToken()
   }
 }
 
@@ -245,4 +299,53 @@ export async function saveUserPreferences(
     method: 'POST',
     body: JSON.stringify(preferences),
   })
+}
+
+// ── Admin APIs ─────────────────────────────────────────────
+
+export async function fetchAdminCheck(): Promise<boolean> {
+  try {
+    const res = await request<{ is_admin: boolean }>('/api/admin/check')
+    return Boolean(res?.is_admin)
+  } catch {
+    return false
+  }
+}
+
+export async function fetchAdminOverview(): Promise<AdminUsageReport> {
+  return request<AdminUsageReport>('/api/admin/overview')
+}
+
+export async function fetchAdminUsers(
+  q: string = '',
+  page: number = 1,
+  limit: number = 25
+): Promise<AdminUsersResponse> {
+  const params = new URLSearchParams()
+  if (q) params.set('q', q)
+  params.set('page', String(page))
+  params.set('limit', String(limit))
+  return request<AdminUsersResponse>(`/api/admin/users?${params.toString()}`)
+}
+
+export async function toggleUserSuspend(
+  userId: number
+): Promise<{ status: string; user_id: number; is_suspended: boolean }> {
+  return request<{ status: string; user_id: number; is_suspended: boolean }>(
+    `/api/admin/users/${userId}/suspend`,
+    { method: 'POST' }
+  )
+}
+
+export async function deleteUserAccount(
+  userId: number
+): Promise<{ status: string; deleted_user_id: number }> {
+  return request<{ status: string; deleted_user_id: number }>(
+    `/api/admin/users/${userId}`,
+    { method: 'DELETE' }
+  )
+}
+
+export async function fetchSystemHealth(): Promise<SystemHealthStatus> {
+  return request<SystemHealthStatus>('/api/admin/health')
 }

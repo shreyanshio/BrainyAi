@@ -1,15 +1,15 @@
 <div align="center">
-  <h1>🧠 BRAINY — AI Study Bot & Web Sanctuary</h1>
+  <h1>🧠 BRAINY — AI Study Companion & SaaS Platform</h1>
 
   <p>
     <a href="https://github.com/shreyanshio/BrainyAi"><img src="https://img.shields.io/badge/GitHub-Repo-181717?style=for-the-badge&logo=github&logoColor=white" alt="GitHub Repo"></a>
-    <a href="https://brainyai.cenai.workers.dev"><img src="https://img.shields.io/badge/Web-Sanctuary-F59E0B?style=for-the-badge&logo=cloudflare&logoColor=black" alt="Live Web App"></a>
+    <a href="https://brainyai.cenai.workers.dev"><img src="https://img.shields.io/badge/Web-Sanctuary-059669?style=for-the-badge&logo=cloudflare&logoColor=white" alt="Live Web App"></a>
     <a href="https://t.me/AiChatExpert_Bot"><img src="https://img.shields.io/badge/Telegram-@AiChatExpert__Bot-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram Bot"></a>
     <a href="https://t.me/aurabreaker7"><img src="https://img.shields.io/badge/Telegram-Channel-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram Channel"></a>
-    <a href="https://github.com/shreyanshio/BrainyAi/stargazers"><img src="https://img.shields.io/github/stars/shreyanshio/BrainyAi?style=for-the-badge&color=F59E0B&logo=star" alt="GitHub Stars"></a>
+    <a href="https://github.com/shreyanshio/BrainyAi/stargazers"><img src="https://img.shields.io/github/stars/shreyanshio/BrainyAi?style=for-the-badge&color=059669&logo=star" alt="GitHub Stars"></a>
   </p>
 
-  <p><strong>An executive, emotionally intelligent AI study companion built with Next.js, Cloudflare Workers, and Flask.</strong></p>
+  <p><strong>A production-ready, emotionally intelligent AI study companion built with Next.js, Cloudflare Workers, and Flask.</strong></p>
 </div>
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -23,13 +23,13 @@ Powered by an intelligent multi-provider router, BRAINY directs queries to optim
 * 🌐 **Web Sanctuary:** [https://brainyai.cenai.workers.dev](https://brainyai.cenai.workers.dev)
 * 🤖 **Telegram Bot:** [@AiChatExpert_Bot](https://t.me/AiChatExpert_Bot)
 * 📢 **Official Channel:** [@aurabreaker7](https://t.me/aurabreaker7)
-* 🔐 **Strict Authentication:** Google OAuth 2.0 & Verified Telegram Handshake (Zero Mock Bypass)
+* 🔐 **Strict Authentication:** Google OAuth 2.0, Verified Telegram Handshake & 1-Click Cryptographic Student Pass
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ## 🔧 Tech Stack & Architecture
 
-- **Frontend:** Next.js (App Router, Tailwind CSS, Lucide Icons) deployed on **Cloudflare Workers**
+- **Frontend:** Next.js (App Router, React 19, Tailwind CSS, Lucide Icons) deployed on **Cloudflare Workers**
 - **Backend:** Python 3.10+ / Flask API with Gunicorn deployed on **Railway**
 - **Telegram Daemon:** `python-telegram-bot` v21.9 running as a continuous background worker
 - **Database & Sync:** Supabase (PostgreSQL with Row-Level Security)
@@ -52,15 +52,17 @@ Powered by an intelligent multi-provider router, BRAINY directs queries to optim
 | **Web Search & Citations** | → Real-time factual queries backed by Tavily and DuckDuckGo |
 | **Adaptive Memory** | → Learns your weak topics, doubt patterns, and liked solutions automatically |
 
-### 🌐 Web App Sanctuary Features
+### 🌐 Web App SaaS Features
 | Feature | Description |
 |---------|-------------|
-| **Obsidian & Gold UI** | → Executive high-contrast palette minimizing eye strain during long study sessions |
-| **Strict Google OAuth** | → Official Google Identity Services (GIS) token verification |
-| **Telegram Handshake** | → Real-time session verification linking your Telegram username and avatar |
-| **Persistent History** | → Encrypted chat sessions stored and indexed in Supabase |
-| **Collapsible Navigation** | → Responsive sidebar with mobile-friendly slide-over menu |
-| **Syntax Highlighting** | → Prism.js formatted code blocks with one-click copy buttons |
+| **Chat Workspace by Default** | → Immediate access to AI study conversation upon login with zero friction |
+| **Aptivus Student Dashboard** | → Interactive 25-minute Pomodoro focus sprint countdown timer, bento study cards, and session continuity |
+| **Admin Control Panel (`/admin`)** | → Dedicated management interface with real Supabase telemetry, student search, account suspension, and API health checks |
+| **5 Calibrated Themes** | → Warm Paper, Pure Light, Midnight Slate, Graphite Dark, OLED Pitch Black (Zero purple shades) |
+| **Typography Customization** | → 9 live font preview cards (Inter, Geist, Plus Jakarta Sans, DM Sans, Manrope, IBM Plex Sans, Lora, Source Serif, JetBrains Mono) |
+| **5-Hour Message Quota** | → Server-authoritative atomic quota of 30 questions every 5 hours |
+| **Dual-Token Auth** | → Stateless HS256 Bearer Token + hardened session cookies solving cross-origin blocking |
+| **Cryptographic Hash Privacy** | → User questions and chat titles masked with SHA-256 before storage in Supabase |
 | **Session Tools** | → Real-time search in conversation, chat export to .txt, and clipboard copy |
 
 ### 📱 Telegram Bot Features
@@ -76,12 +78,12 @@ Powered by an intelligent multi-provider router, BRAINY directs queries to optim
 ### 🔐 Security & Protection
 | Feature | Description |
 |---------|-------------|
+| **Bearer Token Authorization** | → Signed HS256 JWT tokens with automatic renewal |
 | **Input Sanitization** | → Strict guards against XSS, SQLi, and Command Injection |
 | **Pattern Blacklist** | → Automated detection and blocking of malicious exploit patterns |
-| **Dual Rate Limiting** | → Transient per-IP and per-User rate limits to prevent resource abuse |
+| **Dual Rate Limiting** | → Per-user and per-IP rate limiters to prevent resource abuse |
 | **HMAC Auth Verification**| → Cryptographic verification of Telegram session tokens |
-| **Hardened Cookies** | → `HttpOnly`, `Secure`, and `SameSite` cookie flags |
-| **Row Level Security** | → Supabase RLS preventing cross-user data exposure |
+| **Row Level Security (RLS)** | → Supabase RLS preventing cross-user data exposure |
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -90,25 +92,25 @@ Powered by an intelligent multi-provider router, BRAINY directs queries to optim
 ```text
 BrainyAi/
 ├── app/                           # Next.js App Router Frontend
-│   ├── globals.css                # Obsidian & Gold design system tokens
+│   ├── admin/                     # Secure /admin Control Panel
+│   ├── globals.css                # Design system tokens & 5 calibrated themes
 │   ├── layout.tsx                 # Root layout, metadata & custom favicon
-│   └── page.tsx                   # Study workspace & strict auth flow
+│   └── page.tsx                   # Study chat workspace & app shell
+├── components/                    # Modular React Components
+│   ├── app-shell/                 # Header, Sidebar, Segmented Switchers
+│   ├── auth/                      # LoginView (Google OAuth, Telegram, 1-Click Pass)
+│   ├── chat/                      # MessageList, Composer, EmptyState
+│   ├── dashboard/                 # StudentDashboard, Pomodoro Timer, Bento Cards
+│   ├── modals/                    # UsageModal (5-Hour Quota), NotesModal
+│   └── settings/                  # SettingsModal (Typography, Theme, Accent Picker)
+├── lib/                           # Typed API clients & constants
+├── types/                         # Unified TypeScript data contracts
 ├── prompts/                       # Modular academic prompt templates
-│   ├── system_prompt.txt          # Core persona & academic formatting
-│   ├── brainy_prompt.txt          # Deep reasoning mode
-│   ├── quiz_prompt.txt            # MCQ drill generator
-│   ├── ask5_prompt.txt            # Multi-angle explanation mode
-│   └── ...                        # Specialized subject prompts
 ├── fonts/                         # Unicode math & scientific matrices
-│   ├── math_symbols.txt           # Mathematical glyph mappings
-│   ├── calculus_symbols.txt       # Integrals, limits & differential operators
-│   ├── greek_letters.txt          # Greek notation rules
-│   └── ...                        # Extended formatting fonts
-├── public/
-│   └── icon.svg                   # Custom gold & obsidian Brainy neural favicon
 ├── app.py                         # Flask REST API, auth handshake & CORS
 ├── study_bot.py                   # Telegram bot daemon & multi-provider router
-├── security.py                    # Input sanitization, rate-limiting & abuse guard
+├── security.py                    # HS256 Token Auth, rate-limiting & abuse guard
+├── supabase_schema.sql            # PostgreSQL schema with indexes & RLS policies
 ├── wrangler.jsonc                 # Cloudflare Workers static asset configuration
 ├── next.config.mjs                # Next.js static export settings (`output: export`)
 ├── package.json                   # Node.js dependencies & scripts
