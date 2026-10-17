@@ -64,6 +64,7 @@ export interface ChatSendRequest {
   model?: string
   answer_length?: AnswerLength
   tone?: string
+  idempotency_key?: string
 }
 
 export interface ChatSendResponse {

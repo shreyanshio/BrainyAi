@@ -260,6 +260,7 @@ export async function sendChatMessage(req: ChatSendRequest): Promise<ChatSendRes
       model: req.model,
       answer_length: req.answer_length,
       tone: req.tone,
+      idempotency_key: req.idempotency_key,
     }),
   })
 }
@@ -293,6 +294,7 @@ export async function streamChatMessage(
       model: req.model,
       answer_length: req.answer_length,
       tone: req.tone,
+      idempotency_key: req.idempotency_key,
     }),
     signal,
   })

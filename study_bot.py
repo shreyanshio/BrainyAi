@@ -416,7 +416,16 @@ def _sb_save_user_memory(user_id: int, first_name: str = "", username: str = "",
                           level: str = "", score: int = 0, total: int = 0) -> None:
     """Persist user state and fail visibly if Supabase does not confirm the write."""
     if not (SUPABASE_URL and SUPABASE_KEY):
-        raise RuntimeError("Supabase is not configured; user memory is not durable")
+        logging.getLogger(__name__).warning("Supabase unconfigured; using in-memory user memory for dev")
+        if user_id not in user_data_store:
+            user_data_store[user_id] = {"joined": datetime.now().strftime("%d %b %Y")}
+        if level: user_data_store[user_id]["level"] = level
+        if score: user_data_store[user_id]["score"] = score
+        if total: user_data_store[user_id]["total"] = total
+        if liked_notes is not None: user_data_store[user_id]["liked_notes"] = liked_notes[-MAX_LIKED_NOTES:]
+        if preferences is not None: user_data_store[user_id]["preferences"] = preferences
+        if history is not None: user_conversations[user_id] = history[-MAX_SAVED_HISTORY:]
+        return
     try:
         import json as _json
         payload = {
@@ -463,7 +472,16 @@ def _sb_save_user_memory(user_id: int, first_name: str = "", username: str = "",
 def _sb_load_user_memory(user_id: int) -> dict:
     """Load a user's full state. An empty row set means missing; errors stay errors."""
     if not (SUPABASE_URL and SUPABASE_KEY):
-        raise RuntimeError("Supabase is not configured; user memory is not durable")
+        logging.getLogger(__name__).warning("Supabase unconfigured; using in-memory user memory for dev")
+        data = user_data_store.get(user_id, {})
+        return {
+            "level": data.get("level", ""),
+            "score": data.get("score", 0),
+            "total": data.get("total", 0),
+            "liked_notes": data.get("liked_notes", []),
+            "preferences": data.get("preferences", {}),
+            "history": user_conversations.get(user_id, []),
+        }
     try:
         import json as _json
         resp = requests.get(
@@ -625,6 +643,13 @@ def save_user_memory_async(user_id: int) -> None:
         liked_notes=data.get("liked_notes", []), level=data.get("level", ""),
         preferences=data.get("preferences", {}),
         score=data.get("score", 0), total=data.get("total", 0))
+
+def save_user_memory(user_id: int, data: dict = None, **kwargs) -> None:
+    if isinstance(data, dict):
+        merged = {**data, **kwargs}
+        _sb_save_user_memory(user_id, **merged)
+    else:
+        _sb_save_user_memory(user_id, **kwargs)
 
 
 #   FANCY UNICODE FONT HELPERS

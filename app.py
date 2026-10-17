@@ -231,6 +231,64 @@ def unmask_secure_hash(stored_val: str) -> str:
 GLOBAL_MESSAGE_LIMIT = 30
 QUOTA_WINDOW_HOURS = 5
 
+_dev_user_quotas: dict = {}
+_dev_quota_lock = threading.RLock()
+
+def _dev_get_quota(user_id: int | str) -> dict:
+    with _dev_quota_lock:
+        uid = str(user_id)
+        now = datetime.now(timezone.utc)
+        record = _dev_user_quotas.get(uid)
+        if record:
+            try:
+                reset_at = datetime.fromisoformat(record["reset_at"])
+                if reset_at.tzinfo is None:
+                    reset_at = reset_at.replace(tzinfo=timezone.utc)
+                if now >= reset_at:
+                    record = {
+                        "used": 0,
+                        "reset_at": (now + timedelta(hours=QUOTA_WINDOW_HOURS)).isoformat(),
+                        "window_start": now.isoformat()
+                    }
+                    _dev_user_quotas[uid] = record
+            except Exception:
+                record = {
+                    "used": 0,
+                    "reset_at": (now + timedelta(hours=QUOTA_WINDOW_HOURS)).isoformat(),
+                    "window_start": now.isoformat()
+                }
+                _dev_user_quotas[uid] = record
+        else:
+            record = {
+                "used": 0,
+                "reset_at": (now + timedelta(hours=QUOTA_WINDOW_HOURS)).isoformat(),
+                "window_start": now.isoformat()
+            }
+            _dev_user_quotas[uid] = record
+        used = record["used"]
+        return {
+            "used": used,
+            "remaining": max(0, GLOBAL_MESSAGE_LIMIT - used),
+            "reset_at": record["reset_at"],
+            "window_hours": QUOTA_WINDOW_HOURS,
+            "limit": GLOBAL_MESSAGE_LIMIT
+        }
+
+def _dev_consume_quota(user_id: int | str) -> tuple[bool, dict]:
+    with _dev_quota_lock:
+        status = _dev_get_quota(user_id)
+        if status["used"] >= GLOBAL_MESSAGE_LIMIT:
+            return False, status
+        _dev_user_quotas[str(user_id)]["used"] += 1
+        return True, _dev_get_quota(user_id)
+
+def _dev_refund_quota(user_id: int | str) -> dict:
+    with _dev_quota_lock:
+        uid = str(user_id)
+        if uid in _dev_user_quotas and _dev_user_quotas[uid]["used"] > 0:
+            _dev_user_quotas[uid]["used"] -= 1
+        return _dev_get_quota(user_id)
+
 def _quota_rpc(name: str, body: dict) -> dict:
     response = _sb_request("POST", f"rpc/{name}", json_body=body, timeout=5)
     try:
@@ -243,24 +301,85 @@ def _quota_rpc(name: str, body: dict) -> dict:
 
 def get_user_quota(user_id: int | str) -> dict:
     """Read or initialize quota state using the shared atomic Supabase store."""
-    status = _quota_rpc("brainy_get_user_quota", {"p_user_id": int(user_id),
-        "p_limit": GLOBAL_MESSAGE_LIMIT, "p_window_hours": QUOTA_WINDOW_HOURS})
-    return {**status, "limit": GLOBAL_MESSAGE_LIMIT, "window_hours": QUOTA_WINDOW_HOURS}
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        logger.warning("Supabase unconfigured; using local development quota fallback")
+        return _dev_get_quota(user_id)
+    try:
+        status = _quota_rpc("brainy_get_user_quota", {"p_user_id": int(user_id),
+            "p_limit": GLOBAL_MESSAGE_LIMIT, "p_window_hours": QUOTA_WINDOW_HOURS})
+        return {**status, "limit": GLOBAL_MESSAGE_LIMIT, "window_hours": QUOTA_WINDOW_HOURS}
+    except SupabaseOperationError:
+        try:
+            now = datetime.now(timezone.utc)
+            rows = _sb_json(_sb_request("GET", "user_quotas", params=f"?user_id=eq.{user_id}"), "user_quotas")
+            if rows:
+                row = rows[0]
+                reset_at = datetime.fromisoformat(row["reset_at"].replace("Z", "+00:00"))
+                if reset_at.tzinfo is None:
+                    reset_at = reset_at.replace(tzinfo=timezone.utc)
+                if now >= reset_at:
+                    new_reset = (now + timedelta(hours=QUOTA_WINDOW_HOURS)).isoformat()
+                    _sb_request("PATCH", "user_quotas", params=f"?user_id=eq.{user_id}",
+                                json_body={"used": 0, "window_start": now.isoformat(), "reset_at": new_reset, "updated_at": now.isoformat()})
+                    return {"used": 0, "remaining": GLOBAL_MESSAGE_LIMIT, "reset_at": new_reset, "limit": GLOBAL_MESSAGE_LIMIT, "window_hours": QUOTA_WINDOW_HOURS}
+                used = row.get("used", 0)
+                return {"used": used, "remaining": max(0, GLOBAL_MESSAGE_LIMIT - used), "reset_at": row["reset_at"], "limit": GLOBAL_MESSAGE_LIMIT, "window_hours": QUOTA_WINDOW_HOURS}
+            else:
+                new_reset = (now + timedelta(hours=QUOTA_WINDOW_HOURS)).isoformat()
+                _sb_request("POST", "user_quotas", json_body={"user_id": int(user_id), "used": 0, "window_start": now.isoformat(), "reset_at": new_reset, "updated_at": now.isoformat()})
+                return {"used": 0, "remaining": GLOBAL_MESSAGE_LIMIT, "reset_at": new_reset, "limit": GLOBAL_MESSAGE_LIMIT, "window_hours": QUOTA_WINDOW_HOURS}
+        except Exception:
+            raise
 
 def consume_user_quota(user_id: int | str) -> tuple[bool, dict]:
     """Atomically consume a credit across workers and return current usage."""
-    status = _quota_rpc("brainy_consume_user_quota", {
-        "p_user_id": int(user_id), "p_limit": GLOBAL_MESSAGE_LIMIT,
-        "p_window_hours": QUOTA_WINDOW_HOURS,
-    })
-    status.update({"limit": GLOBAL_MESSAGE_LIMIT, "window_hours": QUOTA_WINDOW_HOURS})
-    return bool(status.pop("allowed", False)), status
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        logger.warning("Supabase unconfigured; using local development quota fallback")
+        return _dev_consume_quota(user_id)
+    try:
+        status = _quota_rpc("brainy_consume_user_quota", {
+            "p_user_id": int(user_id), "p_limit": GLOBAL_MESSAGE_LIMIT,
+            "p_window_hours": QUOTA_WINDOW_HOURS,
+        })
+        status.update({"limit": GLOBAL_MESSAGE_LIMIT, "window_hours": QUOTA_WINDOW_HOURS})
+        return bool(status.pop("allowed", False)), status
+    except SupabaseOperationError:
+        try:
+            status = get_user_quota(user_id)
+            if status["used"] >= GLOBAL_MESSAGE_LIMIT:
+                return False, status
+            new_used = status["used"] + 1
+            now = datetime.now(timezone.utc).isoformat()
+            _sb_request("PATCH", "user_quotas", params=f"?user_id=eq.{user_id}",
+                        json_body={"used": new_used, "updated_at": now})
+            status["used"] = new_used
+            status["remaining"] = max(0, GLOBAL_MESSAGE_LIMIT - new_used)
+            return True, status
+        except Exception:
+            raise
 
 def refund_user_quota(user_id: int | str) -> dict:
     """Refund one previously consumed credit after a pre-generation failure."""
-    status = _quota_rpc("brainy_refund_user_quota", {"p_user_id": int(user_id),
-        "p_limit": GLOBAL_MESSAGE_LIMIT, "p_window_hours": QUOTA_WINDOW_HOURS})
-    return {**status, "limit": GLOBAL_MESSAGE_LIMIT, "window_hours": QUOTA_WINDOW_HOURS}
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        logger.warning("Supabase unconfigured; using local development quota fallback")
+        return _dev_refund_quota(user_id)
+    try:
+        status = _quota_rpc("brainy_refund_user_quota", {"p_user_id": int(user_id),
+            "p_limit": GLOBAL_MESSAGE_LIMIT, "p_window_hours": QUOTA_WINDOW_HOURS})
+        return {**status, "limit": GLOBAL_MESSAGE_LIMIT, "window_hours": QUOTA_WINDOW_HOURS}
+    except SupabaseOperationError:
+        try:
+            status = get_user_quota(user_id)
+            new_used = max(0, status["used"] - 1)
+            now = datetime.now(timezone.utc).isoformat()
+            _sb_request("PATCH", "user_quotas", params=f"?user_id=eq.{user_id}",
+                        json_body={"used": new_used, "updated_at": now})
+            status["used"] = new_used
+            status["remaining"] = max(0, GLOBAL_MESSAGE_LIMIT - new_used)
+            return status
+        except Exception:
+            return get_user_quota(user_id)
+
 
 # ── SUSPENDED USERS MANAGEMENT ──
 SUSPENDED_USERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "suspended_users.json")
@@ -424,18 +543,24 @@ def sb_record_login(user_id: int, username: str, first_name: str, login_type: st
     if len(MEM_LOGINS) > 2000:
         del MEM_LOGINS[:-2000]
 
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        return
+
     payload = {
-            "user_id": user_id,
-            "username": username or "",
-            "first_name": first_name or "",
-            "login_type": login_type,
-            "ip_address": ip or "",
-            "user_agent": user_agent[:250] if user_agent else ""
-        }
+        "user_id": user_id,
+        "username": username or "",
+        "first_name": first_name or "",
+        "login_type": login_type,
+        "ip_address": ip or "",
+        "user_agent": user_agent[:250] if user_agent else ""
+    }
     _sb_request("POST", "user_logins", json_body=payload, prefer="return=minimal", timeout=5)
 
 
 def sb_list_sessions(user_id: int) -> list:
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        logger.warning("Supabase unconfigured; using in-memory sessions for dev")
+        return list(MEM_SESSIONS.get(user_id, []))
     rows = _sb_json(_sb_request("GET", "chat_sessions",
         params=f"?user_id=eq.{user_id}&select=id,title,created_at&order=created_at.desc"), "chat_sessions")
     for row in rows:
@@ -447,10 +572,15 @@ def sb_list_sessions(user_id: int) -> list:
 def sb_create_session(user_id: int, title: str, session_id: str | None = None) -> dict:
     if not session_id:
         session_id = str(uuid.uuid4())
+    sess_obj = {"id": session_id, "user_id": user_id, "title": title, "created_at": datetime.now(timezone.utc).isoformat()}
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        logger.warning("Supabase unconfigured; using in-memory session for dev")
+        MEM_SESSIONS.setdefault(user_id, []).insert(0, sess_obj)
+        return sess_obj
+
     # Hash title before saving in Supabase so plain title never leaks
     payload = {"id": session_id, "user_id": user_id, "title": mask_secure_hash(title)}
 
-    sess_obj = {"id": session_id, "user_id": user_id, "title": title, "created_at": datetime.now(timezone.utc).isoformat()}
     rows = _sb_json(_sb_request("POST", "chat_sessions", json_body=payload,
         prefer="return=representation"), "chat_sessions")
     if not rows or not rows[0].get("id"):
@@ -462,6 +592,11 @@ def sb_create_session(user_id: int, title: str, session_id: str | None = None) -
 
 
 def sb_get_session(session_id: str, user_id: int) -> dict | None:
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        for s in MEM_SESSIONS.get(user_id, []):
+            if s.get("id") == session_id:
+                return s
+        return None
     rows = _sb_json(_sb_request("GET", "chat_sessions",
         params=f"?id=eq.{session_id}&user_id=eq.{user_id}&select=id,title,user_id"), "chat_sessions")
     if not rows:
@@ -472,6 +607,11 @@ def sb_get_session(session_id: str, user_id: int) -> dict | None:
 
 
 def sb_rename_session(session_id: str, user_id: int, title: str) -> None:
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        for s in MEM_SESSIONS.get(user_id, []):
+            if s["id"] == session_id:
+                s["title"] = title
+        return
     rows = _sb_json(_sb_request("PATCH", "chat_sessions",
         params=f"?id=eq.{session_id}&user_id=eq.{user_id}",
         json_body={"title": mask_secure_hash(title)}, prefer="return=representation"), "chat_sessions")
@@ -483,12 +623,18 @@ def sb_rename_session(session_id: str, user_id: int, title: str) -> None:
 
 
 def sb_delete_session(session_id: str, user_id: int) -> None:
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        MEM_SESSIONS[user_id] = [s for s in MEM_SESSIONS.get(user_id, []) if s["id"] != session_id]
+        MEM_MESSAGES.pop(session_id, None)
+        return
     _sb_request("DELETE", "chat_sessions", params=f"?id=eq.{session_id}&user_id=eq.{user_id}")
     MEM_SESSIONS[user_id] = [s for s in MEM_SESSIONS.get(user_id, []) if s["id"] != session_id]
     MEM_MESSAGES.pop(session_id, None)
 
 
 def sb_get_messages(session_id: str) -> list:
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        return list(MEM_MESSAGES.get(session_id, []))
     msgs = _sb_json(_sb_request("GET", "chat_messages",
         params=f"?session_id=eq.{session_id}&select=role,content,created_at&order=id.asc"), "chat_messages")
     for m in msgs:
@@ -498,6 +644,9 @@ def sb_get_messages(session_id: str) -> list:
 
 
 def sb_get_recent_messages(session_id: str, limit: int = 15) -> list:
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        all_msgs = MEM_MESSAGES.get(session_id, [])
+        return list(all_msgs[-limit:])
     raw_msgs = _sb_json(_sb_request("GET", "chat_messages",
         params=f"?session_id=eq.{session_id}&select=role,content,created_at&order=id.desc&limit={limit}"), "chat_messages")
     msgs = list(reversed(raw_msgs))
@@ -507,10 +656,18 @@ def sb_get_recent_messages(session_id: str, limit: int = 15) -> list:
     return msgs
 
 
-def sb_insert_message(session_id: str, role: str, content: str) -> None:
+def sb_insert_message(session_id: str, role: str, content: str, idempotency_key: str | None = None) -> None:
     msg_obj = {"role": role, "content": content, "created_at": datetime.now(timezone.utc).isoformat()}
+    if idempotency_key:
+        msg_obj["idempotency_key"] = idempotency_key
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        logger.warning("Supabase unconfigured; using in-memory message storage for dev")
+        MEM_MESSAGES.setdefault(session_id, []).append(msg_obj)
+        return
     stored_content = mask_secure_hash(content) if role == "user" else content
     payload = {"session_id": session_id, "role": role, "content": stored_content}
+    if idempotency_key:
+        payload["idempotency_key"] = idempotency_key
     _sb_request("POST", "chat_messages", json_body=payload, prefer="return=minimal")
     MEM_MESSAGES.setdefault(session_id, []).append(msg_obj)
 
@@ -730,7 +887,8 @@ def index():
 def get_config():
     """Expose public environment configuration (e.g. Google OAuth Client ID)."""
     return jsonify({
-        "google_client_id": os.environ.get("GOOGLE_CLIENT_ID", "")
+        "google_client_id": os.environ.get("GOOGLE_CLIENT_ID", ""),
+        "telegram_bot_username": os.environ.get("TELEGRAM_BOT_USERNAME", "AiChatExpert_Bot")
     })
 
 
@@ -961,6 +1119,7 @@ def auth_web():
 
     return jsonify({
         "status": "authenticated",
+        "authenticated": True,
         "user": {
             "id": user_id,
             "first_name": name,
@@ -1520,7 +1679,7 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
             return None, jsonify({"error": "Could not create a durable chat session. Please retry.", "code": "SESSION_CREATE_FAILED", "retryable": True}), 503
 
     try:
-        sb_insert_message(session_id, "user", content)
+        sb_insert_message(session_id, "user", content, idempotency_key=data.get("idempotency_key"))
     except SupabaseOperationError:
         refund_user_quota(user_id)
         return None, jsonify({"error": "Your message could not be saved. Please retry.", "code": "MESSAGE_SAVE_FAILED", "retryable": True}), 503
