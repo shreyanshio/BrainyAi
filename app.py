@@ -879,8 +879,45 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 @app.route("/")
 def index():
-    frontend_url = os.getenv("FRONTEND_URL", "https://brainyai.cenai.workers.dev")
-    return redirect(frontend_url, code=302)
+    frontend_url = os.getenv("FRONTEND_URL", "https://brainyai.cenai.workers.dev").rstrip("/")
+    code = request.args.get("code", "")
+    error = request.args.get("error", "")
+
+    # Bridge Google OAuth redirect fragments and parameters to the frontend
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Connecting to Brainy...</title>
+</head>
+<body style="background:#090a0f;color:#fff;font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">
+    <div style="text-align:center;">
+        <div style="width:36px;height:36px;border:3px solid #10b981;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 16px auto;"></div>
+        <h2 style="font-weight:600;font-size:18px;margin:0 0 6px 0;">Signing in with Google...</h2>
+        <p style="color:#888;font-size:13px;margin:0;">Connecting your secure study workspace</p>
+    </div>
+    <style>@keyframes spin {{ to {{ transform: rotate(360deg); }} }}</style>
+    <script>
+        try {{
+            const hash = window.location.hash.substring(1);
+            const params = new URLSearchParams(hash || window.location.search);
+            const token = params.get('access_token') || params.get('id_token') || '{code}';
+            const err = params.get('error') || '{error}';
+            if (token) {{
+                window.location.replace("{frontend_url}/?google_token=" + encodeURIComponent(token));
+            }} else if (err) {{
+                window.location.replace("{frontend_url}/?auth_error=" + encodeURIComponent(err));
+            }} else {{
+                window.location.replace("{frontend_url}");
+            }}
+        }} catch(e) {{
+            window.location.replace("{frontend_url}");
+        }}
+    </script>
+</body>
+</html>"""
+    return html
 
 
 @app.route("/api/config", methods=["GET"])

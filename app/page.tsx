@@ -13,6 +13,7 @@ import {
   fetchUserProfile,
   fetchUserPreferences,
   loginWithTelegramInitData,
+  loginWithGoogle,
   logoutUser,
   renameSession,
   saveUserMemoryNote,
@@ -166,7 +167,7 @@ export default function BrainyApp() {
     const authenticate = async () => {
       setAuthLoading(true)
       try {
-        // 1. Check URL query params for Telegram handshake redirect (?auth_session=...)
+        // 1. Check URL query params for Telegram handshake or Google OAuth redirect
         if (typeof window !== 'undefined') {
           const urlParams = new URLSearchParams(window.location.search)
           const authSessionParam = urlParams.get('auth_session')
@@ -179,6 +180,24 @@ export default function BrainyApp() {
               await loadInitialData()
               setAuthLoading(false)
               return
+            }
+          }
+
+          const googleTokenParam = urlParams.get('google_token')
+          if (googleTokenParam) {
+            try {
+              const googleUser = await loginWithGoogle(googleTokenParam)
+              if (googleUser) {
+                setUser(googleUser)
+                setCurrentView('chat')
+                window.history.replaceState({}, document.title, window.location.pathname)
+                await loadInitialData()
+                setAuthLoading(false)
+                return
+              }
+            } catch (gErr) {
+              console.error('Failed to authenticate with google_token:', gErr)
+              window.history.replaceState({}, document.title, window.location.pathname)
             }
           }
         }

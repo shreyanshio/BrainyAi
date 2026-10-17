@@ -58,6 +58,15 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
   useEffect(() => {
     let mounted = true
     const init = async () => {
+      if (typeof window !== 'undefined') {
+        const urlParams = new URLSearchParams(window.location.search)
+        const authErr = urlParams.get('auth_error')
+        if (authErr) {
+          setError('Google authentication was cancelled or failed. Please try again or use Telegram.')
+          window.history.replaceState({}, document.title, window.location.pathname)
+        }
+      }
+
       const activeClientId = googleClientId || DEFAULT_GOOGLE_CLIENT_ID
       if (activeClientId) {
         setupGoogleButton(activeClientId)
@@ -121,48 +130,15 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
 
   const handleGoogleButtonClick = () => {
     setError('')
-    const g = (window as any).google
+    setIsSubmitting(true)
     const activeClientId = googleClientId || DEFAULT_GOOGLE_CLIENT_ID
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(
+      activeClientId
+    )}&response_type=token&scope=${encodeURIComponent(
+      'openid email profile'
+    )}&redirect_uri=${encodeURIComponent('https://brainyai.up.railway.app')}&prompt=select_account`
 
-    // 1. Try OAuth2 token client popup (cleanest popup experience)
-    if (g?.accounts?.oauth2) {
-      try {
-        const tokenClient = g.accounts.oauth2.initTokenClient({
-          client_id: activeClientId,
-          scope: 'openid email profile',
-          callback: async (tokenResponse: any) => {
-            if (tokenResponse?.error) {
-              console.error('Google OAuth error:', tokenResponse)
-              setError(tokenResponse.error_description || tokenResponse.error || 'Google login cancelled or failed.')
-              return
-            }
-            if (tokenResponse?.access_token) {
-              await handleGoogleCallback({ credential: tokenResponse.access_token })
-            }
-          },
-        })
-        tokenClient.requestAccessToken({ prompt: 'select_account' })
-        return
-      } catch (err: any) {
-        console.warn('OAuth2 token client init failed, trying ID prompt:', err)
-      }
-    }
-
-    // 2. Fallback to ID prompt
-    if (g?.accounts?.id) {
-      try {
-        g.accounts.id.prompt((notification: any) => {
-          if (notification.isNotDisplayed()) {
-            console.warn('Google One Tap not displayed:', notification.getNotDisplayedReason())
-          }
-        })
-        return
-      } catch (err: any) {
-        console.error('Google ID prompt error:', err)
-      }
-    }
-
-    setError('Google Sign-In is still loading. Please wait a moment and try again, or use Continue with Telegram.')
+    window.location.href = authUrl
   }
 
   const handleGoogleCallback = async (response: any) => {
