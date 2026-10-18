@@ -512,15 +512,36 @@ MODELS_CATALOG = [
 
 def format_for_web(text: str) -> str:
     """
-    Light-touch formatting applied ONLY to what the web app displays (never
-    touches what's stored in Supabase or sent to Telegram). clean_response()
-    already handles code blocks / Unicode bold / italics fine on web thanks
-    to the .message-bubble { white-space: pre-wrap } CSS rule — this just
-    upgrades plain "- item" / "* item" markdown-style bullets into a real
-    bullet character so lists don't look like stray dashes in the chat UI.
+    Format assistant messages for the React/Markdown web application.
+    Converts any Telegram-safe HTML (<pre><code>, <code>) into clean standard Markdown
+    so code blocks and formulas render via ReactMarkdown instead of raw HTML tags.
     """
     if not text:
         return text
+
+    # Convert <pre><code class="language-xyz">code</code></pre> to ```xyz\ncode\n```
+    def _unhtml_fenced(m):
+        lang = m.group(1) or ""
+        code = m.group(2)
+        code = code.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+        return f"\n```{lang}\n{code}\n```\n"
+
+    text = re.sub(
+        r'<pre><code(?:\s+class=[\'"]language-([^\'"]+)[\'"])?>(.*?)</code></pre>',
+        _unhtml_fenced,
+        text,
+        flags=re.DOTALL | re.IGNORECASE
+    )
+
+    # Convert remaining <code>code</code> to `code`
+    def _unhtml_inline(m):
+        inner = m.group(1)
+        inner = inner.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+        return f"`{inner}`"
+
+    text = re.sub(r'<code>(.*?)</code>', _unhtml_inline, text, flags=re.DOTALL | re.IGNORECASE)
+
+    # Upgrade plain "- item" / "* item" bullets
     return re.sub(r'^[ \t]*[-*][ \t]+', '• ', text, flags=re.MULTILINE)
 
 
@@ -2168,8 +2189,8 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
     content = raw_content.strip()
     if len(content) > 12000:
         return None, jsonify({"error": "Message is too long (maximum 12,000 characters).", "code": "MESSAGE_TOO_LONG"}), 413
-    model_id = (data.get("model") or "brainy-balanced").strip().lower()
-    answer_length = (data.get("answer_length") or "medium").strip().lower()
+    model_id = (data.get("model") or "brainy-fast").strip().lower()
+    answer_length = (data.get("answer_length") or "short").strip().lower()
 
     if not content:
         return None, jsonify({"error": "Message content cannot be empty"}), 400
@@ -2344,28 +2365,29 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
         )
 
     # Answer length constraint handling
-    if answer_length == "short":
-        system_prompt += (
-            "\n\nANSWER LENGTH CONSTRAINT — SHORT MODE:\n"
-            "Keep your response concise, direct, and under 250 words. Focus strictly on "
-            "core definitions, key bullet points, and essential formulas. Avoid conversational filler."
-        )
-        max_tok = 350
-    elif answer_length == "long":
+    if answer_length == "long":
         system_prompt += (
             "\n\nANSWER LENGTH CONSTRAINT — LONG MODE:\n"
-            "Provide an exhaustive, in-depth explanation (~800-1200 words). Include background context, "
+            "Provide an exhaustive, in-depth explanation. Include background context, "
             "detailed step-by-step breakdown or derivations, real-world examples, common pitfalls, and review questions."
         )
-        max_tok = 1400
-    else:
-        answer_length = "medium"
+        max_tok = 3000
+    elif answer_length == "medium":
         system_prompt += (
             "\n\nANSWER LENGTH CONSTRAINT — MEDIUM MODE:\n"
             "Provide a balanced, well-structured explanation (~400-600 words) with clear headings, "
             "bullet points, and relevant examples."
         )
-        max_tok = 800
+        max_tok = 2048
+    else:
+        # Default: Fast & Short mode (quickest TTFT, concise bullet points)
+        answer_length = "short"
+        system_prompt += (
+            "\n\nANSWER LENGTH CONSTRAINT — SHORT MODE (DEFAULT):\n"
+            "Keep your response concise, fast, and direct. Focus strictly on "
+            "core definitions, key bullet points, and essential formulas. Avoid conversational filler."
+        )
+        max_tok = 1024
 
     # Ground the model in real facts about this user's quota
     system_prompt += (

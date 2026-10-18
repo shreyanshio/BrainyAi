@@ -294,7 +294,7 @@ export const DEFAULT_PREFERENCES = {
   chatWidth: 'standard' as const,
   density: 'comfortable' as const,
   readabilityMode: false,
-  defaultModel: 'brainy-balanced',
-  defaultLength: 'medium' as const,
+  defaultModel: 'brainy-fast',
+  defaultLength: 'short' as const,
   focusTimerMinutes: 25,
 }

@@ -73,9 +73,9 @@ export default function BrainyApp() {
   const selectionRequestRef = useRef(0)
   const viewGenerationRef = useRef(0)
 
-  // Capabilities & Preferences state
-  const [activeModel, setActiveModel] = useState('brainy-balanced')
-  const [activeLength, setActiveLength] = useState<AnswerLength>('medium')
+  // Capabilities & Preferences state (Default: Fast & Short for quickest answers)
+  const [activeModel, setActiveModel] = useState('brainy-fast')
+  const [activeLength, setActiveLength] = useState<AnswerLength>('short')
 
   // Global 30 msg / 5h Quota state
   const [usage, setUsage] = useState<UsageStatus | null>(null)
