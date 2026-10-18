@@ -180,8 +180,8 @@ def _collect_keys(prefix: str, count: int = 10) -> list:
 
 # ── API Keys (supports singular GROQ_API_KEY and multi-key GROQ_API_KEY_1..N) ──
 GROQ_API_KEYS       = _collect_keys("GROQ_API_KEY", 10)
-GROQ_FAST_MODEL = (os.getenv("GROQ_MODEL_FAST") or "llama-3.1-8b-instant").strip()
-GROQ_BALANCED_MODEL = (os.getenv("GROQ_MODEL_BALANCED") or "llama-3.3-70b-versatile").strip()
+GROQ_FAST_MODEL = (os.getenv("GROQ_MODEL_FAST") or "qwen/qwen3.8-27b").strip()
+GROQ_BALANCED_MODEL = (os.getenv("GROQ_MODEL_BALANCED") or "openai/gpt-oss-120b").strip()
 NVIDIA_API_KEYS     = _collect_keys("NVIDIA_API_KEY", 10)
 DEEPSEEK_API_KEYS   = _collect_keys("DEEPSEEK_API_KEY", 10)
 GEMINI_API_KEYS     = _collect_keys("GEMINI_API_KEY", 10)
@@ -1197,37 +1197,49 @@ def _get_groq_client(api_key: str) -> Groq:
 def _call_groq(messages, system_prompt, max_tokens):
     if not GROQ_API_KEYS:
         raise Exception("NO_KEYS: groq")
+    groq_models = [
+        GROQ_BALANCED_MODEL,
+        "qwen/qwen3.8-27b",
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
+        "llama-3.1-8b-instant",
+    ]
+    groq_models = list(dict.fromkeys(groq_models))
+
     for _ in range(len(GROQ_API_KEYS)):
-        try:
-            key = _rotate_key("groq", GROQ_API_KEYS)
-            client = _get_groq_client(key)
-            kwargs = dict(
-                model=GROQ_BALANCED_MODEL,
-                messages=[{"role": "system", "content": system_prompt}] + messages
-            )
-            if max_tokens:
-                kwargs["max_tokens"] = max_tokens
-            if any(term in GROQ_BALANCED_MODEL.lower() for term in ("r1", "reasoning", "deepseek")):
-                kwargs["reasoning_effort"] = "medium"
-            if system_prompt == QUIZ_SYSTEM_PROMPT:
-                kwargs["response_format"] = {"type": "json_object"}
+        key = _rotate_key("groq", GROQ_API_KEYS)
+        client = _get_groq_client(key)
+        for model in groq_models:
             try:
-                resp = client.chat.completions.create(**kwargs)
-            except Exception as pe:
-                err_lower = str(pe).lower()
-                if "max_tokens" in err_lower or "unexpected" in err_lower:
-                    kwargs.pop("max_tokens", None)
-                    kwargs["max_completion_tokens"] = max_tokens
+                kwargs = dict(
+                    model=model,
+                    messages=[{"role": "system", "content": system_prompt}] + messages
+                )
+                if max_tokens:
+                    kwargs["max_tokens"] = max_tokens
+                if any(term in model.lower() for term in ("r1", "reasoning", "deepseek")):
+                    kwargs["reasoning_effort"] = "medium"
+                if system_prompt == QUIZ_SYSTEM_PROMPT:
+                    kwargs["response_format"] = {"type": "json_object"}
+                try:
                     resp = client.chat.completions.create(**kwargs)
-                else:
-                    raise pe
-            truncated = resp.choices[0].finish_reason == "length"
-            return resp.choices[0].message.content, truncated
-        except Exception as e:
-            if _is_rate_err(e):
-                print(f"Groq key exhausted, rotating...")
-                continue
-            raise
+                except Exception as pe:
+                    err_lower = str(pe).lower()
+                    if "max_tokens" in err_lower or "unexpected" in err_lower:
+                        kwargs.pop("max_tokens", None)
+                        kwargs["max_completion_tokens"] = max_tokens
+                        resp = client.chat.completions.create(**kwargs)
+                    else:
+                        raise pe
+                truncated = resp.choices[0].finish_reason == "length"
+                return resp.choices[0].message.content, truncated
+            except Exception as e:
+                err_s = str(e).lower()
+                if "model" in err_s or "404" in err_s:
+                    continue
+                if _is_rate_err(e):
+                    break
+                raise
     raise Exception("All Groq keys exhausted")
 
 def _stream_groq(messages, system_prompt, max_tokens, model_id=None):
@@ -1238,7 +1250,14 @@ def _stream_groq(messages, system_prompt, max_tokens, model_id=None):
     fast = model_id == "brainy-fast"
     requested_model = GROQ_FAST_MODEL if fast else GROQ_BALANCED_MODEL
     # Groq active models fallback chain in case requested model is unavailable on the account
-    groq_models = [requested_model, "llama-3.1-8b-instant", "llama3-70b-8192", "mixtral-8x7b-32768", "gemma2-9b-it"]
+    groq_models = [
+        requested_model,
+        "qwen/qwen3.8-27b",
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
+        "llama-3.1-8b-instant",
+        "llama-3.3-70b-versatile",
+    ]
     # De-duplicate while preserving order
     groq_models = list(dict.fromkeys(groq_models))
 
