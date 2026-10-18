@@ -172,8 +172,8 @@ def _collect_keys(prefix: str, count: int = 10) -> list:
 
 # ── API Keys (supports singular GROQ_API_KEY and multi-key GROQ_API_KEY_1..N) ──
 GROQ_API_KEYS       = _collect_keys("GROQ_API_KEY", 10)
-GROQ_FAST_MODEL = (os.getenv("GROQ_MODEL_FAST") or "openai/gpt-oss-20b").strip()
-GROQ_BALANCED_MODEL = (os.getenv("GROQ_MODEL_BALANCED") or "openai/gpt-oss-120b").strip()
+GROQ_FAST_MODEL = (os.getenv("GROQ_MODEL_FAST") or "llama-3.1-8b-instant").strip()
+GROQ_BALANCED_MODEL = (os.getenv("GROQ_MODEL_BALANCED") or "llama-3.3-70b-versatile").strip()
 NVIDIA_API_KEYS     = _collect_keys("NVIDIA_API_KEY", 10)
 DEEPSEEK_API_KEYS   = _collect_keys("DEEPSEEK_API_KEY", 10)
 GEMINI_API_KEYS     = _collect_keys("GEMINI_API_KEY", 10)
@@ -1196,9 +1196,10 @@ def _call_groq(messages, system_prompt, max_tokens):
             kwargs = dict(
                 model=GROQ_BALANCED_MODEL,
                 max_completion_tokens=max_tokens,
-                reasoning_effort="medium",
                 messages=[{"role": "system", "content": system_prompt}] + messages
             )
+            if any(term in GROQ_BALANCED_MODEL.lower() for term in ("r1", "reasoning", "deepseek")):
+                kwargs["reasoning_effort"] = "medium" 
             if system_prompt == QUIZ_SYSTEM_PROMPT:
                 kwargs["response_format"] = {"type": "json_object"}
             resp = client.chat.completions.create(**kwargs)
@@ -1226,10 +1227,11 @@ def _stream_groq(messages, system_prompt, max_tokens, model_id=None):
             kwargs = dict(
                 model=model_name,
                 max_completion_tokens=max_tokens or 1024,
-                reasoning_effort="low" if fast else "medium",
                 messages=[{"role": "system", "content": system_prompt}] + messages,
                 stream=True
             )
+            if any(term in model_name.lower() for term in ("r1", "reasoning", "deepseek")):
+                kwargs["reasoning_effort"] = "low" if fast else "medium" 
             response_stream = client.chat.completions.create(**kwargs)
             for chunk in response_stream:
                 if chunk.choices and len(chunk.choices) > 0:
@@ -1247,7 +1249,7 @@ def _stream_groq(messages, system_prompt, max_tokens, model_id=None):
 def _stream_cerebras(messages, system_prompt, max_tokens, model_id=None):
     if not CEREBRAS_API_KEYS:
         raise Exception("NO_KEYS: cerebras")
-    CEREBRAS_MODELS = ["gpt-oss-120b", "zai-glm-4.7"]
+    CEREBRAS_MODELS = ["llama3.1-8b", "llama3.3-70b"]
     for _ in range(len(CEREBRAS_API_KEYS)):
         try:
             key = _rotate_key("cerebras", CEREBRAS_API_KEYS)
@@ -1349,9 +1351,9 @@ def _stream_gemini(messages, system_prompt, max_tokens, model_id=None):
     if not GEMINI_API_KEYS:
         raise Exception("NO_KEYS: gemini")
     GEMINI_MODELS = [
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-3-flash-preview",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
     ]
     for _ in range(len(GEMINI_API_KEYS)):
         try:
@@ -1402,9 +1404,9 @@ def _call_gemini(messages, system_prompt, max_tokens):
     if not GEMINI_API_KEYS:
         raise Exception("NO_KEYS: gemini")
     GEMINI_MODELS = [
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-3-flash-preview",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
     ]
     rate_limited_count = 0
     for _ in range(len(GEMINI_API_KEYS)):
@@ -1536,7 +1538,7 @@ def _call_cerebras(messages, system_prompt, max_tokens):
         raise Exception("NO_KEYS: cerebras")
     # NOTE: Llama 3.3 70B was removed from Cerebras's public catalog — these are the
     # current models as of mid-2026. (Re-applying this fix; it reverted in this upload.)
-    CEREBRAS_MODELS = ["gpt-oss-120b", "zai-glm-4.7"]
+    CEREBRAS_MODELS = ["llama3.1-8b", "llama3.3-70b"]
     for _ in range(len(CEREBRAS_API_KEYS)):
         try:
             key = _rotate_key("cerebras", CEREBRAS_API_KEYS)
@@ -1683,7 +1685,6 @@ def _call_sambanova(messages, system_prompt, max_tokens):
         raise Exception("NO_KEYS: sambanova")
     SAMBANOVA_MODELS = [
         "Meta-Llama-3.3-70B-Instruct",
-        "Meta-Llama-3.1-70B-Instruct",
         "Meta-Llama-3.1-8B-Instruct",
     ]
     for _ in range(len(SAMBANOVA_API_KEYS)):

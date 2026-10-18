@@ -312,3 +312,77 @@ create index if not exists idx_chat_messages_idempotency_key on chat_messages(id
 create unique index if not exists idx_chat_messages_session_idempotency_unique
   on chat_messages(session_id, idempotency_key) where idempotency_key is not null;
 
+-- ── 11. CHAT CONVERSATION OWNERSHIP & RECENT ACTIVITY ────────────────
+alter table public.chat_sessions
+  add column if not exists updated_at timestamptz default now(),
+  add column if not exists last_message_at timestamptz;
+
+update public.chat_sessions
+set updated_at = coalesce(updated_at, created_at, now())
+where updated_at is null;
+
+alter table public.chat_messages
+  add column if not exists user_id bigint;
+
+-- Backfill user_id on existing messages from their owning session
+update public.chat_messages as m
+set user_id = s.user_id
+from public.chat_sessions as s
+where m.session_id = s.id and m.user_id is null;
+
+create index if not exists idx_chat_messages_user_id on public.chat_messages(user_id);
+create index if not exists idx_chat_sessions_owner_activity
+  on public.chat_sessions(user_id, last_message_at desc nulls last, created_at desc);
+create index if not exists idx_chat_messages_owner_session_order
+  on public.chat_messages(user_id, session_id, id asc);
+
+-- Ensure unique pair for composite foreign key
+create unique index if not exists idx_chat_sessions_id_user_id_unique
+  on public.chat_sessions(id, user_id);
+
+-- Session activity touch trigger
+create or replace function public.brainy_touch_chat_session_activity()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  update public.chat_sessions
+  set last_message_at = greatest(coalesce(last_message_at, new.created_at), new.created_at),
+      updated_at = greatest(coalesce(updated_at, new.created_at), new.created_at)
+  where id = new.session_id;
+  return new;
+end;
+$$;
+
+drop trigger if exists chat_messages_touch_session_activity on public.chat_messages;
+create trigger chat_messages_touch_session_activity
+  after insert on public.chat_messages
+  for each row execute function public.brainy_touch_chat_session_activity();
+
+-- ── 12. CHAT WORKSPACE METADATA (SAVED, PINNED, ARCHIVED) ─────────────
+alter table public.chat_sessions
+  add column if not exists is_saved boolean not null default false,
+  add column if not exists is_pinned boolean not null default false,
+  add column if not exists is_archived boolean not null default false;
+
+create index if not exists idx_chat_sessions_owner_saved_activity
+  on public.chat_sessions (user_id, last_message_at desc nulls last, created_at desc)
+  where is_saved = true;
+
+create index if not exists idx_chat_sessions_owner_pinned_activity
+  on public.chat_sessions (user_id, last_message_at desc nulls last, created_at desc)
+  where is_pinned = true;
+
+create index if not exists idx_chat_sessions_owner_archived_activity
+  on public.chat_sessions (user_id, last_message_at desc nulls last, created_at desc)
+  where is_archived = true;
+
+-- ── 13. ROLLING CONVERSATION MEMORY & COMPACT SUMMARY ────────────────
+alter table public.chat_sessions
+  add column if not exists context_summary text,
+  add column if not exists summary_through_message_id bigint,
+  add column if not exists summary_updated_at timestamptz;
+
+-- ── 14. PERMISSIONS & SERVICE ROLE GRANTS ────────────────────────────
+grant select, insert, update, delete
+  on public.chat_sessions, public.chat_messages, public.user_memory, public.user_quotas, public.rate_limit_buckets
+  to service_role;
+

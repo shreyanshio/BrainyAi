@@ -665,13 +665,28 @@ def sb_list_sessions(user_id: int, view: str = "recent", limit: int = 100, offse
         else:
             rows = [r for r in rows if r.get("is_archived", False)]
         return rows[offset:offset + limit]
-    rows = _sb_json(_sb_request("GET", "chat_sessions",
-        params=(f"?user_id=eq.{user_id}&select=id,title,created_at,updated_at,last_message_at,is_saved,is_pinned,is_archived"
-                f"{view_filters[view]}&order=is_pinned.desc,last_message_at.desc.nullslast,created_at.desc"
-                f"&limit={limit}&offset={offset}")), "chat_sessions")
+    try:
+        rows = _sb_json(_sb_request("GET", "chat_sessions",
+            params=(f"?user_id=eq.{user_id}&select=id,title,created_at,updated_at,last_message_at,is_saved,is_pinned,is_archived"
+                    f"{view_filters[view]}&order=is_pinned.desc,last_message_at.desc.nullslast,created_at.desc"
+                    f"&limit={limit}&offset={offset}")), "chat_sessions")
+    except SupabaseSchemaUnavailable:
+        logger.warning("Expanded session columns unavailable; falling back to legacy chat_sessions schema user_id=%s", user_id)
+        rows = _sb_json(_sb_request("GET", "chat_sessions",
+            params=f"?user_id=eq.{user_id}&select=id,title,created_at&order=created_at.desc&limit={limit}&offset={offset}"),
+            "chat_sessions")
+        for r in rows:
+            r.setdefault("updated_at", r.get("created_at"))
+            r.setdefault("last_message_at", r.get("created_at"))
+            r.setdefault("is_saved", False)
+            r.setdefault("is_pinned", False)
+            r.setdefault("is_archived", False)
     for row in rows:
         if row.get("title"):
-            row["title"] = unmask_secure_hash(row["title"])
+            try:
+                row["title"] = unmask_secure_hash(row["title"])
+            except StoredChatContentUnavailable:
+                row["title"] = "Study Session"
     return rows
 
 
@@ -693,7 +708,10 @@ def sb_create_session(user_id: int, title: str, session_id: str | None = None) -
     if not rows or not rows[0].get("id"):
         raise SupabaseOperationError("Supabase did not confirm session creation")
     created = rows[0]
-    created["title"] = unmask_secure_hash(created.get("title", title))
+    try:
+        created["title"] = unmask_secure_hash(created.get("title", title))
+    except StoredChatContentUnavailable:
+        created["title"] = title
     MEM_SESSIONS.setdefault(user_id, []).insert(0, created)
     return created
 
@@ -723,9 +741,15 @@ def sb_get_session(session_id: str, user_id: int) -> dict | None:
     if not rows:
         return None
     row = rows[0]
-    row["title"] = unmask_secure_hash(row.get("title", ""))
+    try:
+        row["title"] = unmask_secure_hash(row.get("title", ""))
+    except StoredChatContentUnavailable:
+        row["title"] = "Study Session"
     if row.get("context_summary"):
-        row["context_summary"] = unmask_secure_hash(row["context_summary"])
+        try:
+            row["context_summary"] = unmask_secure_hash(row["context_summary"])
+        except StoredChatContentUnavailable:
+            row["context_summary"] = ""
     return row
 
 
@@ -741,7 +765,10 @@ def sb_get_messages_after(session_id: str, user_id: int, after_id: int = 0, limi
                 f"&select=id,role,content,created_at&order=id.asc&limit={int(limit)}")), "chat_messages")
     for row in rows:
         if row.get("content"):
-            row["content"] = unmask_secure_hash(row["content"])
+            try:
+                row["content"] = unmask_secure_hash(row["content"])
+            except StoredChatContentUnavailable:
+                row["content"] = "[Encrypted message from previous session]"
     return rows
 
 
@@ -918,17 +945,33 @@ def sb_get_messages(session_id: str, user_id: int) -> list:
     page_size = 500
     msgs = []
     offset = 0
-    while True:
-        page = _sb_json(_sb_request("GET", "chat_messages",
-            params=(f"?session_id=eq.{session_id}&user_id=eq.{int(user_id)}"
-                    f"&select=id,role,content,created_at&order=id.asc&limit={page_size}&offset={offset}")), "chat_messages")
-        msgs.extend(page)
-        if len(page) < page_size:
-            break
-        offset += page_size
+    try:
+        while True:
+            page = _sb_json(_sb_request("GET", "chat_messages",
+                params=(f"?session_id=eq.{session_id}&user_id=eq.{int(user_id)}"
+                        f"&select=id,role,content,created_at&order=id.asc&limit={page_size}&offset={offset}")), "chat_messages")
+            msgs.extend(page)
+            if len(page) < page_size:
+                break
+            offset += page_size
+    except SupabaseSchemaUnavailable:
+        msgs = []
+        offset = 0
+        while True:
+            page = _sb_json(_sb_request("GET", "chat_messages",
+                params=(f"?session_id=eq.{session_id}"
+                        f"&select=id,role,content,created_at&order=id.asc&limit={page_size}&offset={offset}")), "chat_messages")
+            msgs.extend(page)
+            if len(page) < page_size:
+                break
+            offset += page_size
+
     for m in msgs:
         if m.get("content"):
-            m["content"] = unmask_secure_hash(m["content"])
+            try:
+                m["content"] = unmask_secure_hash(m["content"])
+            except StoredChatContentUnavailable:
+                m["content"] = "[Encrypted message from previous session]"
     return msgs
 
 
@@ -946,31 +989,50 @@ def sb_get_recent_messages(session_id: str, limit: int | None = 15, user_id: int
         raise SupabaseOperationError("An authenticated owner is required to read chat messages")
     id_filter = f"&id=gt.{int(after_id)}" if after_id is not None else ""
 
-    if limit is None:
-        # Read the full conversation in stable pages. Supabase projects often
-        # cap a single REST response, so a long chat must not silently lose its
-        # oldest context at the API row limit.
-        page_size = 500
-        msgs = []
-        offset = 0
-        while True:
-            page = _sb_json(_sb_request("GET", "chat_messages",
+    msgs = []
+    try:
+        if limit is None:
+            page_size = 500
+            offset = 0
+            while True:
+                page = _sb_json(_sb_request("GET", "chat_messages",
+                    params=(f"?session_id=eq.{session_id}&user_id=eq.{int(user_id)}{id_filter}"
+                            "&select=id,role,content,created_at"
+                            f"&order=id.asc&limit={page_size}&offset={offset}")), "chat_messages")
+                msgs.extend(page)
+                if len(page) < page_size:
+                    break
+                offset += page_size
+        else:
+            raw_msgs = _sb_json(_sb_request("GET", "chat_messages",
                 params=(f"?session_id=eq.{session_id}&user_id=eq.{int(user_id)}{id_filter}"
-                        "&select=id,role,content,created_at"
-                        f"&order=id.asc&limit={page_size}&offset={offset}")), "chat_messages")
-            msgs.extend(page)
-            if len(page) < page_size:
-                break
-            offset += page_size
-    else:
-        raw_msgs = _sb_json(_sb_request("GET", "chat_messages",
-            params=(f"?session_id=eq.{session_id}&user_id=eq.{int(user_id)}{id_filter}"
-                    f"&select=id,role,content,created_at&order=id.desc&limit={limit}")), "chat_messages")
-        msgs = list(reversed(raw_msgs))
+                        f"&select=id,role,content,created_at&order=id.desc&limit={limit}")), "chat_messages")
+            msgs = list(reversed(raw_msgs))
+    except SupabaseSchemaUnavailable:
+        if limit is None:
+            page_size = 500
+            offset = 0
+            while True:
+                page = _sb_json(_sb_request("GET", "chat_messages",
+                    params=(f"?session_id=eq.{session_id}{id_filter}"
+                            "&select=id,role,content,created_at"
+                            f"&order=id.asc&limit={page_size}&offset={offset}")), "chat_messages")
+                msgs.extend(page)
+                if len(page) < page_size:
+                    break
+                offset += page_size
+        else:
+            raw_msgs = _sb_json(_sb_request("GET", "chat_messages",
+                params=(f"?session_id=eq.{session_id}{id_filter}"
+                        f"&select=id,role,content,created_at&order=id.desc&limit={limit}")), "chat_messages")
+            msgs = list(reversed(raw_msgs))
 
     for m in msgs:
         if m.get("content"):
-            m["content"] = unmask_secure_hash(m["content"])
+            try:
+                m["content"] = unmask_secure_hash(m["content"])
+            except StoredChatContentUnavailable:
+                m["content"] = "[Encrypted message from previous session]"
     return msgs
 
 
@@ -998,12 +1060,16 @@ def sb_insert_message(session_id: str, role: str, content: str,
     payload = {"session_id": session_id, "user_id": int(user_id), "role": role, "content": stored_content}
     if idempotency_key:
         payload["idempotency_key"] = idempotency_key
-    if idempotency_key:
-        # Requires the matching session-scoped unique index in the migration.
-        _sb_request("POST", "chat_messages?on_conflict=session_id,idempotency_key",
-                    json_body=payload, prefer="resolution=ignore-duplicates,return=minimal")
-    else:
-        _sb_request("POST", "chat_messages", json_body=payload, prefer="return=minimal")
+    try:
+        if idempotency_key:
+            # Requires the matching session-scoped unique index in the migration.
+            _sb_request("POST", "chat_messages?on_conflict=session_id,idempotency_key",
+                        json_body=payload, prefer="resolution=ignore-duplicates,return=minimal")
+        else:
+            _sb_request("POST", "chat_messages", json_body=payload, prefer="return=minimal")
+    except SupabaseSchemaUnavailable:
+        fallback_payload = {"session_id": session_id, "role": role, "content": stored_content}
+        _sb_request("POST", "chat_messages", json_body=fallback_payload, prefer="return=minimal")
     MEM_MESSAGES.setdefault(session_id, []).append(msg_obj)
 
 
@@ -2206,7 +2272,7 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
                         session_id, None, user_id=user_id, after_id=summary_through_id
                     )
             else:
-                history_rows = sb_get_recent_messages(session_id, None, user_id=user_id)
+                history_rows = sb_get_recent_messages(session_id, 30, user_id=user_id)
             messages_context = [{"role": m["role"], "content": m["content"]} for m in history_rows]
         except SupabaseOperationError as exc:
             logger.warning("Chat history read failed request_id=%s category=%s", getattr(g, "request_id", ""), type(exc).__name__)

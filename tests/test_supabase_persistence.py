@@ -215,6 +215,44 @@ class SupabasePersistenceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             app.sb_update_session_metadata("session", 123, {"is_saved": "yes"})
 
+    @patch("app._sb_request")
+    def test_session_list_gracefully_falls_back_on_schema_error(self, mock_sb):
+        mock_sb.side_effect = [
+            app.SupabaseSchemaUnavailable("column chat_sessions.last_message_at does not exist"),
+            FakeResponse([{"id": "session-1", "title": "Legacy chat", "created_at": "2026-10-18T10:00:00Z"}]),
+        ]
+        sessions = app.sb_list_sessions(123)
+        self.assertEqual(len(sessions), 1)
+        self.assertEqual(sessions[0]["id"], "session-1")
+        self.assertEqual(sessions[0]["title"], "Legacy chat")
+        self.assertFalse(sessions[0]["is_pinned"])
+
+    @patch("app._sb_request")
+    def test_messages_read_gracefully_falls_back_on_schema_error(self, mock_sb):
+        mock_sb.side_effect = [
+            app.SupabaseSchemaUnavailable("column chat_messages.user_id does not exist"),
+            FakeResponse([{"id": 1, "role": "user", "content": "Hello", "created_at": "2026-10-18T10:00:00Z"}]),
+        ]
+        messages = app.sb_get_messages("session-1", 123)
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["content"], "Hello")
+
+    @patch("app._sb_request")
+    @patch("app.unmask_secure_hash", side_effect=app.StoredChatContentUnavailable("rotated secret"))
+    def test_session_list_and_messages_gracefully_handle_unmask_failure(self, _unmask, mock_sb):
+        mock_sb.return_value = FakeResponse([
+            {"id": "session-rot", "title": "hsh_v1_rot", "created_at": "2026-10-18T10:00:00Z",
+             "is_pinned": False, "is_saved": False, "is_archived": False, "last_message_at": None, "updated_at": None}
+        ])
+        sessions = app.sb_list_sessions(123)
+        self.assertEqual(sessions[0]["title"], "Study Session")
+
+        mock_sb.return_value = FakeResponse([
+            {"id": 10, "role": "user", "content": "hsh_v1_secret", "created_at": "2026-10-18T10:00:00Z"}
+        ])
+        messages = app.sb_get_messages("session-rot", 123)
+        self.assertEqual(messages[0]["content"], "[Encrypted message from previous session]")
+
 
 if __name__ == "__main__":
     unittest.main()
