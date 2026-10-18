@@ -1876,6 +1876,8 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
     if not isinstance(raw_content, str):
         return None, jsonify({"error": "Message must be text", "code": "INVALID_MESSAGE"}), 400
     content = raw_content.strip()
+    if len(content) > 12000:
+        return None, jsonify({"error": "Message is too long (maximum 12,000 characters).", "code": "MESSAGE_TOO_LONG"}), 413
     model_id = (data.get("model") or "brainy-balanced").strip().lower()
     answer_length = (data.get("answer_length") or "medium").strip().lower()
 
@@ -1904,11 +1906,6 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
 
     # Sanitize user input
     content = sanitize_input(content)
-
-    # Blacklist check
-    if is_blacklisted(content):
-        log_security_event("blacklist_blocked", ip, user_id, "message rejected by input filter")
-        return None, jsonify({"error": "Invalid input detected."}), 403
 
     intent, payload = study_bot.detect_intent(content)
 

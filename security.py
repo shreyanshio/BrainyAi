@@ -42,8 +42,8 @@ BLACKLIST_PATTERNS = [
     re.compile(r'--'),
     re.compile(r'/\*.*?\*/', re.DOTALL),
 
-    # ── Command Injection ──
-    re.compile(r'[;&|$()]'),
+    # Chat text is never evaluated as shell input; broad punctuation filters
+    # incorrectly reject source code, formulas, and ordinary prose.
     re.compile(r'`.*?`'),
     re.compile(r'\|\|'),
     re.compile(r'&&'),
@@ -187,13 +187,11 @@ def block_ip(ip: str, duration: int = 86400) -> None:
 # ── 3. INPUT SANITIZATION ────────────────────────────────
 
 def sanitize_input(text: str) -> str:
-    """Sanitize user input — strip dangerous characters and patterns.
+    """Normalize chat text without corrupting source code or prose.
 
-    - Removes null bytes and control characters
-    - Strips <script> tags and all HTML tags
-    - Removes SQL injection characters (' " ;)
-    - Removes command injection characters (& | $ ( ) `)
-    - Enforces 2000 character max length
+    Chat content is JSON data, never interpolated into SQL or executed by a
+    shell. Preserve punctuation and markup-like code; renderers must escape it.
+    The API enforces an explicit size limit before calling this function.
     """
     if not text:
         return ""
@@ -204,21 +202,7 @@ def sanitize_input(text: str) -> str:
     # Remove control characters (keep newline \n, carriage return \r, tab \t)
     text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
 
-    # Strip <script>...</script> blocks entirely
-    text = re.sub(r'<script.*?>.*?</script>', '', text, flags=re.DOTALL | re.IGNORECASE)
-
-    # Strip all remaining HTML tags
-    text = re.sub(r'<.*?>', '', text)
-
-    # Remove SQL injection patterns
-    text = re.sub(r'[\'\";]+', '', text)
-
-    # Remove command injection characters
-    text = re.sub(r'[&|$()`]', '', text)
-
-    # Enforce max length (prevent DoS via huge payloads)
-    text = text[:2000]
-
+    # Do not silently truncate code: callers validate size and return 413.
     return text.strip()
 
 
@@ -406,6 +390,10 @@ def security_guard(f):
         if request.method in ['POST', 'PUT', 'PATCH'] and request.path not in BODY_SCAN_EXEMPT:
             data = request.get_json(silent=True) or {}
             for key, value in data.items():
+                # These endpoints treat message/content as plain text/code.
+                # They enforce auth, size limits, and rate limits separately.
+                if request.path in {"/api/chat/send", "/api/chat/stream"} and key in {"message", "content"}:
+                    continue
                 if isinstance(value, str) and is_blacklisted(value):
                     log_security_event("blacklist_match", ip, session.get("user_id"), f"POST param: {key}")
                     return jsonify({"error": "Invalid input detected", "request_id": g.request_id}), 403

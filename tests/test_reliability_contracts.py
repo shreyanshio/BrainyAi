@@ -1,5 +1,6 @@
 """Deterministic regression tests for shared rate limits and DDG fallback behavior."""
 import os
+import json
 import unittest
 from unittest.mock import Mock, patch
 
@@ -9,6 +10,43 @@ import app
 
 
 class ReliabilityContractTests(unittest.TestCase):
+    def test_code_debug_prompt_tile_streams_without_punctuation_rejection(self):
+        old_url, old_key = app.SUPABASE_URL, app.SUPABASE_KEY
+        old_env = os.environ.get("RAILWAY_SERVICE_ID")
+        app.SUPABASE_URL, app.SUPABASE_KEY = "", ""
+        os.environ.pop("RAILWAY_SERVICE_ID", None)
+        client = app.app.test_client()
+        app.MEM_MESSAGES.clear()
+        app.MEM_SESSIONS.clear()
+        app._dev_user_quotas.clear()
+        prompt = (
+            "Analyze this code snippet, point out bugs or inefficiencies, and provide the optimal "
+            "implementation with time & space complexity: if (a && b) { return x & 1; }"
+        )
+        try:
+            client.post("/api/auth/web", json={"name": "Code Student", "username": "code_student"})
+            with patch("security.check_rate_limit", return_value=True), \
+                 patch("app.check_rate_limit", return_value=True), \
+                 patch("study_bot.ai_stream", return_value=iter(["Code analysis ready."])), \
+                 patch("study_bot.is_offtopic_chat", return_value=False):
+                response = client.post("/api/chat/stream", json={"message": prompt}, buffered=True)
+
+            self.assertEqual(response.status_code, 200)
+            events = [json.loads(line) for line in response.get_data(as_text=True).splitlines()]
+            self.assertFalse(any(event.get("type") == "error" for event in events))
+            self.assertTrue(any(event.get("type") == "delta" for event in events))
+            session_id = next(event["session_id"] for event in events if event.get("type") == "start")
+            self.assertEqual(app.MEM_MESSAGES[session_id][0]["content"], prompt)
+        finally:
+            app.SUPABASE_URL, app.SUPABASE_KEY = old_url, old_key
+            if old_env is not None:
+                os.environ["RAILWAY_SERVICE_ID"] = old_env
+            else:
+                os.environ.pop("RAILWAY_SERVICE_ID", None)
+            app.MEM_MESSAGES.clear()
+            app.MEM_SESSIONS.clear()
+            app._dev_user_quotas.clear()
+
     def test_full_chat_context_returns_every_turn_in_order(self):
         old_url, old_key = app.SUPABASE_URL, app.SUPABASE_KEY
         session_id = "context-history-contract"
