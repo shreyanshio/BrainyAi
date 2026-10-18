@@ -2734,7 +2734,7 @@ def stream_message():
             }) + "\n"
 
         except Exception as e:
-            logger.error("Streaming request failed request_id=%s category=%s", request_id, type(e).__name__)
+            logger.error("Streaming request failed request_id=%s category=%s error=%s", request_id, type(e).__name__, str(e))
             if not has_yielded:
                 # Refund quota if error happened before any tokens emitted
                 try:

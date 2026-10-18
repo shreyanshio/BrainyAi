@@ -18,9 +18,8 @@ class GroqModelRoutingTests(unittest.TestCase):
 
         kwargs = client.chat.completions.create.call_args.kwargs
         self.assertEqual(kwargs["model"], "llama-3.1-8b-instant")
-        self.assertEqual(kwargs["max_completion_tokens"], 256)
+        self.assertEqual(kwargs.get("max_tokens") or kwargs.get("max_completion_tokens"), 256)
         self.assertNotIn("reasoning_effort", kwargs)
-        self.assertNotIn("max_tokens", kwargs)
 
     def test_balanced_non_stream_uses_configurable_active_model_and_omits_unsupported_reasoning_effort(self):
         completion = Mock(choices=[Mock(finish_reason="stop", message=Mock(content="balanced"))])
@@ -35,9 +34,8 @@ class GroqModelRoutingTests(unittest.TestCase):
         self.assertFalse(truncated)
         kwargs = client.chat.completions.create.call_args.kwargs
         self.assertEqual(kwargs["model"], "llama-3.3-70b-versatile")
-        self.assertEqual(kwargs["max_completion_tokens"], 512)
+        self.assertEqual(kwargs.get("max_tokens") or kwargs.get("max_completion_tokens"), 512)
         self.assertNotIn("reasoning_effort", kwargs)
-        self.assertNotIn("max_tokens", kwargs)
 
     def test_reasoning_model_includes_reasoning_effort(self):
         delta = Mock(content="reasoning")

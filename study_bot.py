@@ -159,11 +159,19 @@ OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
 def _collect_keys(prefix: str, count: int = 10) -> list:
     keys = []
-    # 1. Singular environment variable (standard convention)
+    # 1. Singular environment variable (e.g. GROQ_API_KEY)
     single = os.getenv(prefix)
     if single and single.strip():
-        keys.append(single.strip())
-    # 2. Numbered suffixes (PREFIX_1, PREFIX_2, ...)
+        for k in single.split(","):
+            if k.strip() and k.strip() not in keys:
+                keys.append(k.strip())
+    # 2. Plural environment variable (e.g. GROQ_API_KEYS)
+    plural = os.getenv(f"{prefix}S")
+    if plural and plural.strip():
+        for k in plural.split(","):
+            if k.strip() and k.strip() not in keys:
+                keys.append(k.strip())
+    # 3. Numbered suffixes (PREFIX_1, PREFIX_2, ...)
     for i in range(1, count + 1):
         k = os.getenv(f"{prefix}_{i}")
         if k and k.strip() and k.strip() not in keys:
@@ -1195,14 +1203,24 @@ def _call_groq(messages, system_prompt, max_tokens):
             client = _get_groq_client(key)
             kwargs = dict(
                 model=GROQ_BALANCED_MODEL,
-                max_completion_tokens=max_tokens,
                 messages=[{"role": "system", "content": system_prompt}] + messages
             )
+            if max_tokens:
+                kwargs["max_tokens"] = max_tokens
             if any(term in GROQ_BALANCED_MODEL.lower() for term in ("r1", "reasoning", "deepseek")):
-                kwargs["reasoning_effort"] = "medium" 
+                kwargs["reasoning_effort"] = "medium"
             if system_prompt == QUIZ_SYSTEM_PROMPT:
                 kwargs["response_format"] = {"type": "json_object"}
-            resp = client.chat.completions.create(**kwargs)
+            try:
+                resp = client.chat.completions.create(**kwargs)
+            except Exception as pe:
+                err_lower = str(pe).lower()
+                if "max_tokens" in err_lower or "unexpected" in err_lower:
+                    kwargs.pop("max_tokens", None)
+                    kwargs["max_completion_tokens"] = max_tokens
+                    resp = client.chat.completions.create(**kwargs)
+                else:
+                    raise pe
             truncated = resp.choices[0].finish_reason == "length"
             return resp.choices[0].message.content, truncated
         except Exception as e:
@@ -1224,15 +1242,25 @@ def _stream_groq(messages, system_prompt, max_tokens, model_id=None):
         try:
             key = _rotate_key("groq", GROQ_API_KEYS)
             client = _get_groq_client(key)
+            tok = max_tokens or 1024
             kwargs = dict(
                 model=model_name,
-                max_completion_tokens=max_tokens or 1024,
+                max_tokens=tok,
                 messages=[{"role": "system", "content": system_prompt}] + messages,
                 stream=True
             )
             if any(term in model_name.lower() for term in ("r1", "reasoning", "deepseek")):
-                kwargs["reasoning_effort"] = "low" if fast else "medium" 
-            response_stream = client.chat.completions.create(**kwargs)
+                kwargs["reasoning_effort"] = "low" if fast else "medium"
+            try:
+                response_stream = client.chat.completions.create(**kwargs)
+            except Exception as pe:
+                err_lower = str(pe).lower()
+                if "max_tokens" in err_lower or "unexpected" in err_lower:
+                    kwargs.pop("max_tokens", None)
+                    kwargs["max_completion_tokens"] = tok
+                    response_stream = client.chat.completions.create(**kwargs)
+                else:
+                    raise pe
             for chunk in response_stream:
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = chunk.choices[0].delta
@@ -2351,8 +2379,7 @@ def ai_stream(messages, system_prompt=None, max_tokens=None, model_id=None):
                 raise
             else:
                 # Failed before first token: can safely fall back to next provider
-                if "NO_KEYS:" not in str(e):
-                    print(f"[ai_stream] Provider {name} failed before start ({e}), trying next provider...")
+                print(f"[ai_stream] Provider {name} failed before start: {e}, trying next provider...")
                 last_err = e
                 continue
 
