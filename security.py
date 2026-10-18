@@ -66,14 +66,17 @@ BLACKLIST_PATTERNS = [
 
 
 # ── 2. RATE LIMITING ─────────────────────────────────────
-# In-process fallback request limiter. It provides per-process protection only;
-# shared infrastructure is required for consistent limits across workers.
+# In-process fallback limiter. Shared Supabase counters are preferred, but a
+# temporary database/RPC outage must not take chat offline. The fallback keeps
+# a local per-process cap until the shared store recovers.
 
 rate_limits = {}  # In-memory sliding rate limiting table    # { identifier: [timestamp, timestamp, ...] }
 blocked_ips = {}    # { ip: unblock_timestamp }
 violation_counts = {}  # { ip: count } — for escalating blocks
 _rate_limit_warning_logged = False
 _shared_retry_after = {}
+_shared_limiter_retry_at = 0.0
+_SHARED_LIMITER_COOLDOWN_SECONDS = 15
 
 
 class RateLimitStoreUnavailable(RuntimeError):
@@ -92,10 +95,13 @@ def check_rate_limit(identifier: str, limit: int = 100, window: int = 60) -> boo
     Returns True if allowed, False while the identifier's sliding window is full.
     Rate limits are namespaced by the caller and do not create longer bans.
     """
-    global _rate_limit_warning_logged
+    global _rate_limit_warning_logged, _shared_limiter_retry_at
     supabase_url = (os.getenv("SUPABASE_URL") or "").rstrip("/")
     supabase_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY") or ""
-    if supabase_url and supabase_key:
+    production = _is_production()
+    now = time.time()
+    shared_available = supabase_url and supabase_key and now >= _shared_limiter_retry_at
+    if shared_available:
         bucket_key = hashlib.sha256(identifier.encode("utf-8")).hexdigest()
         try:
             response = requests.post(
@@ -112,18 +118,24 @@ def check_rate_limit(identifier: str, limit: int = 100, window: int = 60) -> boo
             return bool(result["allowed"])
         except Exception as exc:
             logging.getLogger(__name__).error("Shared rate limiter unavailable category=%s", type(exc).__name__)
-            if _is_production():
-                raise RateLimitStoreUnavailable("shared rate-limit decision failed") from exc
+            if production:
+                # Avoid making every request wait for the RPC timeout while
+                # Supabase is down. Local limits remain active during cooldown.
+                _shared_limiter_retry_at = now + _SHARED_LIMITER_COOLDOWN_SECONDS
 
-    elif _is_production():
-        logging.getLogger(__name__).error("Shared rate limiter is not configured in production")
-        raise RateLimitStoreUnavailable("shared rate limiter is not configured")
+    elif production and not (supabase_url and supabase_key):
+        if not _rate_limit_warning_logged:
+            logging.getLogger(__name__).error(
+                "Shared rate limiter is not configured; using per-process protection"
+            )
+            _rate_limit_warning_logged = True
+        _shared_limiter_retry_at = now + _SHARED_LIMITER_COOLDOWN_SECONDS
 
-    environment = (os.getenv("FLASK_ENV") or os.getenv("ENVIRONMENT") or "").lower()
-    if _is_production():  # Defensive: production must never reach the local limiter.
-        raise RateLimitStoreUnavailable("shared rate limiter is not configured")
+    return _check_local_rate_limit(identifier, limit, window, now)
 
-    now = time.time()
+
+def _check_local_rate_limit(identifier: str, limit: int, window: int, now: float) -> bool:
+    """Apply a bounded sliding-window limit in this process."""
     if identifier not in rate_limits:
         rate_limits[identifier] = []
 
