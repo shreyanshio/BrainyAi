@@ -11,6 +11,9 @@ import {
   X,
   Clock,
   BookMarked,
+  Bookmark,
+  Pin,
+  Archive,
   LogOut,
   Sliders,
   LayoutDashboard,
@@ -27,6 +30,7 @@ interface SidebarProps {
   onNewSession: () => void
   onRenameSession: (sessionId: string, newTitle: string) => void
   onDeleteSession: (sessionId: string) => void
+  onUpdateSessionWorkspace: (sessionId: string, changes: { is_saved?: boolean; is_pinned?: boolean; is_archived?: boolean }) => void
   usage: UsageStatus | null
   onOpenUsageModal: () => void
   onOpenNotesModal: () => void
@@ -46,6 +50,7 @@ export function Sidebar({
   onNewSession,
   onRenameSession,
   onDeleteSession,
+  onUpdateSessionWorkspace,
   usage,
   onOpenUsageModal,
   onOpenNotesModal,
@@ -57,6 +62,7 @@ export function Sidebar({
   const [searchQuery, setSearchQuery] = useState('')
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
+  const [workspace, setWorkspace] = useState<'recent' | 'saved' | 'pinned' | 'archived'>('recent')
 
   // Filter sessions by search query
   const filteredSessions = useMemo(() => {
@@ -64,6 +70,14 @@ export function Sidebar({
     const q = searchQuery.toLowerCase()
     return sessions.filter((s) => s.title.toLowerCase().includes(q))
   }, [sessions, searchQuery])
+
+  const workspaceSessions = useMemo(() => filteredSessions.filter((s) => {
+    if (workspace === 'archived') return !!s.is_archived
+    if (s.is_archived) return false
+    if (workspace === 'saved') return !!s.is_saved
+    if (workspace === 'pinned') return !!s.is_pinned
+    return true
+  }), [filteredSessions, workspace])
 
   // Group sessions by date
   const groupedSessions = useMemo(() => {
@@ -77,7 +91,7 @@ export function Sidebar({
     const yesterdayStart = todayStart - 86400000
     const weekStart = todayStart - 6 * 86400000
 
-    filteredSessions.forEach((sess) => {
+    workspaceSessions.forEach((sess) => {
       const ts = sess.created_at ? new Date(sess.created_at).getTime() : todayStart
       if (ts >= todayStart) {
         today.push(sess)
@@ -91,7 +105,7 @@ export function Sidebar({
     })
 
     return { today, yesterday, prev7Days, older }
-  }, [filteredSessions])
+  }, [workspaceSessions])
 
   const startEditing = (sess: ChatSession, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -177,6 +191,21 @@ export function Sidebar({
                 </div>
 
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onUpdateSessionWorkspace(sess.id, { is_saved: !sess.is_saved }) }}
+                    className={`p-1 rounded cursor-pointer ${sess.is_saved ? 'text-amber-500' : 'text-[var(--text-muted)] hover:text-amber-500'}`}
+                    title={sess.is_saved ? 'Remove from Saved' : 'Save chat'}
+                  ><Bookmark size={11} fill={sess.is_saved ? 'currentColor' : 'none'} /></button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onUpdateSessionWorkspace(sess.id, { is_pinned: !sess.is_pinned }) }}
+                    className={`p-1 rounded cursor-pointer ${sess.is_pinned ? 'text-sky-500' : 'text-[var(--text-muted)] hover:text-sky-500'}`}
+                    title={sess.is_pinned ? 'Unpin chat' : 'Pin chat'}
+                  ><Pin size={11} /></button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onUpdateSessionWorkspace(sess.id, { is_archived: !sess.is_archived }) }}
+                    className="p-1 hover:text-[var(--text-primary)] text-[var(--text-muted)] rounded cursor-pointer"
+                    title={sess.is_archived ? 'Restore chat' : 'Archive chat'}
+                  ><Archive size={11} /></button>
                   <button
                     onClick={(e) => startEditing(sess, e)}
                     className="p-1 hover:text-[var(--text-primary)] text-[var(--text-muted)] rounded cursor-pointer"
@@ -284,13 +313,20 @@ export function Sidebar({
               className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--border-strong)]"
             />
           </div>
+          <div className="grid grid-cols-4 gap-1" aria-label="Chat sections">
+            {(['recent', 'saved', 'pinned', 'archived'] as const).map((item) => (
+              <button key={item} onClick={() => setWorkspace(item)} className={`rounded-lg py-1.5 text-[10px] font-semibold capitalize ${workspace === item ? 'bg-[var(--bg-surface-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}>
+                {item}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Chat History List */}
         <div className="flex-1 overflow-y-auto px-3 py-3 scrollbar-thin">
-          {filteredSessions.length === 0 ? (
+          {workspaceSessions.length === 0 ? (
             <div className="text-center py-8 text-xs text-[var(--text-muted)]">
-              {searchQuery ? 'No matching study chats' : 'No study sessions yet'}
+              {searchQuery ? 'No matching study chats' : `No ${workspace} chats`}
             </div>
           ) : (
             <>

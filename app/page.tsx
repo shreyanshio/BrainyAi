@@ -20,6 +20,7 @@ import {
   saveUserPreferences,
   sendChatMessage,
   streamChatMessage,
+  updateSessionWorkspace,
 } from '@/lib/api'
 import {
   AnswerLength,
@@ -301,6 +302,8 @@ export default function BrainyApp() {
   }
 
   const handleDeleteSession = async (sessionId: string) => {
+    const target = sessions.find((s) => s.id === sessionId)
+    if (!window.confirm(`Permanently delete “${target?.title || 'this chat'}” and its messages?`)) return
     try {
       await deleteSession(sessionId)
       setSessions((prev) => prev.filter((s) => s.id !== sessionId))
@@ -309,6 +312,21 @@ export default function BrainyApp() {
       }
     } catch (err) {
       console.error('Failed to delete session:', err)
+    }
+  }
+
+  const handleUpdateSessionWorkspace = async (
+    sessionId: string,
+    changes: { is_saved?: boolean; is_pinned?: boolean; is_archived?: boolean }
+  ) => {
+    const before = sessions
+    setSessions((prev) => prev.map((s) => s.id === sessionId ? { ...s, ...changes } : s))
+    try {
+      await updateSessionWorkspace(sessionId, changes)
+    } catch (err) {
+      setSessions(before)
+      console.error('Failed to update chat workspace settings:', err)
+      window.alert('Could not save this chat setting. Please try again.')
     }
   }
 
@@ -568,6 +586,7 @@ export default function BrainyApp() {
         onNewSession={handleNewSession}
         onRenameSession={handleRenameSession}
         onDeleteSession={handleDeleteSession}
+        onUpdateSessionWorkspace={handleUpdateSessionWorkspace}
         usage={usage}
         onOpenUsageModal={() => setUsageModalOpen(true)}
         onOpenNotesModal={() => setNotesModalOpen(true)}

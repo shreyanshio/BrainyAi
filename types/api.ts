@@ -33,6 +33,10 @@ export interface ChatSession {
   title: string
   created_at?: string
   updated_at?: string
+  last_message_at?: string
+  is_saved?: boolean
+  is_pinned?: boolean
+  is_archived?: boolean
 }
 
 export type AnswerLength = 'short' | 'medium' | 'long'

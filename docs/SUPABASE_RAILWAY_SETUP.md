@@ -1,6 +1,6 @@
 # Supabase and Railway setup for BrainyAi
 
-This repository already has a Flask API, a Supabase-backed data model, and a separate Google sign-in flow. The steps below extend those pieces; they do not create replacement conversation or memory tables. The SQL migration in this change is a proposal and has **not** been run.
+This repository already has a Flask API, a Supabase-backed data model, and a separate Google sign-in flow. The steps below extend those pieces; they do not create replacement conversation or memory tables. The new SQL migration is a proposal and has **not** been run.
 
 ## What the app currently uses
 
@@ -19,10 +19,11 @@ Reuse the existing tables:
 2. Add `chat_messages.user_id`, backfill it from each message's parent session, and make it required. The migration stops with an explicit error if any row cannot be associated with a session owner.
 3. Add a composite foreign key from `(chat_messages.session_id, chat_messages.user_id)` to `(chat_sessions.id, chat_sessions.user_id)`. This prevents a message from naming a different owner than its conversation.
 4. Add/update conversation activity timestamps and indexes for per-user history ordering.
-5. Keep `user_memory` as the existing per-user memory table keyed by `user_id`; do not create a second memory store.
-6. Enable RLS and remove `anon`/`authenticated` table grants for `chat_sessions`, `chat_messages`, and `user_memory`. The current app does not have Supabase Auth JWTs to support `auth.uid()` policies. Browser roles receive no direct access; the trusted Railway services use the private service-role key and the Flask API filters every user-facing conversation/message query by the authenticated Brainy user ID. The composite foreign key adds a database ownership invariant.
+5. Add save, pin, and archive flags plus partial owner/activity indexes to the existing conversation table.
+6. Keep `user_memory` as the existing per-user memory table keyed by `user_id`; do not create a second memory store.
+7. Enable RLS and remove `anon`/`authenticated` table grants for `chat_sessions`, `chat_messages`, and `user_memory`. The current app does not have Supabase Auth JWTs to support `auth.uid()` policies. Browser roles receive no direct access; the trusted Railway services use the private service-role key and the Flask API filters every user-facing conversation/message query by the authenticated Brainy user ID. The composite foreign key adds a database ownership invariant.
 
-The proposed additive migration is [`migrations/20261018_chat_owner_integrity.sql`](../migrations/20261018_chat_owner_integrity.sql). Do not apply it until checking the existing data and backing up the project. It does not drop tables or delete rows. It will stop rather than guess if existing messages lack a parent owner. The repository also contains `migrations/20261017_durable_quotas.sql` and `migrations/20261018_chat_idempotency.sql`; those are prerequisites for current quota/rate-limit and retried-chat-write behavior.
+The proposed additive migrations are [`migrations/20261018_chat_owner_integrity.sql`](../migrations/20261018_chat_owner_integrity.sql) and [`migrations/20261019_chat_workspace_metadata.sql`](../migrations/20261019_chat_workspace_metadata.sql). Do not apply them until checking the existing data and backing up the project. They do not drop tables or delete rows. The owner migration stops rather than guess if existing messages lack a parent owner. The repository also contains `migrations/20261017_durable_quotas.sql` and `migrations/20261018_chat_idempotency.sql`; those are prerequisites for current quota/rate-limit and retried-chat-write behavior.
 
 ### Safe migration review and order
 
@@ -79,3 +80,22 @@ The code also accepts `AUTH_SECRET_KEY` or `SECRET_KEY` as fallback names for `F
 - Database failures are logged with operation/table/status/category and a request ID, without logging credentials or message content. Session and memory API writes return a retryable error rather than claiming the write succeeded. Chat generation can still return an answer if history persistence fails; the API response includes `persistence_warning` and `request_id` so the client can display that history was not saved.
 - Rate limiting uses its independent shared RPC and a bounded local fallback during RPC trouble. It does not depend on inserting chat history.
 - Run the requested local checks with `python -m unittest discover -s tests -v`. The database tests mock PostgREST; they verify request scoping, save/reload contracts, health status, and auth behavior without accessing a real Supabase project. A real RLS check requires a staging project and should use non-production accounts after the migration is reviewed and applied.
+## Additive chat workspace migration
+
+The chat workspace uses the existing `public.chat_sessions` table. It does not
+create replacement conversation/message tables. In Supabase Dashboard, open
+**SQL Editor → New query**, review and apply migrations in this order if they
+have not already been applied:
+
+1. `migrations/20261017_durable_quotas.sql`
+2. `migrations/20261018_chat_idempotency.sql`
+3. `migrations/20261018_chat_owner_integrity.sql`
+4. `migrations/20261019_chat_workspace_metadata.sql`
+
+The workspace migration only adds `is_saved`, `is_pinned`, and `is_archived`
+columns and partial owner/activity indexes. It preserves existing records.
+Verify with `select column_name from information_schema.columns where table_schema
+= 'public' and table_name = 'chat_sessions' and column_name in
+('is_saved','is_pinned','is_archived');`. Keep the existing service-role policy
+and keep the Supabase secret key only in the Railway backend service variables.
+The application does not apply migrations or deploy them automatically.

@@ -106,6 +106,24 @@ class SupabasePersistenceTests(unittest.TestCase):
         listed = second.get("/api/sessions").get_json()
         self.assertFalse(any(row["id"] == session_id for row in listed))
 
+    def test_workspace_metadata_is_owner_scoped_and_filterable(self):
+        app.SUPABASE_URL, app.SUPABASE_KEY = "", ""
+        owner = app.app.test_client()
+        other = app.app.test_client()
+        owner.post("/api/auth/web", json={"name": "Workspace Owner", "username": "workspace_owner"})
+        created = owner.post("/api/sessions", json={"title": "Saved study"})
+        session_id = created.get_json()["id"]
+
+        self.assertEqual(owner.patch(f"/api/sessions/{session_id}", json={"is_saved": True, "is_pinned": True}).status_code, 200)
+        listed = owner.get("/api/sessions?view=saved").get_json()
+        self.assertTrue(any(row["id"] == session_id for row in listed))
+        other.post("/api/auth/web", json={"name": "Other User", "username": "other_workspace_user"})
+        self.assertEqual(other.patch(f"/api/sessions/{session_id}", json={"is_archived": True}).status_code, 404)
+
+    def test_workspace_metadata_rejects_non_boolean_values(self):
+        with self.assertRaises(ValueError):
+            app.sb_update_session_metadata("session", 123, {"is_saved": "yes"})
+
 
 if __name__ == "__main__":
     unittest.main()

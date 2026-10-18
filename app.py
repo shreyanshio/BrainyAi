@@ -604,14 +604,34 @@ def sb_record_login(user_id: int, username: str, first_name: str, login_type: st
         logger.warning("Supabase record login failed user_id=%s category=%s", user_id, type(exc).__name__)
 
 
-def sb_list_sessions(user_id: int) -> list:
+def sb_list_sessions(user_id: int, view: str = "recent") -> list:
+    view_filters = {
+        "all": "",
+        "recent": "&is_archived=eq.false",
+        "saved": "&is_saved=eq.true&is_archived=eq.false",
+        "pinned": "&is_pinned=eq.true&is_archived=eq.false",
+        "archived": "&is_archived=eq.true",
+    }
+    if view not in view_filters:
+        raise ValueError("Unsupported conversation view")
     if not (SUPABASE_URL and SUPABASE_KEY):
         _require_supabase_in_production()
         logger.warning("Supabase unconfigured; using in-memory sessions for dev")
-        return list(MEM_SESSIONS.get(user_id, []))
+        rows = list(MEM_SESSIONS.get(user_id, []))
+        if view == "all":
+            pass
+        elif view == "recent":
+            rows = [r for r in rows if not r.get("is_archived", False)]
+        elif view == "saved":
+            rows = [r for r in rows if r.get("is_saved", False) and not r.get("is_archived", False)]
+        elif view == "pinned":
+            rows = [r for r in rows if r.get("is_pinned", False) and not r.get("is_archived", False)]
+        else:
+            rows = [r for r in rows if r.get("is_archived", False)]
+        return rows
     rows = _sb_json(_sb_request("GET", "chat_sessions",
-        params=(f"?user_id=eq.{user_id}&select=id,title,created_at,updated_at,last_message_at"
-                "&order=last_message_at.desc.nullslast,created_at.desc")), "chat_sessions")
+        params=(f"?user_id=eq.{user_id}&select=id,title,created_at,updated_at,last_message_at,is_saved,is_pinned,is_archived"
+                f"{view_filters[view]}&order=is_pinned.desc,last_message_at.desc.nullslast,created_at.desc&limit=100")), "chat_sessions")
     for row in rows:
         if row.get("title"):
             row["title"] = unmask_secure_hash(row["title"])
@@ -672,6 +692,25 @@ def sb_rename_session(session_id: str, user_id: int, title: str) -> None:
     for s in MEM_SESSIONS.get(user_id, []):
         if s["id"] == session_id:
             s["title"] = title
+
+
+def sb_update_session_metadata(session_id: str, user_id: int, changes: dict) -> dict:
+    allowed = {"is_saved", "is_pinned", "is_archived"}
+    if not changes or set(changes) - allowed or any(not isinstance(v, bool) for v in changes.values()):
+        raise ValueError("Invalid conversation metadata")
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        _require_supabase_in_production()
+        for row in MEM_SESSIONS.get(user_id, []):
+            if row.get("id") == session_id:
+                row.update(changes)
+                return row
+        raise SupabaseOperationError("Session was not found or could not be updated")
+    rows = _sb_json(_sb_request("PATCH", "chat_sessions",
+        params=f"?id=eq.{session_id}&user_id=eq.{int(user_id)}",
+        json_body=changes, prefer="return=representation"), "chat_sessions")
+    if not rows:
+        raise SupabaseOperationError("Session was not found or could not be updated")
+    return rows[0]
 
 
 def sb_delete_session(session_id: str, user_id: int) -> None:
@@ -1690,7 +1729,11 @@ def admin_health():
 @login_required
 def get_sessions():
     user_id = session["user_id"]
-    return jsonify(sb_list_sessions(user_id))
+    view = request.args.get("view", "all")
+    try:
+        return jsonify(sb_list_sessions(user_id, view=view))
+    except ValueError:
+        return jsonify({"error": "Unsupported conversation view"}), 400
 
 
 @app.route("/api/sessions", methods=["POST"])
@@ -1709,12 +1752,21 @@ def rename_session(session_id):
     user_id = session["user_id"]
     data = request.json or {}
     title = data.get("title")
-    if not title:
-        return jsonify({"error": "Title required"}), 400
+    metadata = {k: data[k] for k in ("is_saved", "is_pinned", "is_archived") if k in data}
+    if title is None and not metadata:
+        return jsonify({"error": "Title or workspace setting required"}), 400
     if not sb_get_session(session_id, user_id):
         return jsonify({"error": "Session not found"}), 404
-    sb_rename_session(session_id, user_id, title)
-    return jsonify({"status": "ok"})
+    if title is not None:
+        if not isinstance(title, str) or not title.strip() or len(title.strip()) > 160:
+            return jsonify({"error": "Title must be between 1 and 160 characters"}), 400
+        sb_rename_session(session_id, user_id, title.strip())
+    if metadata:
+        try:
+            sb_update_session_metadata(session_id, user_id, metadata)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+    return jsonify({"status": "ok", **metadata, **({"title": title.strip()} if title is not None else {})})
 
 
 @app.route("/api/sessions/<session_id>", methods=["DELETE"])

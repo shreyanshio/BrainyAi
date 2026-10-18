@@ -255,6 +255,16 @@ export async function renameSession(sessionId: string, title: string): Promise<v
   })
 }
 
+export async function updateSessionWorkspace(
+  sessionId: string,
+  changes: { is_saved?: boolean; is_pinned?: boolean; is_archived?: boolean }
+): Promise<void> {
+  await request(`/api/sessions/${sessionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(changes),
+  })
+}
+
 export async function deleteSession(sessionId: string): Promise<void> {
   await request(`/api/sessions/${sessionId}`, {
     method: 'DELETE',
