@@ -206,9 +206,17 @@ def api_health():
             database_status = "unavailable"
         latency_ms = round((time.perf_counter() - started) * 1000, 2)
     healthy = database_status == "connected"
+    provider_counts = {
+        "groq": len(getattr(study_bot, "GROQ_API_KEYS", [])),
+        "cerebras": len(getattr(study_bot, "CEREBRAS_API_KEYS", [])),
+        "gemini": len(getattr(study_bot, "GEMINI_API_KEYS", [])),
+        "openrouter": len(getattr(study_bot, "OPENROUTER_API_KEYS", [])),
+    }
     return jsonify({
         "status": "healthy" if healthy else "degraded",
+        "version": "2026.10.18-v2",
         "database": {"status": database_status, "latency_ms": latency_ms},
+        "providers": provider_counts,
     }), 200
 
 
