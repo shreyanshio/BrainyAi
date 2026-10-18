@@ -1238,6 +1238,7 @@ def _stream_groq(messages, system_prompt, max_tokens, model_id=None):
     fast = model_id == "brainy-fast"
     model_name = GROQ_FAST_MODEL if fast else GROQ_BALANCED_MODEL
 
+    last_err = None
     for _ in range(len(GROQ_API_KEYS)):
         try:
             key = _rotate_key("groq", GROQ_API_KEYS)
@@ -1268,16 +1269,16 @@ def _stream_groq(messages, system_prompt, max_tokens, model_id=None):
                         yield delta.content
             return
         except Exception as e:
-            if _is_rate_err(e):
-                print("[groq_stream] Groq key exhausted, rotating...")
-                continue
-            raise
-    raise Exception("All Groq keys exhausted")
+            last_err = e
+            print(f"[groq_stream] Groq key failure ({type(e).__name__}): {str(e)[:80]}, rotating to next key...")
+            continue
+    raise Exception(f"All Groq keys exhausted: {last_err}")
 
 def _stream_cerebras(messages, system_prompt, max_tokens, model_id=None):
     if not CEREBRAS_API_KEYS:
         raise Exception("NO_KEYS: cerebras")
-    CEREBRAS_MODELS = ["llama3.1-8b", "llama3.3-70b"]
+    CEREBRAS_MODELS = ["llama3.1-8b", "llama-3.3-70b", "llama3.3-70b"]
+    last_err = None
     for _ in range(len(CEREBRAS_API_KEYS)):
         try:
             key = _rotate_key("cerebras", CEREBRAS_API_KEYS)
@@ -1313,24 +1314,23 @@ def _stream_cerebras(messages, system_prompt, max_tokens, model_id=None):
                                     continue
                     return
                 except Exception as me:
-                    if "404" in str(me) or "not found" in str(me).lower() or "model" in str(me).lower():
-                        continue
-                    raise me
+                    last_err = me
+                    continue
         except Exception as e:
-            if _is_rate_err(e):
-                continue
-            raise
-    raise Exception("NO_KEYS: cerebras")
+            last_err = e
+            continue
+    raise Exception(f"All Cerebras keys/models failed: {last_err}")
 
 def _stream_openrouter(messages, system_prompt, max_tokens, model_id=None):
     if not OPENROUTER_API_KEYS:
         raise Exception("NO_KEYS: openrouter")
     OPENROUTER_MODELS = [
         "meta-llama/llama-3.3-70b-instruct:free",
-        "deepseek/deepseek-chat-v3.1:free",
-        "google/gemma-3-27b-it:free",
-        "qwen/qwen3-235b-a22b:free",
+        "google/gemini-2.0-flash-lite-preview-02-05:free",
+        "mistralai/mistral-7b-instruct:free",
+        "qwen/qwen-2.5-72b-instruct:free",
     ]
+    last_err = None
     for _ in range(len(OPENROUTER_API_KEYS)):
         key = _rotate_key("openrouter", OPENROUTER_API_KEYS)
         for model in OPENROUTER_MODELS:
@@ -1370,19 +1370,20 @@ def _stream_openrouter(messages, system_prompt, max_tokens, model_id=None):
                                 continue
                 return
             except Exception as e:
-                if _is_rate_err(e) or "404" in str(e):
-                    continue
-                raise
-    raise Exception("NO_KEYS: openrouter")
+                last_err = e
+                continue
+    raise Exception(f"All OpenRouter keys/models failed: {last_err}")
 
 def _stream_gemini(messages, system_prompt, max_tokens, model_id=None):
     if not GEMINI_API_KEYS:
         raise Exception("NO_KEYS: gemini")
     GEMINI_MODELS = [
+        "gemini-2.5-flash",
         "gemini-2.0-flash",
+        "gemini-2.5-flash-lite",
         "gemini-1.5-flash",
-        "gemini-1.5-pro",
     ]
+    last_err = None
     for _ in range(len(GEMINI_API_KEYS)):
         try:
             key = _rotate_key("gemini", GEMINI_API_KEYS)
@@ -1419,22 +1420,21 @@ def _stream_gemini(messages, system_prompt, max_tokens, model_id=None):
                                     continue
                     return
                 except Exception as me:
-                    if "404" in str(me):
-                        continue
-                    raise me
+                    last_err = me
+                    continue
         except Exception as e:
-            if _is_rate_err(e):
-                continue
-            raise
-    raise Exception("NO_KEYS: gemini")
+            last_err = e
+            continue
+    raise Exception(f"All Gemini keys/models failed: {last_err}")
 
 def _call_gemini(messages, system_prompt, max_tokens):
     if not GEMINI_API_KEYS:
         raise Exception("NO_KEYS: gemini")
     GEMINI_MODELS = [
+        "gemini-2.5-flash",
         "gemini-2.0-flash",
+        "gemini-2.5-flash-lite",
         "gemini-1.5-flash",
-        "gemini-1.5-pro",
     ]
     rate_limited_count = 0
     for _ in range(len(GEMINI_API_KEYS)):
@@ -1662,9 +1662,9 @@ def _call_openrouter(messages, system_prompt, max_tokens):
     # Free models on OpenRouter (":free" suffix = zero cost, ~20 RPM / shared daily cap)
     OPENROUTER_MODELS = [
         "meta-llama/llama-3.3-70b-instruct:free",
-        "deepseek/deepseek-chat-v3.1:free",
-        "google/gemma-3-27b-it:free",
-        "qwen/qwen3-235b-a22b:free",
+        "google/gemini-2.0-flash-lite-preview-02-05:free",
+        "mistralai/mistral-7b-instruct:free",
+        "qwen/qwen-2.5-72b-instruct:free",
     ]
     for _ in range(len(OPENROUTER_API_KEYS)):
         key = _rotate_key("openrouter", OPENROUTER_API_KEYS)
