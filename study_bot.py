@@ -7,6 +7,7 @@ import base64
 import io
 import random
 import requests
+from urllib.parse import urlparse
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -830,9 +831,15 @@ def code_to_monospace(text: str) -> str:
 
 def web_search(query: str, max_results: int = 5) -> str:
     """
-    Search using Tavily API (primary) with DuckDuckGo as fallback.
-    Returns a formatted string of results for the AI to use.
+    Use Tavily for full web results when configured, then DuckDuckGo's
+    Instant Answer API. DDG is not a full web-search results API.
     """
+    def safe_url(value):
+        if not isinstance(value, str):
+            return ""
+        parsed = urlparse(value)
+        return value if parsed.scheme in ("https", "http") and parsed.netloc else ""
+
     # ── PRIMARY: Tavily API ──────────────────────────────────
     if TAVILY_API_KEYS:
         for _tavily_attempt in range(len(TAVILY_API_KEYS)):
@@ -863,15 +870,15 @@ def web_search(query: str, max_results: int = 5) -> str:
 
                 # Individual search results
                 for r in data.get("results", [])[:max_results]:
-                    title   = r.get("title", "")
-                    content = r.get("content", "")
-                    url     = r.get("url", "")
+                    title   = str(r.get("title") or "")[:200]
+                    content = str(r.get("content") or "")
+                    url     = safe_url(r.get("url", ""))
                     if content:
                         snippet = content[:300]
                         results.append(f"🔹 {title}\n   {snippet}\n   🔗 {url}" if url else f"🔹 {title}\n   {snippet}")
 
                 if results:
-                    print(f"Tavily search success (key #{_tavily_attempt+1}): {query[:40]}")
+                    logger.info("Tavily search succeeded key_index=%s", _tavily_attempt + 1)
                     return "\n\n".join(results)
 
             except Exception as e:
@@ -879,7 +886,7 @@ def web_search(query: str, max_results: int = 5) -> str:
                 if any(w in err_str for w in ["429", "rate", "quota", "limit"]):
                     print(f"Tavily key #{_tavily_attempt+1} rate-limited, trying next...")
                     continue
-                print(f"Tavily search failed: {str(e)[:80]}, falling back to DuckDuckGo...")
+                logger.warning("Tavily search failed category=%s; trying DuckDuckGo Instant Answer", type(e).__name__)
                 break
 
     # ── FALLBACK: DuckDuckGo ─────────────────────────────────
@@ -891,24 +898,28 @@ def web_search(query: str, max_results: int = 5) -> str:
             "no_html": "1",
             "skip_disambig": "1",
             "no_redirect": "1",
+            "no_questions": "1",
         }
         resp = requests.get(ddg_url, params=params, timeout=10,
                             headers={"User-Agent": "BrainyBot/1.0"})
         resp.raise_for_status()
         data = resp.json()
 
+        if not isinstance(data, dict):
+            raise ValueError("unexpected DuckDuckGo response")
         results = []
 
         if data.get("AbstractText"):
             results.append(f"📌 {data['AbstractText'][:600]}")
-            if data.get("AbstractURL"):
-                results.append(f"🔗 Source: {data['AbstractURL']}")
+            abstract_url = safe_url(data.get("AbstractURL"))
+            if abstract_url:
+                results.append(f"🔗 Source: {abstract_url}")
 
         if data.get("Answer"):
             results.append(f"⚡ Direct Answer: {data['Answer']}")
 
         if data.get("Definition"):
-            results.append(f"📖 Definition: {data['Definition'][:400]}")
+            results.append(f"📖 Definition: {str(data['Definition'])[:400]}")
 
         topics = data.get("RelatedTopics", [])
         count = 0
@@ -916,59 +927,30 @@ def web_search(query: str, max_results: int = 5) -> str:
             if count >= max_results:
                 break
             if isinstance(t, dict) and t.get("Text"):
-                results.append(f"→ {t['Text'][:250]}")
+                topic_text = str(t["Text"])[:250]
+                topic_url = safe_url(t.get("FirstURL"))
+                results.append(f"→ {topic_text}" + (f" ({topic_url})" if topic_url else ""))
                 count += 1
             elif isinstance(t, dict) and t.get("Topics"):
                 for sub in t["Topics"]:
                     if count >= max_results:
                         break
                     if isinstance(sub, dict) and sub.get("Text"):
-                        results.append(f"→ {sub['Text'][:250]}")
+                        topic_text = str(sub["Text"])[:250]
+                        topic_url = safe_url(sub.get("FirstURL"))
+                        results.append(f"→ {topic_text}" + (f" ({topic_url})" if topic_url else ""))
                         count += 1
 
         if not results:
-            # Last resort: DuckDuckGo lite scrape
-            try:
-                lite_resp = requests.get(
-                    "https://lite.duckduckgo.com/lite/",
-                    params={"q": query},
-                    timeout=10,
-                    headers={"User-Agent": "Mozilla/5.0 BrainyBot"}
-                )
-                from html.parser import HTMLParser
-
-                class _DDGParser(HTMLParser):
-                    def __init__(self):
-                        super().__init__()
-                        self.snippets = []
-
-                    def handle_data(self, data):
-                        data = data.strip()
-                        if data and len(data) > 40:
-                            self.snippets.append(data)
-
-                parser = _DDGParser()
-                parser.feed(lite_resp.text)
-                seen = set()
-                for s in parser.snippets:
-                    if s not in seen and not s.startswith(("Next", "Prev", "DuckDuckGo", "About")):
-                        results.append(f"→ {s[:300]}")
-                        seen.add(s)
-                    if len(results) >= max_results:
-                        break
-            except Exception:
-                pass
-
-        if not results:
-            return f"❌ '{query}' NO results for query, please try again."
+            return "DuckDuckGo Instant Answer did not return a useful result for this query. No full web search was performed."
 
         return "\n".join(results)
 
     except requests.exceptions.Timeout:
-        return "⏰ Search timeout. Try again after a while."
+        return "DuckDuckGo Instant Answer timed out. No search results are available right now."
     except Exception as e:
-        logger.error(f"Web search error: {e}")
-        return f"❌ Error in search: {str(e)[:100]}"
+        logger.error("DuckDuckGo Instant Answer failed category=%s", type(e).__name__)
+        return "DuckDuckGo Instant Answer is temporarily unavailable. No search results are available right now."
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3426,7 +3408,7 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"{ai_answer}"
         )
-        print(f"Search done for {update.effective_user.id}: {query[:40]}")
+        print(f"Search completed for Telegram user {update.effective_user.id}")
 
     except Exception as e:
         logger.error(f"Search command error: {e}")

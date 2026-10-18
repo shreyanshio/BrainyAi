@@ -13,8 +13,9 @@ import hashlib
 import base64
 import json
 import logging
+import uuid
 from functools import wraps
-from flask import request, jsonify, session
+from flask import request, jsonify, session, g
 import requests
 
 
@@ -75,6 +76,16 @@ _rate_limit_warning_logged = False
 _shared_retry_after = {}
 
 
+class RateLimitStoreUnavailable(RuntimeError):
+    """The shared limiter could not make an authoritative decision."""
+
+
+def _is_production() -> bool:
+    return (os.getenv("FLASK_ENV", "").lower() == "production"
+            or os.getenv("ENVIRONMENT", "").lower() == "production"
+            or bool(os.getenv("RAILWAY_SERVICE_ID")))
+
+
 def check_rate_limit(identifier: str, limit: int = 100, window: int = 60) -> bool:
     """Check if an identifier (IP or user key) is rate limited.
 
@@ -100,14 +111,17 @@ def check_rate_limit(identifier: str, limit: int = 100, window: int = 60) -> boo
             _shared_retry_after[identifier] = int(result.get("retry_after", window))
             return bool(result["allowed"])
         except Exception as exc:
-            logging.getLogger(__name__).error("Shared rate limiter unavailable category=%s; using local fallback", type(exc).__name__)
+            logging.getLogger(__name__).error("Shared rate limiter unavailable category=%s", type(exc).__name__)
+            if _is_production():
+                raise RateLimitStoreUnavailable("shared rate-limit decision failed") from exc
+
+    elif _is_production():
+        logging.getLogger(__name__).error("Shared rate limiter is not configured in production")
+        raise RateLimitStoreUnavailable("shared rate limiter is not configured")
 
     environment = (os.getenv("FLASK_ENV") or os.getenv("ENVIRONMENT") or "").lower()
-    if environment == "production" and not _rate_limit_warning_logged:
-        logging.getLogger(__name__).warning(
-            "Rate limiting is process-local in production; limits are not shared across workers"
-        )
-        _rate_limit_warning_logged = True
+    if _is_production():  # Defensive: production must never reach the local limiter.
+        raise RateLimitStoreUnavailable("shared rate limiter is not configured")
 
     now = time.time()
     if identifier not in rate_limits:
@@ -303,6 +317,7 @@ def login_required(f):
     """
     @wraps(f)
     def decorated(*args, **kwargs):
+        g.request_id = getattr(g, "request_id", None) or uuid.uuid4().hex
         # 0. Allow OPTIONS preflight through immediately
         if request.method == "OPTIONS":
             return f(*args, **kwargs)
@@ -326,7 +341,9 @@ def login_required(f):
             request.authenticated_user_id = session["user_id"]
             return f(*args, **kwargs)
 
-        return jsonify({"error": "Authentication required"}), 401
+        response = jsonify({"error": "Authentication required", "request_id": g.request_id})
+        response.headers["X-Request-ID"] = g.request_id
+        return response, 401
     return decorated
 
 
@@ -345,13 +362,21 @@ def security_guard(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         ip = request.remote_addr or "unknown"
+        g.request_id = getattr(g, "request_id", None) or uuid.uuid4().hex
 
         # Rate limit check (100 requests per minute per IP)
-        if not check_rate_limit(ip):
+        try:
+            allowed = check_rate_limit(ip)
+        except RateLimitStoreUnavailable:
+            response = jsonify({"error": "Request protection is temporarily unavailable. Please retry shortly.",
+                "code": "RATE_LIMIT_STORE_UNAVAILABLE", "request_id": g.request_id, "retryable": True})
+            response.headers["X-Request-ID"] = g.request_id
+            return response, 503
+        if not allowed:
             log_security_event("rate_limit_exceeded", ip, session.get("user_id"), "")
             retry_after = rate_limit_retry_after(ip)
             response = jsonify({"error": "Too many requests. Try again later.",
-                "code": "RATE_LIMITED", "retry_after": retry_after, "limit": 100})
+                "code": "RATE_LIMITED", "retry_after": retry_after, "limit": 100, "request_id": g.request_id})
             response.headers["Retry-After"] = str(retry_after)
             return response, 429
 
@@ -360,7 +385,7 @@ def security_guard(f):
             for key, value in request.args.items():
                 if is_blacklisted(value):
                     log_security_event("blacklist_match", ip, session.get("user_id"), f"GET param: {key}")
-                    return jsonify({"error": "Invalid input detected"}), 403
+                    return jsonify({"error": "Invalid input detected", "request_id": g.request_id}), 403
 
         # Check POST/PUT/PATCH JSON body (skip for auth token endpoints)
         if request.method in ['POST', 'PUT', 'PATCH'] and request.path not in BODY_SCAN_EXEMPT:
@@ -368,9 +393,20 @@ def security_guard(f):
             for key, value in data.items():
                 if isinstance(value, str) and is_blacklisted(value):
                     log_security_event("blacklist_match", ip, session.get("user_id"), f"POST param: {key}")
-                    return jsonify({"error": "Invalid input detected"}), 403
+                    return jsonify({"error": "Invalid input detected", "request_id": g.request_id}), 403
 
-        return f(*args, **kwargs)
+        result = f(*args, **kwargs)
+        response = result[0] if isinstance(result, tuple) else result
+        if hasattr(response, "headers"):
+            response.headers["X-Request-ID"] = g.request_id
+            status_code = result[1] if isinstance(result, tuple) and len(result) > 1 else response.status_code
+            if status_code >= 400 and response.is_json:
+                payload = response.get_json(silent=True)
+                if isinstance(payload, dict) and "request_id" not in payload:
+                    payload["request_id"] = g.request_id
+                    response.set_data(json.dumps(payload))
+                    response.headers["Content-Type"] = "application/json"
+        return result
     return decorated
 
 

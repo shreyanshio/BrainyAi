@@ -309,4 +309,6 @@ grant execute on function public.brainy_check_rate_limit(text, integer, integer)
 -- ── 10. CHAT IDEMPOTENCY KEY ─────────────────────────────────────────
 alter table chat_messages add column if not exists idempotency_key text;
 create index if not exists idx_chat_messages_idempotency_key on chat_messages(idempotency_key) where idempotency_key is not null;
+create unique index if not exists idx_chat_messages_session_idempotency_unique
+  on chat_messages(session_id, idempotency_key) where idempotency_key is not null;
 

@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { ExternalLink, ShieldCheck, CheckCircle2, Lock, ArrowRight, Sparkles } from 'lucide-react'
 import {
   fetchPublicConfig,
@@ -44,6 +44,7 @@ const TelegramIcon = ({ className = 'w-5 h-5' }: { className?: string }) => (
 const DEFAULT_GOOGLE_CLIENT_ID = '793579888403-76l0ls9vr4jjrjshmmdbue6apsiabhpk.apps.googleusercontent.com'
 
 export function LoginView({ onLoginSuccess }: LoginViewProps) {
+  const sceneRef = useRef<HTMLDivElement>(null)
   const [googleClientId, setGoogleClientId] = useState<string>(
     process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || DEFAULT_GOOGLE_CLIENT_ID
   )
@@ -172,8 +173,8 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
           setTelegramSessionId(null)
           onLoginSuccess(res.user)
         }
-      } catch {
-        // ignore network hiccups
+      } catch (err) {
+        console.warn('Telegram login polling failed:', err instanceof Error ? err.name : 'unknown error')
       }
     }, 2000)
 
@@ -197,190 +198,60 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
     }
   }
 
+  const handleScenePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'touch' || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const x = (event.clientX - bounds.left) / bounds.width - 0.5
+    const y = (event.clientY - bounds.top) / bounds.height - 0.5
+    sceneRef.current?.style.setProperty('--scene-rotate-x', `${-y * 7}deg`)
+    sceneRef.current?.style.setProperty('--scene-rotate-y', `${x * 9}deg`)
+  }
+
+  const resetScenePointer = () => {
+    sceneRef.current?.style.setProperty('--scene-rotate-x', '0deg')
+    sceneRef.current?.style.setProperty('--scene-rotate-y', '0deg')
+  }
+
 
 
   return (
-    <div className="min-h-screen bg-[#0e1017] text-zinc-100 flex items-center justify-center p-4 sm:p-6 lg:p-8 font-sans antialiased relative overflow-hidden select-none">
-      {/* Quiet background texture */}
-      <div className="absolute inset-0 bg-[radial-gradient(#1c2230_1px,transparent_1px)] [background-size:24px_24px] opacity-40 pointer-events-none" />
-      <div className="absolute top-1/4 -left-32 w-96 h-96 bg-emerald-950/20 rounded-full blur-[140px] pointer-events-none" />
-      <div className="absolute bottom-1/4 -right-32 w-96 h-96 bg-cyan-950/20 rounded-full blur-[140px] pointer-events-none" />
-
-      {/* Main Split Floating Card (Exact Design Inspired by Reference Image 1) */}
-      <div className="w-full max-w-4xl bg-white text-zinc-900 rounded-3xl shadow-[0_30px_90px_rgba(0,0,0,0.45)] border border-zinc-200/80 overflow-hidden relative z-10 flex flex-col md:flex-row p-3 sm:p-4">
-        
-        {/* Left Dark Card (Matching Image 1 Left Textured Panel) */}
-        <div className="md:w-[45%] rounded-2xl bg-[#111319] text-white p-8 sm:p-10 flex flex-col justify-between relative overflow-hidden shadow-inner">
-          {/* Subtle curved mesh texture overlay */}
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom_right,_rgba(5,150,105,0.18)_0%,_transparent_70%)] pointer-events-none" />
-          <div className="absolute -bottom-10 -right-10 w-64 h-64 bg-[radial-gradient(circle,_rgba(255,255,255,0.06)_1px,_transparent_1px)] [background-size:12px_12px] rounded-full pointer-events-none opacity-60" />
-
-          {/* Top Brand Logo */}
-          <div className="flex items-center gap-2.5 relative z-10">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-600 to-emerald-400 flex items-center justify-center text-white font-black text-sm shadow-md shadow-emerald-950/40">
-              B
+    <main className="login-shell min-h-screen text-stone-100 relative overflow-hidden px-5 py-8 sm:px-8 lg:px-12">
+      <div className="login-grain" aria-hidden="true" />
+      <div className="relative z-10 mx-auto flex min-h-[calc(100dvh-4rem)] max-w-7xl flex-col">
+        <header className="flex items-center justify-between">
+          <a href="/" aria-label="Brainy home" className="inline-flex items-center gap-3 text-stone-100 no-underline">
+            <span className="login-mark">B</span><span className="text-lg font-semibold tracking-tight">Brainy<span className="text-emerald-300">.</span></span>
+          </a>
+          <span className="hidden sm:inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[.04] px-4 py-2 text-xs text-stone-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> Your personal study space</span>
+        </header>
+        <div className="grid flex-1 items-center gap-12 py-12 lg:grid-cols-[1.15fr_.85fr] lg:gap-16 lg:py-16">
+          <section className="login-hero min-w-0" aria-labelledby="login-heading">
+            <p className="mb-5 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[.22em] text-emerald-200/80"><Sparkles size={14} aria-hidden="true" /> A clearer way to learn</p>
+            <h1 id="login-heading" className="max-w-3xl text-5xl font-medium leading-[1.02] tracking-[-.045em] text-white sm:text-6xl lg:text-7xl">Make room for <span className="login-heading-accent">understanding.</span></h1>
+            <p className="mt-6 max-w-xl text-base leading-7 text-stone-300 sm:text-lg">Pick up where you left off, work through difficult ideas, and keep the answers that help you move forward.</p>
+            <div ref={sceneRef} className="login-scene mt-9 hidden min-h-[300px] sm:block" onPointerMove={handleScenePointerMove} onPointerLeave={resetScenePointer} aria-label="An interactive study desk illustration">
+              <div className="login-orbit login-orbit-one" aria-hidden="true" /><div className="login-orbit login-orbit-two" aria-hidden="true" /><div className="login-scene-glow" aria-hidden="true" />
+              <div className="login-book login-book-back" aria-hidden="true"><span /><span /><span /></div><div className="login-book login-book-front" aria-hidden="true"><span /><span /><span /><span /></div>
+              <div className="login-study-card" aria-hidden="true"><div className="flex items-center justify-between text-[10px] uppercase tracking-[.18em] text-emerald-200/80"><span>Study note</span><span className="login-card-spark">✳</span></div><div className="mt-5 h-2 w-2/3 rounded-full bg-white/75" /><div className="mt-3 h-1.5 w-full rounded-full bg-white/20" /><div className="mt-2 h-1.5 w-4/5 rounded-full bg-white/20" /><div className="mt-5 flex items-center gap-2 text-[11px] text-stone-300"><span className="h-6 w-6 rounded-lg bg-emerald-300/15 text-center leading-6 text-emerald-200">∑</span>Ideas, made clearer</div></div>
+              <div className="login-orbit-dot" aria-hidden="true"><Sparkles size={17} /></div><div className="login-scene-caption">A little more clarity, one question at a time.</div>
             </div>
-            <span className="font-brand-display font-bold text-base tracking-tight text-white uppercase">Brainy</span>
-          </div>
-
-          {/* Center Welcome Headline */}
-          <div className="relative z-10 my-10 sm:my-14 space-y-3">
-            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white leading-tight">
-              Welcome <br />
-              Back!
-            </h1>
-            <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed">
-              A calmer place to understand difficult ideas, work through solutions, and build a study routine that fits you.
-            </p>
-
-            <div className="pt-4 space-y-2 text-xs text-zinc-300">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 size={14} className="text-emerald-400 flex-shrink-0" />
-                <span>Pick up your study sessions where you left off</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <CheckCircle2 size={14} className="text-emerald-400 flex-shrink-0" />
-                <span>Save useful answers as study notes</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <CheckCircle2 size={14} className="text-emerald-400 flex-shrink-0" />
-                <span>Ask questions, revise topics, and keep your notes together</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Bottom Pill Badge Matching Reference Image 1 */}
-          <div className="relative z-10">
-            <div className="p-3 rounded-xl bg-white/5 border border-white/10 backdrop-blur-md flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 flex-shrink-0">
-                <ShieldCheck size={18} />
-              </div>
-              <div>
-                <div className="text-xs font-semibold text-white">Your study space</div>
-                <div className="text-[11px] text-zinc-400">Sign in to continue learning</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Light Card (Matching Image 1 Right Clean Form Panel) */}
-        <div className="md:w-[55%] p-6 sm:p-10 flex flex-col justify-between">
-          <div>
-            {/* Header */}
-            <div className="text-center sm:text-left mb-8">
-              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 mb-2">
-                Login
-              </h2>
-              <p className="text-xs sm:text-sm text-zinc-500">
-                Sign in to return to your conversations and saved study notes.
-              </p>
-            </div>
-
-            {error && (
-              <div className="mb-6 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs text-center leading-relaxed font-medium">
-                {error}
-              </div>
-            )}
-
-            {/* Telegram Waiting Mode */}
+            <div className="mt-8 hidden flex-wrap gap-x-6 gap-y-3 text-sm text-stone-300 sm:flex"><span className="inline-flex items-center gap-2"><CheckCircle2 size={16} className="text-emerald-300" /> Conversations that stay with you</span><span className="inline-flex items-center gap-2"><CheckCircle2 size={16} className="text-emerald-300" /> Notes for your next study session</span></div>
+          </section>
+          <section className="login-auth-panel mx-auto w-full max-w-md" aria-labelledby="auth-heading">
+            <div className="mb-8"><p className="text-xs font-semibold uppercase tracking-[.2em] text-emerald-200/80">Welcome back</p><h2 id="auth-heading" className="mt-3 text-3xl font-medium tracking-tight text-white sm:text-4xl">Continue learning</h2><p className="mt-3 text-sm leading-6 text-stone-300">Sign in to return to your conversations and saved study notes.</p></div>
+            {error && <div role="alert" className="mb-5 rounded-xl border border-rose-300/20 bg-rose-400/10 px-4 py-3 text-sm leading-6 text-rose-100">{error}</div>}
             {telegramWaiting ? (
-              <div className="p-6 rounded-2xl bg-zinc-50 border border-zinc-200 text-center space-y-4">
-                <div className="w-12 h-12 mx-auto rounded-full bg-emerald-100 border border-emerald-200 flex items-center justify-center text-emerald-700">
-                  <TelegramIcon className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-zinc-900 mb-1">
-                    Waiting for @AiChatExpert_bot
-                  </h3>
-                  <p className="text-xs text-zinc-600 leading-relaxed">
-                    Open <strong className="text-zinc-900">@AiChatExpert_bot</strong> on Telegram, type{' '}
-                    <code className="px-1.5 py-0.5 rounded bg-zinc-200 font-mono text-[11px] text-zinc-800">
-                      /login
-                    </code>
-                    , and tap <strong>&ldquo;Authorize Web Login&rdquo;</strong>.
-                  </p>
-                </div>
-
-                <div className="pt-2 flex flex-col gap-2">
-                  <a
-                    href={telegramBotUrl || 'https://t.me/AiChatExpert_Bot'}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition flex items-center justify-center gap-2 shadow-sm"
-                  >
-                    <span>Open @AiChatExpert_bot</span>
-                    <ExternalLink size={13} />
-                  </a>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTelegramWaiting(false)
-                      setTelegramSessionId(null)
-                    }}
-                    className="text-xs text-zinc-500 hover:text-zinc-800 py-1 transition underline cursor-pointer"
-                  >
-                    Cancel Telegram Login
-                  </button>
-                </div>
-              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/[.04] p-5 text-center"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-300/10 text-emerald-200"><TelegramIcon className="h-6 w-6" /></div><h3 className="mt-4 text-lg font-medium text-white">Waiting for @AiChatExpert_bot</h3><p className="mt-2 text-sm leading-6 text-stone-300">Open the bot, type <code className="rounded bg-white/10 px-1.5 py-0.5 text-xs">/login</code>, then tap “Authorize Web Login”.</p><a href={telegramBotUrl || 'https://t.me/AiChatExpert_Bot'} target="_blank" rel="noreferrer" className="login-provider-button mt-5">Open Telegram <ExternalLink size={15} /></a><button type="button" onClick={() => { setTelegramWaiting(false); setTelegramSessionId(null) }} className="mt-4 text-sm text-stone-400 underline-offset-4 hover:text-white hover:underline">Cancel sign in</button></div>
             ) : (
-              /* Verified Auth Actions */
-              <div className="space-y-4 max-w-sm mx-auto sm:mx-0">
-                
-                {/* 1. Continue with Telegram (@AiChatExpert_bot) */}
-                <button
-                  type="button"
-                  onClick={handleStartTelegram}
-                  disabled={isSubmitting}
-                  className="w-full py-3 px-4 rounded-xl bg-zinc-900 hover:bg-black text-white text-xs font-semibold transition flex items-center justify-center gap-2.5 shadow-md shadow-zinc-900/10 cursor-pointer disabled:opacity-50"
-                >
-                  <TelegramIcon className="w-4 h-4 text-emerald-400" />
-                  <span>Continue with Telegram (@AiChatExpert_bot)</span>
-                </button>
-
-                {/* Divider */}
-                <div className="relative flex items-center justify-center my-4">
-                  <div className="border-t border-zinc-200 w-full" />
-                  <span className="bg-white px-3 text-[11px] font-medium text-zinc-400 uppercase tracking-wider">
-                    or
-                  </span>
-                </div>
-
-                {/* 2. Continue with Google */}
-                <div className="w-full flex flex-col items-center">
-                  <div id="google-signin-btn-target" className="w-full flex justify-center min-h-[44px]" />
-                  {!googleBtnRendered && (
-                    <button
-                      type="button"
-                      disabled={isSubmitting}
-                      onClick={handleGoogleButtonClick}
-                      className="w-full py-2.5 px-4 rounded-xl border border-zinc-300 hover:border-zinc-400 hover:bg-zinc-50 text-zinc-700 text-xs font-medium flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-60"
-                    >
-                      <GoogleIcon className="w-4 h-4" />
-                      <span>{isSubmitting ? 'Signing in with Google...' : 'Continue with Google'}</span>
-                    </button>
-                  )}
-                </div>
-
-                <div className="pt-2 text-center text-[11px] text-zinc-400">
-                  Select Telegram or Google to authenticate securely.
-                </div>
-              </div>
+              <div className="space-y-3"><button type="button" onClick={handleStartTelegram} disabled={isSubmitting} className="login-provider-button" aria-label="Continue with Telegram"><TelegramIcon className="h-5 w-5 text-emerald-200" /><span>Continue with Telegram</span><ArrowRight size={16} className="ml-auto text-stone-400" /></button>
+                <div className="flex items-center gap-4 py-2" aria-hidden="true"><span className="h-px flex-1 bg-white/10" /><span className="text-[11px] uppercase tracking-[.18em] text-stone-500">or</span><span className="h-px flex-1 bg-white/10" /></div><div id="google-signin-btn-target" className="login-google-target flex min-h-12 w-full justify-center" />
+                {!googleBtnRendered && <button type="button" disabled={isSubmitting} onClick={handleGoogleButtonClick} className="login-provider-button login-google-fallback"><GoogleIcon className="h-5 w-5" /><span>{isSubmitting ? 'Connecting to Google…' : 'Continue with Google'}</span><ArrowRight size={16} className="ml-auto text-stone-400" /></button>}
+                <p className="pt-3 text-center text-xs leading-5 text-stone-400">Choose a provider to securely access your personal study space.</p></div>
             )}
-          </div>
-
-          {/* Bottom Security & Copyright Footer */}
-          <div className="mt-8 pt-4 border-t border-zinc-100 flex flex-col sm:flex-row items-center justify-between text-[11px] text-zinc-400 gap-2">
-            <div className="flex items-center gap-1.5 text-zinc-500 font-medium">
-              <Lock size={12} />
-              <span>Sign in to your personal study space</span>
-            </div>
-            <span>© 2026 BrainyAi</span>
-          </div>
+            <div className="mt-8 flex items-center justify-center gap-2 border-t border-white/10 pt-5 text-xs text-stone-400"><Lock size={13} aria-hidden="true" /> Your conversations are linked to your account</div><p className="mt-5 text-center text-[11px] text-stone-600">© 2026 BrainyAi</p>
+          </section>
         </div>
-
       </div>
-    </div>
+    </main>
   )
 }

@@ -299,7 +299,10 @@ Validate the repository before committing changes:
 # 1. Compile Python source files for syntax and import consistency
 python -m py_compile app.py security.py study_bot.py
 
-# 2. Run TypeScript compiler and Next.js production export build
+# 2. Run mocked backend contract tests
+python -m unittest discover -s tests -v
+
+# 3. Run TypeScript compiler and Next.js production export build
 npm run build
 ```
 
@@ -308,6 +311,7 @@ npm run build
 ## 12. Documentation Directory
 
 * 📖 [**Architecture & System Design**](docs/ARCHITECTURE.md)
+* 🧰 [**Reliability Contracts & Operations**](docs/RELIABILITY.md)
 * 📡 [**REST API Reference**](docs/API.md)
 * 🗄️ [**Database & Schema Reference**](docs/DATABASE.md)
 * 🚀 [**Production Deployment Guide**](docs/DEPLOYMENT.md)

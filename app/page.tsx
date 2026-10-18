@@ -94,7 +94,9 @@ export default function BrainyApp() {
 
     // 2. Font Class
     FONT_OPTIONS.forEach((f) => root.classList.remove(`font-${f.id}`))
-    root.classList.add(`font-${preferences.interfaceFont}`)
+    // Lora is the product-wide default. Other typography preferences remain
+    // available as explicit user choices in Settings.
+    root.classList.add(`font-${preferences.interfaceFont || 'lora'}`)
 
     // 3. Font Size & Line Spacing Scaling Classes
     ;['font-size-sm', 'font-size-md', 'font-size-lg', 'font-size-xl'].forEach((cls) => root.classList.remove(cls))
@@ -128,7 +130,7 @@ export default function BrainyApp() {
         const savedPrefs = localStorage.getItem('brainy_user_preferences')
         if (savedPrefs) {
           try {
-            setPreferences((prev) => ({ ...prev, ...JSON.parse(savedPrefs) }))
+            setPreferences((prev) => ({ ...prev, ...JSON.parse(savedPrefs), interfaceFont: 'lora' }))
           } catch {
             // ignore
           }
@@ -151,7 +153,7 @@ export default function BrainyApp() {
 
       if (serverPrefs && Object.keys(serverPrefs).length > 0) {
         setPreferences((prev) => {
-          const merged = { ...prev, ...serverPrefs }
+          const merged = { ...prev, ...serverPrefs, interfaceFont: 'lora' as const }
           if (typeof window !== 'undefined') {
             localStorage.setItem('brainy_user_preferences', JSON.stringify(merged))
           }
@@ -309,6 +311,9 @@ export default function BrainyApp() {
 
     // Add optimistic assistant message placeholder for streaming
     const assistantMsgId = `assistant-${Date.now()}`
+    const idempotencyKey = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `chat-${Date.now()}-${Math.random().toString(36).slice(2)}`
     const initialAssistantMsg: ChatMessage = {
       id: assistantMsgId,
       role: 'assistant',
@@ -330,6 +335,7 @@ export default function BrainyApp() {
           message: textToSend,
           model: activeModel,
           answer_length: activeLength,
+          idempotency_key: idempotencyKey,
         },
         {
           onStart: (sessionId, requestId) => {
@@ -353,6 +359,9 @@ export default function BrainyApp() {
                       isStreaming: false,
                       model: doneEvent.model,
                       answer_length: doneEvent.answer_length,
+                      content: doneEvent.persistence_warning
+                        ? `${m.content}\n\n⚠️ This reply could not be fully saved to your chat. Copy it before leaving this conversation.`
+                        : m.content,
                     }
                   : m
               )
@@ -376,7 +385,7 @@ export default function BrainyApp() {
                 .then((updated) => {
                   if (updated && updated.length > 0) setSessions(updated)
                 })
-                .catch(() => {})
+                .catch((error) => console.warn('Could not refresh saved chats:', error))
             } else if (doneEvent.new_title) {
               setActiveSessionTitle(doneEvent.new_title)
               setSessions((prev) =>
@@ -431,10 +440,11 @@ export default function BrainyApp() {
                     : ''
                 return { ...m, isStreaming: false, content: `${m.content}${note}` }
               }
+              const requestRef = err?.data?.request_id ? ` (reference ${err.data.request_id})` : ''
               return {
                 ...m,
                 isStreaming: false,
-                content: `⚠️ ${err?.message || 'Could not generate an answer. Please check connection and retry.'}`,
+                content: `⚠️ ${err?.message || 'Could not generate an answer. Please check connection and retry.'}${requestRef}`,
               }
             }
             return m

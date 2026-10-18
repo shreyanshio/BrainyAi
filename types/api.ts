@@ -92,22 +92,24 @@ export interface StreamLatencyMetrics {
 }
 
 export type StreamEvent =
-  | { type: 'start'; request_id: string; session_id: string }
+  | { type: 'start'; request_id: string; session_id: string | null }
   | { type: 'status'; stage: StreamStage }
   | { type: 'delta'; text: string }
   | {
       type: 'done'
-      session_id: string
+      session_id: string | null
       new_title: string | null
       model: string
       answer_length: AnswerLength
       usage: UsageStatus
+      persistence_warning?: boolean
+      request_id?: string
       latency_ms?: StreamLatencyMetrics
     }
-  | { type: 'error'; code: string; message: string; partial?: boolean }
+  | { type: 'error'; code: string; message: string; partial?: boolean; request_id?: string }
 
 export interface StreamChatCallbacks {
-  onStart?: (sessionId: string, requestId: string) => void
+  onStart?: (sessionId: string | null, requestId: string) => void
   onStatus?: (stage: StreamStage) => void
   onDelta?: (deltaText: string, accumulatedText: string) => void
   onDone?: (event: Extract<StreamEvent, { type: 'done' }>) => void

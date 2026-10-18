@@ -91,7 +91,7 @@ export function SettingsModal({
   }
 
   const currentFont =
-    FONT_OPTIONS.find((f) => f.id === preferences.interfaceFont) || FONT_OPTIONS[0]
+    FONT_OPTIONS.find((f) => f.id === 'lora') || FONT_OPTIONS[0]
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-sm animate-fade-in">
@@ -273,7 +273,7 @@ export function SettingsModal({
                   </div>
 
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
-                    {FONT_OPTIONS.map((f) => (
+                    {FONT_OPTIONS.filter((f) => f.id === 'lora').map((f) => (
                       <button
                         key={f.id}
                         onClick={() => onUpdatePreferences({ interfaceFont: f.id as InterfaceFont })}

@@ -288,7 +288,7 @@ export const FONT_OPTIONS: FontDefinition[] = [
 export const DEFAULT_PREFERENCES = {
   theme: 'warm-paper' as const,
   accentColor: 'emerald' as const,
-  interfaceFont: 'inter' as const,
+  interfaceFont: 'lora' as const,
   fontSize: 'md' as const,
   lineSpacing: 'comfortable' as const,
   chatWidth: 'standard' as const,

@@ -23,7 +23,7 @@ import requests
 from datetime import datetime, timezone, timedelta
 from html import escape
 from functools import wraps
-from flask import Flask, request, jsonify, session, send_from_directory, redirect, Response, stream_with_context
+from flask import Flask, request, jsonify, session, send_from_directory, redirect, Response, stream_with_context, g
 from flask_cors import CORS
 
 logging.basicConfig(level=logging.INFO)
@@ -36,7 +36,7 @@ import study_bot
 from security import (
     security_guard, login_required, sanitize_input,
     is_blacklisted, check_rate_limit, rate_limit_retry_after, log_security_event, security_headers,
-    create_auth_token, verify_auth_token, _get_auth_secret_key
+    create_auth_token, verify_auth_token, _get_auth_secret_key, RateLimitStoreUnavailable
 )
 
 app = Flask(__name__)
@@ -344,19 +344,10 @@ def consume_user_quota(user_id: int | str) -> tuple[bool, dict]:
         status.update({"limit": GLOBAL_MESSAGE_LIMIT, "window_hours": QUOTA_WINDOW_HOURS})
         return bool(status.pop("allowed", False)), status
     except SupabaseOperationError:
-        try:
-            status = get_user_quota(user_id)
-            if status["used"] >= GLOBAL_MESSAGE_LIMIT:
-                return False, status
-            new_used = status["used"] + 1
-            now = datetime.now(timezone.utc).isoformat()
-            _sb_request("PATCH", "user_quotas", params=f"?user_id=eq.{user_id}",
-                        json_body={"used": new_used, "updated_at": now})
-            status["used"] = new_used
-            status["remaining"] = max(0, GLOBAL_MESSAGE_LIMIT - new_used)
-            return True, status
-        except Exception:
-            raise
+        # A read/modify/write fallback is not atomic across application workers.
+        # Fail closed instead of allowing concurrent requests to exceed quota.
+        logger.exception("Atomic quota store unavailable user_id=%s", user_id)
+        raise
 
 def refund_user_quota(user_id: int | str) -> dict:
     """Refund one previously consumed credit after a pre-generation failure."""
@@ -368,17 +359,11 @@ def refund_user_quota(user_id: int | str) -> dict:
             "p_limit": GLOBAL_MESSAGE_LIMIT, "p_window_hours": QUOTA_WINDOW_HOURS})
         return {**status, "limit": GLOBAL_MESSAGE_LIMIT, "window_hours": QUOTA_WINDOW_HOURS}
     except SupabaseOperationError:
-        try:
-            status = get_user_quota(user_id)
-            new_used = max(0, status["used"] - 1)
-            now = datetime.now(timezone.utc).isoformat()
-            _sb_request("PATCH", "user_quotas", params=f"?user_id=eq.{user_id}",
-                        json_body={"used": new_used, "updated_at": now})
-            status["used"] = new_used
-            status["remaining"] = max(0, GLOBAL_MESSAGE_LIMIT - new_used)
-            return status
-        except Exception:
-            return get_user_quota(user_id)
+        # Refunds must use the same atomic quota row operation as consumption.
+        # A failed refund can conservatively leave a credit consumed; it must
+        # never decrement another concurrent request's usage.
+        logger.exception("Atomic quota refund unavailable user_id=%s", user_id)
+        raise
 
 
 # ── SUSPENDED USERS MANAGEMENT ──
@@ -671,7 +656,12 @@ def sb_insert_message(session_id: str, role: str, content: str, idempotency_key:
     payload = {"session_id": session_id, "role": role, "content": stored_content}
     if idempotency_key:
         payload["idempotency_key"] = idempotency_key
-    _sb_request("POST", "chat_messages", json_body=payload, prefer="return=minimal")
+    if idempotency_key:
+        # Requires the matching session-scoped unique index in the migration.
+        _sb_request("POST", "chat_messages?on_conflict=session_id,idempotency_key",
+                    json_body=payload, prefer="resolution=ignore-duplicates,return=minimal")
+    else:
+        _sb_request("POST", "chat_messages", json_body=payload, prefer="return=minimal")
     MEM_MESSAGES.setdefault(session_id, []).append(msg_obj)
 
 
@@ -1672,7 +1662,7 @@ def view_shared_answer(share_id):
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{title}</title>
   <style>
-    body {{ margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, sans-serif; background:#0b0a14; color:#ede7f6; }}
+    body {{ margin:0; font-family: 'Lora', Georgia, serif; background:#0b0a14; color:#ede7f6; }}
     main {{ max-width: 780px; margin: 0 auto; padding: 48px 20px; }}
     h1 {{ font-size: 20px; margin: 0 0 18px; }}
     article {{ white-space: pre-wrap; line-height: 1.65; background:#14111f; border:1px solid #322a4d; border-radius:14px; padding:22px; }}
@@ -1725,11 +1715,32 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
 
     # Blacklist check
     if is_blacklisted(content):
-        log_security_event("blacklist_blocked", ip, user_id, content[:100])
+        log_security_event("blacklist_blocked", ip, user_id, "message rejected by input filter")
         return None, jsonify({"error": "Invalid input detected."}), 403
 
+    intent, payload = study_bot.detect_intent(content)
+
+    # Search is a separate expensive operation with its own burst ceiling.
+    if intent == "search":
+        try:
+            search_allowed = check_rate_limit(f"search_user_{user_id}", limit=5, window=60)
+        except RateLimitStoreUnavailable:
+            return None, jsonify({"error": "Request protection is temporarily unavailable. Please retry shortly.",
+                "code": "RATE_LIMIT_STORE_UNAVAILABLE", "request_id": getattr(g, "request_id", None), "retryable": True}), 503
+        if not search_allowed:
+            retry_after = rate_limit_retry_after(f"search_user_{user_id}", window=60)
+            response = jsonify({"error": "Search limit reached. Please wait a moment before searching again.",
+                "code": "SEARCH_RATE_LIMITED", "retry_after": retry_after, "limit": 5})
+            response.headers["Retry-After"] = str(retry_after)
+            return None, response, 429
+
     # Per-user rate limit: 10 messages per minute
-    if not check_rate_limit("user_{}".format(user_id), limit=10, window=60):
+    try:
+        user_rate_allowed = check_rate_limit("user_{}".format(user_id), limit=10, window=60)
+    except RateLimitStoreUnavailable:
+        return None, jsonify({"error": "Request protection is temporarily unavailable. Please retry shortly.",
+            "code": "RATE_LIMIT_STORE_UNAVAILABLE", "request_id": getattr(g, "request_id", None), "retryable": True}), 503
+    if not user_rate_allowed:
         log_security_event("user_rate_limit", ip, user_id, "")
         retry_after = rate_limit_retry_after("user_{}".format(user_id), window=60)
         response = jsonify({"error": "Message rate limit reached. Please wait a moment.",
@@ -1752,27 +1763,37 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
             "message_limit": GLOBAL_MESSAGE_LIMIT
         }), 429
 
-    # Create only after validation, rate limiting, and quota acceptance.
+    # Durable history is best effort for answer delivery. A database outage must
+    # not discard the user's question or prevent an otherwise valid AI answer.
+    persistence_warning = False
     if not session_id:
         try:
             sess = sb_create_session(user_id, "New Study Session")
             session_id = sess["id"]
-        except SupabaseOperationError:
-            refund_user_quota(user_id)
-            return None, jsonify({"error": "Could not create a durable chat session. Please retry.", "code": "SESSION_CREATE_FAILED", "retryable": True}), 503
+        except SupabaseOperationError as exc:
+            logger.warning("Session creation failed request_id=%s category=%s", getattr(g, "request_id", ""), type(exc).__name__)
+            sess = {"title": None}
+            persistence_warning = True
 
-    try:
-        sb_insert_message(session_id, "user", content, idempotency_key=data.get("idempotency_key"))
-    except SupabaseOperationError:
-        refund_user_quota(user_id)
-        return None, jsonify({"error": "Your message could not be saved. Please retry.", "code": "MESSAGE_SAVE_FAILED", "retryable": True}), 503
+    user_message_saved = False
+    if session_id:
+        try:
+            sb_insert_message(session_id, "user", content, idempotency_key=data.get("idempotency_key"))
+            user_message_saved = True
+        except SupabaseOperationError as exc:
+            logger.warning("User message persistence failed request_id=%s category=%s", getattr(g, "request_id", ""), type(exc).__name__)
+            persistence_warning = True
 
-    # Fetch last 15 messages (including the one just saved) for context
-    try:
-        messages_context = [{"role": m["role"], "content": m["content"]} for m in sb_get_recent_messages(session_id, 15)]
-    except SupabaseOperationError:
-        refund_user_quota(user_id)
-        return None, jsonify({"error": "Conversation history is temporarily unavailable. Please retry.", "code": "HISTORY_LOAD_FAILED", "retryable": True}), 503
+    # Include the current question even if its insert or the history read fails.
+    messages_context = []
+    if session_id:
+        try:
+            messages_context = [{"role": m["role"], "content": m["content"]} for m in sb_get_recent_messages(session_id, 15)]
+        except SupabaseOperationError as exc:
+            logger.warning("Chat history read failed request_id=%s category=%s", getattr(g, "request_id", ""), type(exc).__name__)
+            persistence_warning = True
+    if not user_message_saved or not messages_context or messages_context[-1].get("content") != content:
+        messages_context.append({"role": "user", "content": content})
 
     # Durable personal profile is loaded before model context is assembled.
     try:
@@ -1780,9 +1801,6 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
     except Exception:
         refund_user_quota(user_id)
         return None, jsonify({"error": "Your study profile is temporarily unavailable. Please retry.", "code": "MEMORY_LOAD_FAILED", "retryable": True}), 503
-
-    # Run intent detection
-    intent, payload = study_bot.detect_intent(content)
 
     system_prompt = study_bot.SYSTEM_PROMPT
     max_tok = None
@@ -1900,8 +1918,15 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
                 f"{search_results}\n\n"
                 f"In results ke basis pe ek clear, accurate, engaging answer do Hinglish mein. "
                 f"Agar results mein kafi info nahi hai, toh honestly batao. "
+                f"Cite only exact HTTP(S) source URLs present in the results; never invent citations or links. "
                 f"NEVER use **asterisks** markdown. Use emojis and → for formatting."
             )
+            if search_results.startswith("DuckDuckGo Instant Answer"):
+                ai_prompt += (
+                    "\nThis is an unavailable/empty Instant Answer result, not full web search. "
+                    "Tell the user no useful search result is available right now; do not answer from memory "
+                    "or invent sources, citations, titles, or links."
+                )
             messages_context = [{"role": "user", "content": ai_prompt}]
             system_prompt = study_bot.SEARCH_SYSTEM_PROMPT
             max_tok = 600
@@ -1936,6 +1961,7 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
         "system_prompt": system_prompt,
         "max_tok": max_tok,
         "quota_status": quota_status,
+        "persistence_warning": persistence_warning,
     }, None, 200
 
 
@@ -1951,6 +1977,10 @@ def send_message():
     data = request.get_json(silent=True) or {}
     prep, err_resp, status = _prepare_chat_request(data, user_id, first_name, username, ip)
     if err_resp:
+        body = err_resp.get_json(silent=True) or {}
+        body.setdefault("request_id", getattr(g, "request_id", None))
+        err_resp.set_data(json.dumps(body))
+        err_resp.headers["Content-Type"] = "application/json"
         return err_resp, status
 
     session_id = prep["session_id"]
@@ -1959,36 +1989,47 @@ def send_message():
     answer_length = prep["answer_length"]
     quota_status = prep["quota_status"]
     sess = prep["sess"]
+    request_key = data.get("idempotency_key")
+    if not isinstance(request_key, str) or not request_key:
+        request_key = None
 
     try:
         response_text = study_bot.ai_call(prep["messages_context"], prep["system_prompt"], prep["max_tok"])
         response_text = study_bot.clean_response(response_text)
+        if not response_text.strip():
+            raise RuntimeError("provider returned an empty answer")
     except Exception as e:
-        logger.error("AI Call failed in Web App: %s", e)
-        refund_user_quota(user_id)
+        logger.error("AI call failed request_id=%s category=%s", getattr(g, "request_id", ""), type(e).__name__)
+        try:
+            refund_user_quota(user_id)
+        except SupabaseOperationError:
+            logger.error("Quota refund failed request_id=%s", getattr(g, "request_id", ""))
         return jsonify({
             "error": "ai_provider_error",
-            "message": "AI service temporarily unavailable. Please try again in a few moments."
+            "message": "AI service temporarily unavailable. Please try again in a few moments.",
+            "request_id": getattr(g, "request_id", None)
         }), 502
 
     # Save assistant reply + auto-title the chat on its first exchange
-    try:
-        sb_insert_message(session_id, "assistant", response_text)
-    except SupabaseOperationError:
-        return jsonify({
-            "error": "The answer was generated but could not be saved to your chat.",
-            "code": "ASSISTANT_SAVE_FAILED",
-            "retryable": True,
-            "unsaved_response": format_for_web(response_text),
-            "session_id": session_id,
-        }), 503
+    assistant_saved = False
+    if session_id:
+        try:
+            sb_insert_message(session_id, "assistant", response_text,
+                idempotency_key=f"{request_key}:assistant" if request_key else None)
+            assistant_saved = True
+        except SupabaseOperationError as exc:
+            logger.warning("Assistant message persistence failed request_id=%s category=%s", getattr(g, "request_id", ""), type(exc).__name__)
 
     title_updated = None
-    if sess.get("title") in ("New Chat", "New Study Session", "", None):
+    if session_id and sess.get("title") in ("New Chat", "New Study Session", "", None):
         words = content.split()[:5]
         new_title = " ".join(words) + ("..." if len(content.split()) > 5 else "")
-        sb_rename_session(session_id, user_id, new_title)
-        title_updated = new_title
+        try:
+            sb_rename_session(session_id, user_id, new_title)
+            title_updated = new_title
+        except SupabaseOperationError as exc:
+            logger.warning("Session title update failed request_id=%s category=%s", getattr(g, "request_id", ""), type(exc).__name__)
+            prep["persistence_warning"] = True
 
     # Return unified typed API response
     return jsonify({
@@ -2001,7 +2042,9 @@ def send_message():
         "answer_length": answer_length,
         "usage": quota_status,
         "user_message_count": quota_status["used"],
-        "message_limit": GLOBAL_MESSAGE_LIMIT
+        "message_limit": GLOBAL_MESSAGE_LIMIT,
+        "persistence_warning": prep["persistence_warning"] or not assistant_saved,
+        "request_id": getattr(g, "request_id", None)
     })
 
 
@@ -2020,15 +2063,22 @@ def stream_message():
     t_start = time.perf_counter()
 
     data = request.get_json(silent=True) or {}
+    request_key = data.get("idempotency_key") if isinstance(data, dict) else None
+    if not isinstance(request_key, str) or not request_key:
+        request_key = None
     prep, err_resp, status = _prepare_chat_request(data, user_id, first_name, username, ip)
     if err_resp:
+        body = err_resp.get_json(silent=True) or {}
+        body.setdefault("request_id", getattr(g, "request_id", None))
+        err_resp.set_data(json.dumps(body))
+        err_resp.headers["Content-Type"] = "application/json"
         return err_resp, status
 
     t_prep_done = time.perf_counter()
     pre_gen_ms = round((t_prep_done - t_start) * 1000, 2)
 
     def generate():
-        request_id = str(uuid.uuid4())
+        request_id = getattr(g, "request_id", None) or str(uuid.uuid4())
         session_id = prep["session_id"]
         model_id = prep["model_id"]
         answer_length = prep["answer_length"]
@@ -2054,6 +2104,7 @@ def stream_message():
         has_yielded = False
         persistence_started = False
         assistant_saved = False
+        persistence_warning = prep["persistence_warning"]
 
         try:
             for chunk in study_bot.ai_stream(
@@ -2078,21 +2129,35 @@ def stream_message():
 
             full_text = "".join(tokens)
             clean_text = study_bot.clean_response(full_text)
+            if not clean_text.strip():
+                raise RuntimeError("provider returned an empty answer")
 
             yield json.dumps({"type": "status", "stage": "persisting"}) + "\n"
             t_persist_start = time.perf_counter()
             persistence_started = True
-            # Insert assistant message into Supabase
-            sb_insert_message(session_id, "assistant", clean_text)
-            assistant_saved = True
+            # Deliver the completed answer even if its durable chat write fails.
+            if session_id:
+                try:
+                    assistant_key = f"{request_key}:assistant" if request_key else None
+                    sb_insert_message(session_id, "assistant", clean_text, idempotency_key=assistant_key)
+                    assistant_saved = True
+                except SupabaseOperationError as exc:
+                    logger.warning("Assistant message persistence failed request_id=%s category=%s", request_id, type(exc).__name__)
+                    persistence_warning = True
+            else:
+                persistence_warning = True
 
             # Auto-title if new session
             title_updated = None
-            if sess.get("title") in ("New Chat", "New Study Session", "", None):
+            if session_id and sess.get("title") in ("New Chat", "New Study Session", "", None):
                 words = content.split()[:5]
                 new_title = " ".join(words) + ("..." if len(content.split()) > 5 else "")
-                sb_rename_session(session_id, user_id, new_title)
-                title_updated = new_title
+                try:
+                    sb_rename_session(session_id, user_id, new_title)
+                    title_updated = new_title
+                except SupabaseOperationError as exc:
+                    logger.warning("Session title update failed request_id=%s category=%s", request_id, type(exc).__name__)
+                    persistence_warning = True
 
             t_persist_done = time.perf_counter()
             total_duration_ms = round((t_persist_done - t_start) * 1000, 2)
@@ -2106,6 +2171,8 @@ def stream_message():
                 "model": model_id,
                 "answer_length": answer_length,
                 "usage": quota_status,
+                "persistence_warning": persistence_warning or not assistant_saved,
+                "request_id": request_id,
                 "latency_ms": {
                     "pre_gen_ms": pre_gen_ms,
                     "ttft_ms": ttft_ms,
@@ -2116,12 +2183,16 @@ def stream_message():
             }) + "\n"
 
         except Exception as e:
-            logger.error("Error during streaming generation: %s", e)
+            logger.error("Streaming request failed request_id=%s category=%s", request_id, type(e).__name__)
             if not has_yielded:
                 # Refund quota if error happened before any tokens emitted
-                refund_user_quota(user_id)
+                try:
+                    refund_user_quota(user_id)
+                except SupabaseOperationError:
+                    logger.error("Quota refund failed request_id=%s", request_id)
                 yield json.dumps({
                     "type": "error",
+                    "request_id": request_id,
                     "code": "ai_provider_error",
                     "message": "AI service temporarily unavailable. Please try again in a few moments.",
                     "partial": False
@@ -2129,6 +2200,7 @@ def stream_message():
             else:
                 yield json.dumps({
                     "type": "error",
+                    "request_id": request_id,
                     "code": "assistant_save_failed" if persistence_started and not assistant_saved else "session_update_failed" if assistant_saved else "stream_interrupted",
                     "message": "The generated answer could not be saved." if persistence_started and not assistant_saved else "The answer was saved, but chat details could not be updated." if assistant_saved else "Generation was interrupted before it could be saved.",
                     "partial": True
