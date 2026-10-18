@@ -1236,42 +1236,51 @@ def _stream_groq(messages, system_prompt, max_tokens, model_id=None):
 
     # Model IDs are configurable in Railway, with active Groq models as defaults.
     fast = model_id == "brainy-fast"
-    model_name = GROQ_FAST_MODEL if fast else GROQ_BALANCED_MODEL
+    requested_model = GROQ_FAST_MODEL if fast else GROQ_BALANCED_MODEL
+    # Groq active models fallback chain in case requested model is unavailable on the account
+    groq_models = [requested_model, "llama-3.1-8b-instant", "llama3-70b-8192", "mixtral-8x7b-32768", "gemma2-9b-it"]
+    # De-duplicate while preserving order
+    groq_models = list(dict.fromkeys(groq_models))
 
     last_err = None
     for _ in range(len(GROQ_API_KEYS)):
-        try:
-            key = _rotate_key("groq", GROQ_API_KEYS)
-            client = _get_groq_client(key)
-            tok = max_tokens or 1024
-            kwargs = dict(
-                model=model_name,
-                max_tokens=tok,
-                messages=[{"role": "system", "content": system_prompt}] + messages,
-                stream=True
-            )
-            if any(term in model_name.lower() for term in ("r1", "reasoning", "deepseek")):
-                kwargs["reasoning_effort"] = "low" if fast else "medium"
+        key = _rotate_key("groq", GROQ_API_KEYS)
+        client = _get_groq_client(key)
+        tok = max_tokens or 1024
+        for model_name in groq_models:
             try:
-                response_stream = client.chat.completions.create(**kwargs)
-            except Exception as pe:
-                err_lower = str(pe).lower()
-                if "max_tokens" in err_lower or "unexpected" in err_lower:
-                    kwargs.pop("max_tokens", None)
-                    kwargs["max_completion_tokens"] = tok
+                kwargs = dict(
+                    model=model_name,
+                    max_tokens=tok,
+                    messages=[{"role": "system", "content": system_prompt}] + messages,
+                    stream=True
+                )
+                if any(term in model_name.lower() for term in ("r1", "reasoning", "deepseek")):
+                    kwargs["reasoning_effort"] = "low" if fast else "medium"
+                try:
                     response_stream = client.chat.completions.create(**kwargs)
-                else:
-                    raise pe
-            for chunk in response_stream:
-                if chunk.choices and len(chunk.choices) > 0:
-                    delta = chunk.choices[0].delta
-                    if delta and delta.content:
-                        yield delta.content
-            return
-        except Exception as e:
-            last_err = e
-            print(f"[groq_stream] Groq key failure ({type(e).__name__}): {str(e)[:80]}, rotating to next key...")
-            continue
+                except Exception as pe:
+                    err_lower = str(pe).lower()
+                    if "max_tokens" in err_lower or "unexpected" in err_lower:
+                        kwargs.pop("max_tokens", None)
+                        kwargs["max_completion_tokens"] = tok
+                        response_stream = client.chat.completions.create(**kwargs)
+                    else:
+                        raise pe
+                for chunk in response_stream:
+                    if chunk.choices and len(chunk.choices) > 0:
+                        delta = chunk.choices[0].delta
+                        if delta and delta.content:
+                            yield delta.content
+                return
+            except Exception as e:
+                last_err = e
+                err_s = str(e).lower()
+                if "model" in err_s or "404" in err_s:
+                    # Model not available on this tier/account, try next model
+                    continue
+                print(f"[groq_stream] Groq key failure ({type(e).__name__}): {str(e)[:80]}, rotating to next key...")
+                break
     raise Exception(f"All Groq keys exhausted: {last_err}")
 
 def _stream_cerebras(messages, system_prompt, max_tokens, model_id=None):

@@ -1070,9 +1070,14 @@ def sb_insert_message(session_id: str, role: str, content: str,
         payload["idempotency_key"] = idempotency_key
     try:
         if idempotency_key:
-            # Requires the matching session-scoped unique index in the migration.
-            _sb_request("POST", "chat_messages?on_conflict=session_id,idempotency_key",
-                        json_body=payload, prefer="resolution=ignore-duplicates,return=minimal")
+            # Try with idempotency constraint if unique index exists in Supabase
+            try:
+                _sb_request("POST", "chat_messages?on_conflict=session_id,idempotency_key",
+                            json_body=payload, prefer="resolution=ignore-duplicates,return=minimal")
+            except (SupabaseOperationError, SupabaseSchemaUnavailable) as e:
+                # If the unique index or constraint is missing in Supabase, fall back immediately to plain insert
+                logger.info("Retrying chat message insert without on_conflict: %s", str(e)[:100])
+                _sb_request("POST", "chat_messages", json_body=payload, prefer="return=minimal")
         else:
             _sb_request("POST", "chat_messages", json_body=payload, prefer="return=minimal")
     except SupabaseSchemaUnavailable:

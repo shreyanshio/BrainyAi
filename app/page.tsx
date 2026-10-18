@@ -481,9 +481,7 @@ export default function BrainyApp() {
                       isStreaming: false,
                       model: doneEvent.model,
                       answer_length: doneEvent.answer_length,
-                      content: doneEvent.persistence_warning
-                        ? `${m.content}\n\n⚠️ This reply could not be fully saved to your chat. Copy it before leaving this conversation.`
-                        : m.content,
+                      content: m.content,
                     }
                   : m
               )
