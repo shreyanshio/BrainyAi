@@ -670,7 +670,7 @@ export default function BrainyApp() {
 
   // Authenticated: Full Study Companion App Shell
   return (
-    <div className="flex h-screen h-[100dvh] overflow-hidden bg-[var(--bg-app)] text-[var(--text-primary)] antialiased transition-colors">
+    <div className="flex h-screen h-[100dvh] overflow-hidden ambient-canvas text-[var(--text-primary)] antialiased transition-colors">
       {/* Left Sidebar */}
       <Sidebar
         user={user}
@@ -712,6 +712,7 @@ export default function BrainyApp() {
           usage={usage}
           onOpenUsageModal={() => setUsageModalOpen(true)}
           onOpenSettingsModal={() => setSettingsModalOpen(true)}
+          onOpenNotesModal={() => setNotesModalOpen(true)}
           onToggleSidebar={() => setSidebarMobileOpen(!sidebarMobileOpen)}
           onLogout={handleLogout}
         />
@@ -749,7 +750,12 @@ export default function BrainyApp() {
                   )}
                 </div>
               ) : messages.length === 0 ? (
-                <EmptyState onSelectPrompt={(prompt) => handleSendMessage(prompt)} />
+                <EmptyState
+                  userName={user?.first_name}
+                  usage={usage}
+                  onOpenUsageModal={() => setUsageModalOpen(true)}
+                  onSelectPrompt={(prompt) => handleSendMessage(prompt)}
+                />
               ) : (
                 <MessageList
                   messages={messages}

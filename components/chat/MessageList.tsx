@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useRef } from 'react'
-import { Copy, Check, Bookmark, BookmarkCheck } from 'lucide-react'
+import { Copy, Check, Bookmark, BookmarkCheck, Sparkles } from 'lucide-react'
 import { ChatMessage, ChatWidthOption, User } from '@/types/api'
 import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 
@@ -40,21 +40,21 @@ export function MessageList({
     setTimeout(() => setSavedIndex(null), 2500)
   }
 
-  const maxWidthClass = chatWidth === 'wide' ? 'max-w-5xl' : 'max-w-3xl'
+  const maxWidthClass = chatWidth === 'wide' ? 'max-w-4xl' : 'max-w-2xl'
 
   return (
-    <div className={`w-full ${maxWidthClass} mx-auto px-4 py-6 space-y-6`}>
+    <div className={`w-full ${maxWidthClass} mx-auto px-4 py-8 space-y-6 sm:space-y-8`}>
       {messages.map((msg, idx) => {
         const isUser = msg.role === 'user'
         const messageKey = msg.id ?? `${msg.role}-${msg.created_at || 'pending'}-${idx}`
 
         if (isUser) {
           return (
-            <div key={messageKey} className="flex justify-end items-start gap-2.5">
-              <div className="max-w-[85%] sm:max-w-[75%] rounded-2xl rounded-tr-xs bg-zinc-900 text-white dark:bg-zinc-800 border border-zinc-800 dark:border-zinc-700/60 px-4 py-2.5 text-xs sm:text-sm leading-relaxed shadow-xs break-words">
+            <div key={messageKey} className="flex justify-end items-start gap-2.5 sm:gap-3">
+              <div className="max-w-[85%] sm:max-w-[78%] rounded-3xl rounded-tr-sm bg-[var(--text-primary)] text-[var(--bg-app)] px-4 sm:px-5 py-3 text-xs sm:text-sm leading-relaxed shadow-sm break-words">
                 {msg.content}
               </div>
-              <div className="w-6 h-6 rounded-full bg-zinc-700 text-white flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5">
+              <div className="w-7 h-7 rounded-full bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] text-[var(--text-primary)] flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5 shadow-xs">
                 {user.first_name ? user.first_name[0].toUpperCase() : 'U'}
               </div>
             </div>
@@ -64,19 +64,19 @@ export function MessageList({
         const isStreaming = Boolean(msg.isStreaming)
 
         return (
-          <div key={messageKey} className="flex items-start gap-3">
-            <div className="w-7 h-7 rounded-lg bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 flex items-center justify-center font-bold text-xs flex-shrink-0 mt-0.5">
+          <div key={messageKey} className="flex items-start gap-3 sm:gap-3.5">
+            <div className="w-7 h-7 rounded-xl bg-[var(--text-primary)] text-[var(--bg-app)] flex items-center justify-center font-bold text-xs flex-shrink-0 mt-1 shadow-xs">
               B
             </div>
 
             <div className="flex-1 min-w-0">
-              <div className="rounded-2xl rounded-tl-xs bg-[var(--bg-surface)] border border-[var(--border-subtle)] p-4 sm:p-5 shadow-[var(--card-shadow)] text-[var(--text-primary)]">
+              <div className="rounded-3xl rounded-tl-sm glass-panel p-5 sm:p-6 shadow-xs text-[var(--text-primary)] leading-relaxed text-xs sm:text-sm">
                 {msg.content ? (
                   <>
                     <MarkdownRenderer content={msg.content} />
                     {isStreaming && (
                       <span
-                        className="inline-block w-1.5 h-4 ml-1 bg-emerald-500 dark:bg-emerald-400 animate-pulse align-middle"
+                        className="inline-block w-1.5 h-4 ml-1 bg-emerald-500 dark:bg-emerald-400 animate-pulse align-middle rounded-full"
                         aria-label="streaming cursor"
                       />
                     )}
@@ -84,18 +84,18 @@ export function MessageList({
                 ) : (
                   <div className="flex items-center gap-2.5 text-xs text-[var(--text-muted)] py-1">
                     <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    <span>Brainy is preparing your explanation...</span>
+                    <span>Brainy is formulating your explanation...</span>
                   </div>
                 )}
               </div>
 
-              {/* Message Toolbar - visible once streaming completes and content exists */}
+              {/* Message Toolbar */}
               {!isStreaming && msg.content && (
-                <div className="flex items-center gap-3 mt-1.5 px-1 text-[11px] text-[var(--text-muted)]">
+                <div className="flex items-center gap-3 mt-2 px-1 text-[11px] text-[var(--text-muted)]">
                   <button
                     onClick={() => handleCopy(msg.content, idx)}
-                    className="flex items-center gap-1 hover:text-[var(--text-primary)] transition py-0.5 cursor-pointer"
-                    title="Copy full answer"
+                    className="flex items-center gap-1.5 hover:text-[var(--text-primary)] transition py-0.5 cursor-pointer"
+                    title="Copy response"
                   >
                     {copiedIndex === idx ? (
                       <>
@@ -112,8 +112,8 @@ export function MessageList({
 
                   <button
                     onClick={() => handleSaveNote(msg.content, idx)}
-                    className="flex items-center gap-1 hover:text-[var(--text-primary)] transition py-0.5 cursor-pointer"
-                    title="Save note to study context"
+                    className="flex items-center gap-1.5 hover:text-[var(--text-primary)] transition py-0.5 cursor-pointer"
+                    title="Save to study notes"
                   >
                     {savedIndex === idx ? (
                       <>
@@ -134,20 +134,20 @@ export function MessageList({
         )
       })}
 
-      {/* Thinking Indicator only when no streaming bubble is currently active */}
+      {/* Thinking Indicator */}
       {isThinking && !messages.some((m) => m.isStreaming) && (
-        <div className="flex items-start gap-3">
-          <div className="w-7 h-7 rounded-lg bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 flex items-center justify-center font-bold text-xs flex-shrink-0 mt-0.5">
+        <div className="flex items-start gap-3 sm:gap-3.5">
+          <div className="w-7 h-7 rounded-xl bg-[var(--text-primary)] text-[var(--bg-app)] flex items-center justify-center font-bold text-xs flex-shrink-0 mt-1 shadow-xs">
             B
           </div>
-          <div className="rounded-2xl rounded-tl-xs bg-[var(--bg-surface)] border border-[var(--border-subtle)] px-4 py-3 text-xs text-[var(--text-muted)] flex items-center gap-2.5">
+          <div className="rounded-3xl rounded-tl-sm glass-panel px-5 py-3.5 text-xs text-[var(--text-muted)] flex items-center gap-2.5 shadow-xs">
             <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>Brainy is formulating step-by-step academic explanation...</span>
+            <span>Formulating step-by-step academic response...</span>
           </div>
         </div>
       )}
 
-      <div ref={bottomRef} className="h-4" />
+      <div ref={bottomRef} className="h-6" />
     </div>
   )
 }

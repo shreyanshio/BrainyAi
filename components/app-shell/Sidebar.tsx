@@ -9,14 +9,13 @@ import {
   Edit2,
   Check,
   X,
-  Clock,
-  BookMarked,
   Bookmark,
   Pin,
   Archive,
   LogOut,
   Sliders,
   LayoutDashboard,
+  BookMarked,
 } from 'lucide-react'
 import { ChatSession, UsageStatus, User } from '@/types/api'
 
@@ -72,6 +71,7 @@ export function Sidebar({
   onCloseMobile,
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchActive, setSearchActive] = useState(false)
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [workspace, setWorkspace] = useState<'recent' | 'saved' | 'pinned' | 'archived'>('recent')
@@ -191,33 +191,48 @@ export function Sidebar({
                   onSelectView('chat')
                   onCloseMobile()
                 }}
-                className={`group flex items-center justify-between px-3 py-2 rounded-xl text-xs cursor-pointer transition ${
+                className={`group flex items-start justify-between px-3 py-2 rounded-xl text-xs cursor-pointer transition ${
                   isSelected
-                    ? 'bg-[var(--bg-surface-elevated)] text-[var(--text-primary)] font-bold shadow-xs'
+                    ? 'bg-[var(--bg-surface-elevated)] text-[var(--text-primary)] font-medium shadow-xs'
                     : 'text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text-primary)]'
                 }`}
               >
-                <div className="flex items-center gap-2.5 truncate pr-2">
-                  <MessageSquare size={13} className={isSelected ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'} />
-                  <span className="truncate">{sess.title || 'Untitled Session'}</span>
+                <div className="flex-1 min-w-0 pr-1.5">
+                  <div className="flex items-center gap-2">
+                    {sess.is_pinned && <Pin size={10} className="text-sky-500 flex-shrink-0" />}
+                    {sess.is_saved && <Bookmark size={10} className="text-amber-500 flex-shrink-0" fill="currentColor" />}
+                    <span className="truncate font-medium">{sess.title || 'Untitled Session'}</span>
+                  </div>
+                  <p className="text-[10px] text-[var(--text-muted)] mt-0.5 truncate">
+                    {sess.created_at ? new Date(sess.created_at).toLocaleDateString([], { month: 'short', day: 'numeric' }) : 'Recent study'}
+                  </p>
                 </div>
 
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 pt-0.5">
                   <button
-                    onClick={(e) => { e.stopPropagation(); onUpdateSessionWorkspace(sess.id, { is_saved: !sess.is_saved }) }}
-                    className={`p-1 rounded cursor-pointer ${sess.is_saved ? 'text-amber-500' : 'text-[var(--text-muted)] hover:text-amber-500'}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onUpdateSessionWorkspace(sess.id, { is_saved: !sess.is_saved })
+                    }}
+                    className={`p-1 rounded cursor-pointer ${
+                      sess.is_saved ? 'text-amber-500' : 'text-[var(--text-muted)] hover:text-amber-500'
+                    }`}
                     title={sess.is_saved ? 'Remove from Saved' : 'Save chat'}
-                  ><Bookmark size={11} fill={sess.is_saved ? 'currentColor' : 'none'} /></button>
+                  >
+                    <Bookmark size={11} fill={sess.is_saved ? 'currentColor' : 'none'} />
+                  </button>
                   <button
-                    onClick={(e) => { e.stopPropagation(); onUpdateSessionWorkspace(sess.id, { is_pinned: !sess.is_pinned }) }}
-                    className={`p-1 rounded cursor-pointer ${sess.is_pinned ? 'text-sky-500' : 'text-[var(--text-muted)] hover:text-sky-500'}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onUpdateSessionWorkspace(sess.id, { is_pinned: !sess.is_pinned })
+                    }}
+                    className={`p-1 rounded cursor-pointer ${
+                      sess.is_pinned ? 'text-sky-500' : 'text-[var(--text-muted)] hover:text-sky-500'
+                    }`}
                     title={sess.is_pinned ? 'Unpin chat' : 'Pin chat'}
-                  ><Pin size={11} /></button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onUpdateSessionWorkspace(sess.id, { is_archived: !sess.is_archived }) }}
-                    className="p-1 hover:text-[var(--text-primary)] text-[var(--text-muted)] rounded cursor-pointer"
-                    title={sess.is_archived ? 'Restore chat' : 'Archive chat'}
-                  ><Archive size={11} /></button>
+                  >
+                    <Pin size={11} />
+                  </button>
                   <button
                     onClick={(e) => startEditing(sess, e)}
                     className="p-1 hover:text-[var(--text-primary)] text-[var(--text-muted)] rounded cursor-pointer"
@@ -260,96 +275,152 @@ export function Sidebar({
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed top-0 bottom-0 left-0 w-64 bg-[var(--bg-surface)] border-r border-[var(--border-subtle)] flex flex-col z-50 transition-transform duration-200 ease-in-out lg:translate-x-0 ${
-          mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        className={`fixed top-0 bottom-0 left-0 z-40 w-64 border-r border-[var(--border-subtle)] bg-[var(--bg-surface)]/90 backdrop-blur-xl flex flex-col transition-transform duration-200 lg:translate-x-0 ${
+          mobileOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        {/* Top Brand & Actions */}
-        <div className="p-4 border-b border-[var(--border-subtle)] space-y-3">
-          <div className="flex items-center justify-between px-1">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-md bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 flex items-center justify-center font-black text-xs">
-                B
-              </div>
-              <span className="font-brand-display font-extrabold text-sm tracking-tight text-[var(--text-primary)] uppercase">
-                Brainy
-              </span>
-            </div>
-            <button
-              onClick={onCloseMobile}
-              className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-lg lg:hidden cursor-pointer"
-              aria-label="Close sidebar"
-            >
-              <X size={16} />
-            </button>
-          </div>
+        {/* Top Header & Core Actions (Matching reference image) */}
+        <div className="p-3.5 space-y-2 border-b border-[var(--border-subtle)]">
+          {/* + New Chat Button */}
+          <button
+            onClick={() => {
+              onNewSession()
+              onSelectView('chat')
+              onCloseMobile()
+            }}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition cursor-pointer border border-[var(--border-subtle)]"
+          >
+            <Plus size={15} className="text-[var(--text-primary)]" />
+            <span>New chat</span>
+          </button>
 
-          {/* View Switcher: Overview vs New Session */}
-          <div className="space-y-1.5">
+          {/* Quick Actions Bar: Search & Customize */}
+          <div className="grid grid-cols-2 gap-1.5 pt-0.5">
             <button
-              onClick={() => {
-                onSelectView('overview')
-                onCloseMobile()
-              }}
-              className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition cursor-pointer ${
-                currentView === 'overview'
-                  ? 'bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 shadow-sm'
-                  : 'bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] text-[var(--text-primary)]'
+              onClick={() => setSearchActive(!searchActive)}
+              className={`flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs transition cursor-pointer border border-transparent ${
+                searchActive
+                  ? 'bg-[var(--bg-surface-elevated)] text-[var(--text-primary)] border-[var(--border-subtle)]'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)]'
               }`}
             >
-              <LayoutDashboard size={14} />
-              <span>Student Overview</span>
+              <Search size={13} />
+              <span>Search</span>
             </button>
 
             <button
-              onClick={() => {
-                onNewSession()
-                onSelectView('chat')
-                onCloseMobile()
-              }}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] text-[var(--text-primary)] text-xs font-semibold transition cursor-pointer"
+              onClick={onOpenSettingsModal}
+              className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition cursor-pointer"
             >
-              <Plus size={14} />
-              <span>New Study Chat</span>
+              <Sliders size={13} />
+              <span>Customize</span>
             </button>
           </div>
 
-          {/* Search Box */}
-          <div className="relative">
-            <Search size={13} className="absolute left-3 top-2.5 text-[var(--text-muted)]" />
-            <input
-              type="text"
-              placeholder="Search study chats..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--border-strong)]"
-            />
-          </div>
-          <div className="grid grid-cols-4 gap-1" aria-label="Chat sections">
-            {(['recent', 'saved', 'pinned', 'archived'] as const).map((item) => (
-              <button key={item} onClick={() => setWorkspace(item)} className={`rounded-lg py-1.5 text-[10px] font-semibold capitalize ${workspace === item ? 'bg-[var(--bg-surface-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}>
-                {item}
-              </button>
-            ))}
-          </div>
+          {/* Search Input Box when expanded */}
+          {searchActive && (
+            <div className="relative pt-1 animate-fade-in">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Filter recent chats..."
+                autoFocus
+                className="w-full bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] rounded-xl px-2.5 py-1.5 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-2.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Chat History List */}
-        <div className="flex-1 overflow-y-auto px-3 py-3 scrollbar-thin">
+        {/* Primary Navigation Section */}
+        <div className="px-3 py-2 space-y-0.5 border-b border-[var(--border-subtle)] text-xs">
+          <button
+            onClick={() => {
+              onSelectView('chat')
+              onCloseMobile()
+            }}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition cursor-pointer ${
+              currentView === 'chat'
+                ? 'bg-[var(--bg-surface-elevated)] text-[var(--text-primary)] font-semibold shadow-xs'
+                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            <MessageSquare size={14} className={currentView === 'chat' ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'} />
+            <span>Chats</span>
+          </button>
+
+          <button
+            onClick={() => {
+              onSelectView('overview')
+              onCloseMobile()
+            }}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition cursor-pointer ${
+              currentView === 'overview'
+                ? 'bg-[var(--bg-surface-elevated)] text-[var(--text-primary)] font-semibold shadow-xs'
+                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            <LayoutDashboard size={14} className={currentView === 'overview' ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'} />
+            <span>Overview</span>
+          </button>
+
+          <button
+            onClick={() => {
+              onOpenNotesModal()
+              onCloseMobile()
+            }}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text-primary)] transition cursor-pointer"
+          >
+            <BookMarked size={14} className="text-[var(--text-muted)]" />
+            <span>Saved Notes</span>
+          </button>
+        </div>
+
+        {/* Workspace Filter Pills: All / Saved / Pinned */}
+        <div className="px-3 pt-3 pb-1 flex items-center gap-1 text-[10px]">
+          {(['recent', 'pinned', 'saved', 'archived'] as const).map((w) => (
+            <button
+              key={w}
+              onClick={() => setWorkspace(w)}
+              className={`px-2 py-0.5 rounded-lg capitalize transition cursor-pointer ${
+                workspace === w
+                  ? 'bg-[var(--bg-surface-elevated)] text-[var(--text-primary)] font-bold'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+              }`}
+            >
+              {w}
+            </button>
+          ))}
+        </div>
+
+        {/* RECENTS Session List */}
+        <div className="flex-1 overflow-y-auto p-3 scrollbar-thin">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] px-1 mb-2">
+            Recents
+          </div>
+
           {sessionsLoading && sessions.length === 0 ? (
-            <div className="text-center py-8 text-xs text-[var(--text-muted)]">Loading your chats…</div>
+            <div className="text-center py-6 text-xs text-[var(--text-muted)]">
+              Loading study history…
+            </div>
           ) : sessionsError && sessions.length === 0 ? (
-            <div className="text-center py-6 text-xs text-rose-500">
+            <div className="rounded-xl border border-rose-500/20 bg-rose-500/10 p-3 text-center text-xs text-rose-500">
               <p>{sessionsError}</p>
-              <button onClick={onRetrySessions} className="mt-2 underline cursor-pointer">Retry</button>
+              <button onClick={onRetrySessions} className="mt-2 underline font-semibold cursor-pointer">
+                Retry loading
+              </button>
             </div>
           ) : workspaceSessions.length === 0 ? (
-            <div className="text-center py-8 text-xs text-[var(--text-muted)]">
-              {sessionsError
-                ? <><p className="text-rose-500">{sessionsError}</p><button onClick={onRetrySessions} className="mt-2 underline cursor-pointer">Retry</button></>
-                : searchQuery
-                  ? (sessionsHasMore ? 'No matching chats in the loaded history' : 'No matching study chats')
-                  : (sessionsHasMore ? `No loaded ${workspace} chats` : `No ${workspace} chats`)}
+            <div className="text-center py-6 text-xs text-[var(--text-muted)]">
+              {searchQuery ? 'No matching chats found' : `No ${workspace} chats`}
             </div>
           ) : (
             <>
@@ -359,37 +430,67 @@ export function Sidebar({
               {renderGroup('Older', groupedSessions.older)}
             </>
           )}
-          {sessionsError && sessions.length > 0 && (
-            <div className="text-center py-2 text-[10px] text-rose-500">
-              <span>{sessionsError}</span>{' '}
-              <button onClick={onRetrySessions} className="underline cursor-pointer">Retry</button>
-            </div>
-          )}
+
           {sessionsHasMore && (
             <button
               onClick={onLoadMoreSessions}
               disabled={sessionsLoadingMore}
-              className="w-full mt-2 rounded-lg py-2 text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] disabled:opacity-50 cursor-pointer"
+              className="w-full mt-2 rounded-xl py-2 text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] disabled:opacity-50 cursor-pointer"
             >
               {sessionsLoadingMore ? 'Loading older chats…' : 'Load older chats'}
             </button>
           )}
         </div>
 
-        {/* Bottom Quota & Navigation */}
-        <div className="p-3.5 border-t border-[var(--border-subtle)] bg-[var(--bg-surface-elevated)] space-y-2.5">
-          {/* 5-Hour Quota Meter */}
+        {/* Bottom User Profile Section (Matching reference image) */}
+        <div className="p-3 border-t border-[var(--border-subtle)] bg-[var(--bg-surface-elevated)]/60">
+          {/* User Card */}
+          <div className="flex items-center justify-between p-2 rounded-xl hover:bg-[var(--bg-surface-hover)] transition">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-full bg-[var(--text-primary)] text-[var(--bg-app)] flex items-center justify-center text-xs font-bold shadow-xs flex-shrink-0">
+                {user.first_name ? user.first_name[0].toUpperCase() : 'U'}
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-semibold text-[var(--text-primary)] truncate">
+                  {user.first_name}
+                </div>
+                <div className="text-[10px] text-[var(--text-muted)] truncate">
+                  {user.username ? `@${user.username}` : 'Free Tier'}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-0.5">
+              <button
+                onClick={onOpenSettingsModal}
+                className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition rounded-lg hover:bg-[var(--bg-surface-elevated)] cursor-pointer"
+                title="Workspace settings"
+              >
+                <Sliders size={13} />
+              </button>
+
+              <button
+                onClick={onLogout}
+                className="p-1.5 text-[var(--text-muted)] hover:text-rose-500 transition rounded-lg hover:bg-[var(--bg-surface-elevated)] cursor-pointer"
+                title="Sign Out"
+              >
+                <LogOut size={13} />
+              </button>
+            </div>
+          </div>
+
+          {/* Quota Progress Line */}
           <div
             onClick={onOpenUsageModal}
-            className="p-2.5 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] cursor-pointer hover:border-[var(--border-strong)] transition"
+            className="mt-2 px-2 py-1.5 rounded-lg bg-[var(--bg-surface)] border border-[var(--border-subtle)] cursor-pointer hover:border-[var(--border-strong)] transition"
           >
-            <div className="flex items-center justify-between text-[11px] mb-1.5">
-              <span className="text-[var(--text-muted)] font-medium">5-Hour Quota</span>
-              <span className="text-[var(--text-primary)] font-mono font-bold">
+            <div className="flex items-center justify-between text-[10px] mb-1">
+              <span className="text-[var(--text-muted)]">5h Study Quota</span>
+              <span className="font-mono font-bold text-[var(--text-primary)]">
                 {used} / {limit}
               </span>
             </div>
-            <div className="w-full h-1.5 rounded-full bg-[var(--bg-surface-elevated)] overflow-hidden">
+            <div className="w-full h-1 rounded-full bg-[var(--bg-surface-elevated)] overflow-hidden">
               <div
                 className={`h-full transition-all duration-300 ${
                   progressPercent >= 100
@@ -400,35 +501,6 @@ export function Sidebar({
                 }`}
                 style={{ width: `${progressPercent}%` }}
               />
-            </div>
-          </div>
-
-          {/* Quick Actions (Saved Notes, Settings, Sign Out) */}
-          <div className="flex items-center justify-between text-xs pt-1">
-            <button
-              onClick={onOpenNotesModal}
-              className="flex items-center gap-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition py-1 cursor-pointer font-medium"
-            >
-              <BookMarked size={13} />
-              <span>Saved Notes</span>
-            </button>
-
-            <div className="flex items-center gap-1">
-              <button
-                onClick={onOpenSettingsModal}
-                className="p-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition rounded-lg hover:bg-[var(--bg-surface-hover)] cursor-pointer"
-                title="Settings & Customization"
-              >
-                <Sliders size={14} />
-              </button>
-
-              <button
-                onClick={onLogout}
-                className="p-1.5 text-[var(--text-secondary)] hover:text-rose-500 transition rounded-lg hover:bg-[var(--bg-surface-hover)] cursor-pointer"
-                title="Sign Out"
-              >
-                <LogOut size={14} />
-              </button>
             </div>
           </div>
         </div>

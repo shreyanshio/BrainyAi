@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useRef } from 'react'
-import { ExternalLink, ShieldCheck, CheckCircle2, Lock, ArrowRight, Sparkles } from 'lucide-react'
+import { ExternalLink, CheckCircle2, Lock, ArrowRight, Sparkles } from 'lucide-react'
 import {
   fetchPublicConfig,
   initTelegramLogin,
@@ -203,8 +203,8 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
     const bounds = event.currentTarget.getBoundingClientRect()
     const x = (event.clientX - bounds.left) / bounds.width - 0.5
     const y = (event.clientY - bounds.top) / bounds.height - 0.5
-    sceneRef.current?.style.setProperty('--scene-rotate-x', `${-y * 7}deg`)
-    sceneRef.current?.style.setProperty('--scene-rotate-y', `${x * 9}deg`)
+    sceneRef.current?.style.setProperty('--scene-rotate-x', `${-y * 6}deg`)
+    sceneRef.current?.style.setProperty('--scene-rotate-y', `${x * 8}deg`)
   }
 
   const resetScenePointer = () => {
@@ -212,46 +212,206 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
     sceneRef.current?.style.setProperty('--scene-rotate-y', '0deg')
   }
 
-
-
   return (
-    <main className="login-shell min-h-screen text-stone-100 relative overflow-hidden px-5 py-8 sm:px-8 lg:px-12">
+    <main className="min-h-screen text-[var(--text-primary)] ambient-canvas relative overflow-hidden px-5 py-8 sm:px-8 lg:px-14 flex flex-col justify-between">
       <div className="login-grain" aria-hidden="true" />
-      <div className="relative z-10 mx-auto flex min-h-[calc(100dvh-4rem)] max-w-7xl flex-col">
-        <header className="flex items-center justify-between">
-          <a href="/" aria-label="Brainy home" className="inline-flex items-center gap-3 text-stone-100 no-underline">
-            <span className="login-mark">B</span><span className="text-lg font-semibold tracking-tight">Brainy<span className="text-emerald-300">.</span></span>
-          </a>
-          <span className="hidden sm:inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[.04] px-4 py-2 text-xs text-stone-300"><span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> Your personal study space</span>
-        </header>
-        <div className="grid flex-1 items-center gap-12 py-12 lg:grid-cols-[1.15fr_.85fr] lg:gap-16 lg:py-16">
-          <section className="login-hero min-w-0" aria-labelledby="login-heading">
-            <p className="mb-5 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[.22em] text-emerald-200/80"><Sparkles size={14} aria-hidden="true" /> A clearer way to learn</p>
-            <h1 id="login-heading" className="max-w-3xl text-5xl font-medium leading-[1.02] tracking-[-.045em] text-white sm:text-6xl lg:text-7xl">Make room for <span className="login-heading-accent">understanding.</span></h1>
-            <p className="mt-6 max-w-xl text-base leading-7 text-stone-300 sm:text-lg">Pick up where you left off, work through difficult ideas, and keep the answers that help you move forward.</p>
-            <div ref={sceneRef} className="login-scene mt-9 hidden min-h-[300px] sm:block" onPointerMove={handleScenePointerMove} onPointerLeave={resetScenePointer} aria-label="An interactive study desk illustration">
-              <div className="login-orbit login-orbit-one" aria-hidden="true" /><div className="login-orbit login-orbit-two" aria-hidden="true" /><div className="login-scene-glow" aria-hidden="true" />
-              <div className="login-book login-book-back" aria-hidden="true"><span /><span /><span /></div><div className="login-book login-book-front" aria-hidden="true"><span /><span /><span /><span /></div>
-              <div className="login-study-card" aria-hidden="true"><div className="flex items-center justify-between text-[10px] uppercase tracking-[.18em] text-emerald-200/80"><span>Study note</span><span className="login-card-spark">✳</span></div><div className="mt-5 h-2 w-2/3 rounded-full bg-white/75" /><div className="mt-3 h-1.5 w-full rounded-full bg-white/20" /><div className="mt-2 h-1.5 w-4/5 rounded-full bg-white/20" /><div className="mt-5 flex items-center gap-2 text-[11px] text-stone-300"><span className="h-6 w-6 rounded-lg bg-emerald-300/15 text-center leading-6 text-emerald-200">∑</span>Ideas, made clearer</div></div>
-              <div className="login-orbit-dot" aria-hidden="true"><Sparkles size={17} /></div><div className="login-scene-caption">A little more clarity, one question at a time.</div>
-            </div>
-            <div className="mt-8 hidden flex-wrap gap-x-6 gap-y-3 text-sm text-stone-300 sm:flex"><span className="inline-flex items-center gap-2"><CheckCircle2 size={16} className="text-emerald-300" /> Conversations that stay with you</span><span className="inline-flex items-center gap-2"><CheckCircle2 size={16} className="text-emerald-300" /> Notes for your next study session</span></div>
-          </section>
-          <section className="login-auth-panel mx-auto w-full max-w-md" aria-labelledby="auth-heading">
-            <div className="mb-8"><p className="text-xs font-semibold uppercase tracking-[.2em] text-emerald-200/80">Welcome back</p><h2 id="auth-heading" className="mt-3 text-3xl font-medium tracking-tight text-white sm:text-4xl">Continue learning</h2><p className="mt-3 text-sm leading-6 text-stone-300">Sign in to return to your conversations and saved study notes.</p></div>
-            {error && <div role="alert" className="mb-5 rounded-xl border border-rose-300/20 bg-rose-400/10 px-4 py-3 text-sm leading-6 text-rose-100">{error}</div>}
-            {telegramWaiting ? (
-              <div className="rounded-2xl border border-white/10 bg-white/[.04] p-5 text-center"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-300/10 text-emerald-200"><TelegramIcon className="h-6 w-6" /></div><h3 className="mt-4 text-lg font-medium text-white">Waiting for @AiChatExpert_bot</h3><p className="mt-2 text-sm leading-6 text-stone-300">Open the bot, type <code className="rounded bg-white/10 px-1.5 py-0.5 text-xs">/login</code>, then tap “Authorize Web Login”.</p><a href={telegramBotUrl || 'https://t.me/AiChatExpert_Bot'} target="_blank" rel="noreferrer" className="login-provider-button mt-5">Open Telegram <ExternalLink size={15} /></a><button type="button" onClick={() => { setTelegramWaiting(false); setTelegramSessionId(null) }} className="mt-4 text-sm text-stone-400 underline-offset-4 hover:text-white hover:underline">Cancel sign in</button></div>
-            ) : (
-              <div className="space-y-3"><button type="button" onClick={handleStartTelegram} disabled={isSubmitting} className="login-provider-button" aria-label="Continue with Telegram"><TelegramIcon className="h-5 w-5 text-emerald-200" /><span>Continue with Telegram</span><ArrowRight size={16} className="ml-auto text-stone-400" /></button>
-                <div className="flex items-center gap-4 py-2" aria-hidden="true"><span className="h-px flex-1 bg-white/10" /><span className="text-[11px] uppercase tracking-[.18em] text-stone-500">or</span><span className="h-px flex-1 bg-white/10" /></div><div id="google-signin-btn-target" className="login-google-target flex min-h-12 w-full justify-center" />
-                {!googleBtnRendered && <button type="button" disabled={isSubmitting} onClick={handleGoogleButtonClick} className="login-provider-button login-google-fallback"><GoogleIcon className="h-5 w-5" /><span>{isSubmitting ? 'Connecting to Google…' : 'Continue with Google'}</span><ArrowRight size={16} className="ml-auto text-stone-400" /></button>}
-                <p className="pt-3 text-center text-xs leading-5 text-stone-400">Choose a provider to securely access your personal study space.</p></div>
-            )}
-            <div className="mt-8 flex items-center justify-center gap-2 border-t border-white/10 pt-5 text-xs text-stone-400"><Lock size={13} aria-hidden="true" /> Your conversations are linked to your account</div><p className="mt-5 text-center text-[11px] text-stone-600">© 2026 BrainyAi</p>
-          </section>
+
+      {/* Top Header */}
+      <header className="relative z-10 mx-auto w-full max-w-7xl flex items-center justify-between">
+        <a href="/" aria-label="Brainy home" className="inline-flex items-center gap-3 no-underline group">
+          <div className="w-8 h-8 rounded-xl bg-[var(--text-primary)] text-[var(--bg-app)] flex items-center justify-center font-bold text-sm shadow-xs transition-transform group-hover:scale-105">
+            B
+          </div>
+          <span className="text-lg font-bold tracking-tight text-[var(--text-primary)]">
+            Brainy<span className="text-emerald-500">.</span>
+          </span>
+        </a>
+
+        <div className="hidden sm:inline-flex items-center gap-2 rounded-full glass-panel px-4 py-1.5 text-xs text-[var(--text-secondary)] shadow-xs">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          <span>Personal AI Study Companion</span>
         </div>
+      </header>
+
+      {/* Main Two-Area Content Grid */}
+      <div className="relative z-10 mx-auto w-full max-w-7xl grid flex-1 items-center gap-12 py-10 lg:grid-cols-[1.15fr_0.85fr] lg:gap-16 lg:py-16">
+        
+        {/* Left Area: Hero Narrative & Interactive Perspective Centerpiece */}
+        <section className="min-w-0" aria-labelledby="login-heading">
+          <div className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-400 mb-4">
+            <Sparkles size={13} aria-hidden="true" />
+            <span>Intuitive Academic Workspace</span>
+          </div>
+
+          <h1
+            id="login-heading"
+            className="text-4xl sm:text-6xl lg:text-7xl font-medium leading-[1.05] tracking-tight text-[var(--text-primary)] max-w-2xl"
+          >
+            Make room for <span className="italic text-emerald-600 dark:text-emerald-400">understanding.</span>
+          </h1>
+
+          <p className="mt-6 max-w-xl text-sm sm:text-base leading-relaxed text-[var(--text-secondary)]">
+            A quiet space to ask difficult conceptual questions, derive formulas step-by-step, review code, and build durable mastery that stays with you.
+          </p>
+
+          {/* Interactive Perspective Scene */}
+          <div
+            ref={sceneRef}
+            className="login-scene mt-8 hidden min-h-[260px] sm:block cursor-default"
+            onPointerMove={handleScenePointerMove}
+            onPointerLeave={resetScenePointer}
+            aria-label="An interactive study workspace illustration"
+          >
+            <div className="login-orbit login-orbit-one" aria-hidden="true" />
+            <div className="login-orbit login-orbit-two" aria-hidden="true" />
+            <div className="login-scene-glow" aria-hidden="true" />
+            <div className="login-book login-book-back" aria-hidden="true">
+              <span /><span /><span />
+            </div>
+            <div className="login-book login-book-front" aria-hidden="true">
+              <span /><span /><span /><span />
+            </div>
+            <div className="login-study-card" aria-hidden="true">
+              <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.18em] text-emerald-300">
+                <span>Active Recall</span>
+                <span className="login-card-spark">✳</span>
+              </div>
+              <div className="mt-4 h-2 w-2/3 rounded-full bg-white/70" />
+              <div className="mt-2.5 h-1.5 w-full rounded-full bg-white/20" />
+              <div className="mt-2 h-1.5 w-4/5 rounded-full bg-white/20" />
+              <div className="mt-4 flex items-center gap-2 text-[11px] text-stone-200">
+                <span className="h-5 w-5 rounded-md bg-emerald-400/20 text-center leading-5 text-emerald-200">
+                  ∑
+                </span>
+                Concepts, made clear
+              </div>
+            </div>
+            <div className="login-orbit-dot" aria-hidden="true">
+              <Sparkles size={16} />
+            </div>
+          </div>
+
+          {/* Value Highlights */}
+          <div className="mt-8 hidden flex-wrap gap-x-6 gap-y-2.5 text-xs text-[var(--text-secondary)] sm:flex">
+            <span className="inline-flex items-center gap-1.5">
+              <CheckCircle2 size={14} className="text-emerald-500" />
+              Conversations saved to Supabase
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <CheckCircle2 size={14} className="text-emerald-500" />
+              Step-by-step mathematical proofs
+            </span>
+          </div>
+        </section>
+
+        {/* Right Area: Minimalist Glassmorphic Auth Panel */}
+        <section className="mx-auto w-full max-w-md" aria-labelledby="auth-heading">
+          <div className="rounded-3xl glass-panel p-6 sm:p-8 shadow-2xl relative">
+            <div className="mb-6">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-600 dark:text-emerald-400 mb-1">
+                Welcome back
+              </div>
+              <h2 id="auth-heading" className="text-2xl sm:text-3xl font-medium tracking-tight text-[var(--text-primary)]">
+                Continue learning
+              </h2>
+              <p className="mt-2 text-xs sm:text-sm text-[var(--text-secondary)] leading-relaxed">
+                Sign in to return to your study chats, notes, and personal memory context.
+              </p>
+            </div>
+
+            {error && (
+              <div role="alert" className="mb-5 rounded-2xl border border-rose-500/20 bg-rose-500/10 p-3.5 text-xs leading-relaxed text-rose-600 dark:text-rose-400">
+                {error}
+              </div>
+            )}
+
+            {telegramWaiting ? (
+              <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface-elevated)] p-5 text-center">
+                <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                  <TelegramIcon className="h-6 w-6" />
+                </div>
+                <h3 className="mt-3 text-sm font-semibold text-[var(--text-primary)]">
+                  Waiting for Telegram Handshake
+                </h3>
+                <p className="mt-1.5 text-xs text-[var(--text-secondary)] leading-relaxed">
+                  Open the bot, send <code className="rounded bg-[var(--bg-surface)] px-1.5 py-0.5 font-mono text-[11px]">/login</code>, then tap &ldquo;Authorize Web Login&rdquo;.
+                </p>
+                <a
+                  href={telegramBotUrl || 'https://t.me/AiChatExpert_Bot'}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-4 inline-flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl bg-[var(--text-primary)] text-[var(--bg-app)] text-xs font-semibold shadow-xs hover:opacity-90 transition"
+                >
+                  <span>Open Telegram Bot</span>
+                  <ExternalLink size={13} />
+                </a>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTelegramWaiting(false)
+                    setTelegramSessionId(null)
+                  }}
+                  className="mt-3 text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition cursor-pointer underline-offset-4 hover:underline"
+                >
+                  Cancel sign-in
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {/* Continue with Telegram */}
+                <button
+                  type="button"
+                  onClick={handleStartTelegram}
+                  disabled={isSubmitting}
+                  className="w-full flex items-center justify-center gap-2.5 py-3 px-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] text-xs sm:text-sm font-semibold text-[var(--text-primary)] transition cursor-pointer shadow-xs disabled:opacity-50"
+                  aria-label="Continue with Telegram"
+                >
+                  <TelegramIcon className="h-5 w-5 text-sky-500" />
+                  <span>Continue with Telegram</span>
+                  <ArrowRight size={14} className="ml-auto text-[var(--text-muted)]" />
+                </button>
+
+                <div className="flex items-center gap-3 py-1.5" aria-hidden="true">
+                  <span className="h-px flex-1 bg-[var(--border-subtle)]" />
+                  <span className="text-[10px] uppercase tracking-widest text-[var(--text-muted)] font-medium">or</span>
+                  <span className="h-px flex-1 bg-[var(--border-subtle)]" />
+                </div>
+
+                {/* Google Sign-in Target */}
+                <div id="google-signin-btn-target" className="flex min-h-11 w-full justify-center" />
+
+                {/* Google Fallback Button */}
+                {!googleBtnRendered && (
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={handleGoogleButtonClick}
+                    className="w-full flex items-center justify-center gap-2.5 py-3 px-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] text-xs sm:text-sm font-semibold text-[var(--text-primary)] transition cursor-pointer shadow-xs disabled:opacity-50"
+                  >
+                    <GoogleIcon className="h-5 w-5" />
+                    <span>{isSubmitting ? 'Connecting to Google…' : 'Continue with Google'}</span>
+                    <ArrowRight size={14} className="ml-auto text-[var(--text-muted)]" />
+                  </button>
+                )}
+
+                <p className="pt-2 text-center text-[11px] leading-relaxed text-[var(--text-muted)]">
+                  Instant sign-in · No passwords required
+                </p>
+              </div>
+            )}
+
+            <div className="mt-6 flex items-center justify-center gap-2 border-t border-[var(--border-subtle)] pt-4 text-[11px] text-[var(--text-muted)]">
+              <Lock size={12} aria-hidden="true" />
+              <span>Isolated study context & private memory</span>
+            </div>
+          </div>
+        </section>
       </div>
+
+      {/* Footer */}
+      <footer className="relative z-10 mx-auto w-full max-w-7xl text-center text-[11px] text-[var(--text-muted)] pt-4">
+        © 2026 BrainyAi · Precision academic intelligence
+      </footer>
     </main>
   )
 }

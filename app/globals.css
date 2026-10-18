@@ -14,18 +14,24 @@
    THEME DESIGN TOKENS
    ========================================================================== */
 
-/* 1. Theme: Warm Paper (Default - Aptivus inspired) */
+/* 1. Theme: Warm Paper (Default - Warm minimalist aesthetic) */
 :root,
 .theme-warm-paper {
   --bg-app: #faf8f5;
-  --bg-surface: #ffffff;
-  --bg-surface-elevated: #f5f2eb;
-  --bg-surface-hover: #ede8df;
-  --border-subtle: #e8e3da;
-  --border-strong: #d6cec2;
+  --bg-app-ambient: radial-gradient(circle at 85% 15%, rgba(248, 226, 204, 0.45), transparent 48%),
+                    radial-gradient(circle at 12% 88%, rgba(240, 222, 202, 0.35), transparent 42%),
+                    #faf8f5;
+  --bg-surface: rgba(255, 255, 255, 0.88);
+  --bg-surface-elevated: rgba(248, 245, 239, 0.92);
+  --bg-surface-hover: rgba(241, 237, 229, 0.95);
+  --border-subtle: rgba(230, 224, 214, 0.85);
+  --border-strong: rgba(212, 204, 191, 0.9);
   --text-primary: #1c1917;
   --text-secondary: #57534e;
-  --text-muted: #78716c;
+  --text-muted: #8c827a;
+  --glass-bg: rgba(255, 255, 255, 0.78);
+  --glass-border: rgba(255, 255, 255, 0.7);
+  --glass-shadow: 0 10px 30px -4px rgba(120, 90, 60, 0.05), 0 2px 8px -2px rgba(120, 90, 60, 0.03);
   --card-shadow: 0 4px 20px -2px rgba(28, 25, 23, 0.05), 0 2px 6px -1px rgba(28, 25, 23, 0.03);
   --color-scheme: light;
 }
@@ -33,14 +39,20 @@
 /* 2. Theme: Pure Light */
 .theme-pure-light {
   --bg-app: #ffffff;
-  --bg-surface: #f8fafc;
-  --bg-surface-elevated: #f1f5f9;
+  --bg-app-ambient: radial-gradient(circle at 85% 15%, rgba(241, 245, 249, 0.7), transparent 48%),
+                    radial-gradient(circle at 12% 88%, rgba(241, 245, 249, 0.5), transparent 42%),
+                    #ffffff;
+  --bg-surface: rgba(248, 250, 252, 0.9);
+  --bg-surface-elevated: rgba(241, 245, 249, 0.95);
   --bg-surface-hover: #e2e8f0;
   --border-subtle: #e2e8f0;
   --border-strong: #cbd5e1;
   --text-primary: #0f172a;
   --text-secondary: #334155;
   --text-muted: #64748b;
+  --glass-bg: rgba(255, 255, 255, 0.82);
+  --glass-border: rgba(226, 232, 240, 0.8);
+  --glass-shadow: 0 10px 30px -4px rgba(15, 23, 42, 0.06), 0 2px 8px -2px rgba(15, 23, 42, 0.03);
   --card-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.06), 0 2px 6px -1px rgba(15, 23, 42, 0.03);
   --color-scheme: light;
 }
@@ -48,14 +60,20 @@
 /* 3. Theme: Midnight */
 .theme-midnight {
   --bg-app: #080c14;
-  --bg-surface: #0e1524;
-  --bg-surface-elevated: #162035;
-  --bg-surface-hover: #1e2c47;
-  --border-subtle: #1c2842;
-  --border-strong: #2a3a5c;
+  --bg-app-ambient: radial-gradient(circle at 85% 15%, rgba(30, 58, 138, 0.16), transparent 50%),
+                    radial-gradient(circle at 12% 88%, rgba(15, 23, 42, 0.35), transparent 45%),
+                    #080c14;
+  --bg-surface: rgba(14, 21, 36, 0.82);
+  --bg-surface-elevated: rgba(22, 32, 53, 0.88);
+  --bg-surface-hover: rgba(30, 44, 71, 0.95);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
   --text-primary: #f8fafc;
   --text-secondary: #cbd5e1;
   --text-muted: #94a3b8;
+  --glass-bg: rgba(14, 21, 36, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-shadow: 0 16px 36px -8px rgba(0, 0, 0, 0.6);
   --card-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.6);
   --color-scheme: dark;
 }
@@ -63,14 +81,20 @@
 /* 4. Theme: Graphite */
 .theme-graphite {
   --bg-app: #121214;
-  --bg-surface: #18181b;
-  --bg-surface-elevated: #27272a;
-  --bg-surface-hover: #323236;
-  --border-subtle: #27272a;
-  --border-strong: #3f3f46;
+  --bg-app-ambient: radial-gradient(circle at 85% 15%, rgba(39, 39, 42, 0.35), transparent 50%),
+                    radial-gradient(circle at 12% 88%, rgba(24, 24, 27, 0.45), transparent 45%),
+                    #121214;
+  --bg-surface: rgba(24, 24, 27, 0.84);
+  --bg-surface-elevated: rgba(39, 39, 42, 0.88);
+  --bg-surface-hover: rgba(50, 50, 54, 0.95);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.15);
   --text-primary: #f4f4f5;
   --text-secondary: #d4d4d8;
   --text-muted: #a1a1aa;
+  --glass-bg: rgba(24, 24, 27, 0.75);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-shadow: 0 16px 36px -8px rgba(0, 0, 0, 0.65);
   --card-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.7);
   --color-scheme: dark;
 }
@@ -78,14 +102,20 @@
 /* 5. Theme: OLED Dark */
 .theme-oled {
   --bg-app: #000000;
-  --bg-surface: #09090b;
-  --bg-surface-elevated: #141416;
-  --bg-surface-hover: #202024;
-  --border-subtle: #1f1f23;
-  --border-strong: #2e2e33;
+  --bg-app-ambient: radial-gradient(circle at 85% 15%, rgba(20, 20, 22, 0.4), transparent 50%),
+                    radial-gradient(circle at 12% 88%, rgba(15, 15, 17, 0.4), transparent 45%),
+                    #000000;
+  --bg-surface: rgba(10, 10, 12, 0.88);
+  --bg-surface-elevated: rgba(20, 20, 23, 0.92);
+  --bg-surface-hover: rgba(32, 32, 36, 0.95);
+  --border-subtle: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.16);
   --text-primary: #ffffff;
   --text-secondary: #e4e4e7;
   --text-muted: #71717a;
+  --glass-bg: rgba(10, 10, 12, 0.82);
+  --glass-border: rgba(255, 255, 255, 0.09);
+  --glass-shadow: 0 16px 36px -8px rgba(0, 0, 0, 0.85);
   --card-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.9);
   --color-scheme: dark;
 }
@@ -190,6 +220,36 @@ body {
 ::selection {
   background-color: var(--accent-primary);
   color: #ffffff;
+}
+
+/* Ethereal Ambient Canvas & Minimalist Glassmorphism Utilities */
+.ambient-canvas {
+  background: var(--bg-app-ambient);
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.glass-panel {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+}
+
+.glass-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
+}
+
+.glass-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-strong);
+  box-shadow: 0 16px 36px -6px rgba(0, 0, 0, 0.08), 0 4px 12px -2px rgba(0, 0, 0, 0.04);
 }
 
 /* Custom Adaptive Scrollbar */

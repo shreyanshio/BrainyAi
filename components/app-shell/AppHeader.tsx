@@ -13,9 +13,10 @@ import {
   Sliders,
   LayoutDashboard,
   MessageSquare,
+  BookMarked,
 } from 'lucide-react'
-import { AnswerLength, ModelDefinition, UsageStatus, User } from '@/types/api'
-import { CAPABILITY_MODELS, ANSWER_LENGTH_OPTIONS } from '@/lib/constants'
+import { AnswerLength, UsageStatus, User } from '@/types/api'
+import { CAPABILITY_MODELS } from '@/lib/constants'
 
 interface AppHeaderProps {
   user: User
@@ -28,6 +29,7 @@ interface AppHeaderProps {
   usage: UsageStatus | null
   onOpenUsageModal: () => void
   onOpenSettingsModal: () => void
+  onOpenNotesModal?: () => void
   onToggleSidebar: () => void
   onLogout: () => void
 }
@@ -35,15 +37,15 @@ interface AppHeaderProps {
 const getModelIcon = (id: string) => {
   switch (id) {
     case 'brainy-fast':
-      return <Zap size={14} className="text-amber-500" />
+      return <Zap size={13} className="text-amber-500" />
     case 'brainy-reasoning':
-      return <Sparkles size={14} className="text-emerald-500" />
+      return <Sparkles size={13} className="text-emerald-500" />
     case 'brainy-coding':
-      return <Code2 size={14} className="text-teal-500" />
+      return <Code2 size={13} className="text-teal-500" />
     case 'brainy-exam':
-      return <BookOpen size={14} className="text-blue-500" />
+      return <BookOpen size={13} className="text-blue-500" />
     default:
-      return <Sparkles size={14} className="text-emerald-500" />
+      return <Sparkles size={13} className="text-emerald-500" />
   }
 }
 
@@ -53,11 +55,10 @@ export function AppHeader({
   onSelectView,
   activeModel,
   onSelectModel,
-  activeLength,
-  onSelectLength,
   usage,
   onOpenUsageModal,
   onOpenSettingsModal,
+  onOpenNotesModal,
   onToggleSidebar,
   onLogout,
 }: AppHeaderProps) {
@@ -72,36 +73,36 @@ export function AppHeader({
   const isExhausted = remaining === 0
 
   return (
-    <header className="h-14 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] backdrop-blur-md px-4 sm:px-6 flex items-center justify-between z-20 flex-shrink-0 transition-colors">
-      {/* Left: Mobile hamburger & Brand */}
-      <div className="flex items-center gap-3">
+    <header className="h-14 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)]/80 backdrop-blur-xl px-4 sm:px-6 flex items-center justify-between z-20 flex-shrink-0 transition-colors">
+      {/* Left: Mobile menu toggle, Logo & Model */}
+      <div className="flex items-center gap-2.5 sm:gap-3">
         <button
           onClick={onToggleSidebar}
-          className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition lg:hidden cursor-pointer"
+          className="p-1.5 rounded-xl text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition lg:hidden cursor-pointer"
           aria-label="Toggle sidebar"
         >
           <Menu size={18} />
         </button>
 
         <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 flex items-center justify-center font-black text-xs">
+          <div className="w-6 h-6 rounded-lg bg-[var(--text-primary)] text-[var(--bg-app)] flex items-center justify-center font-bold text-xs shadow-xs">
             B
           </div>
-          <span className="font-brand-display font-extrabold text-sm tracking-tight text-[var(--text-primary)] hidden xs:inline uppercase">
+          <span className="font-bold text-sm tracking-tight text-[var(--text-primary)] hidden sm:inline">
             Brainy
           </span>
         </div>
 
-        {/* Model Selector Dropdown (When in Chat Workspace) */}
+        {/* Capability Model Selector Dropdown */}
         {currentView === 'chat' && (
           <div className="relative ml-1 sm:ml-2">
             <button
               onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] transition cursor-pointer"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] transition cursor-pointer shadow-2xs"
             >
               {getModelIcon(currentModel.id)}
-              <span className="font-semibold hidden sm:inline">{currentModel.name}</span>
-              <ChevronDown size={12} className="text-[var(--text-muted)]" />
+              <span className="font-medium hidden md:inline">{currentModel.name}</span>
+              <ChevronDown size={11} className="text-[var(--text-muted)]" />
             </button>
 
             {modelDropdownOpen && (
@@ -110,9 +111,9 @@ export function AppHeader({
                   className="fixed inset-0 z-30"
                   onClick={() => setModelDropdownOpen(false)}
                 />
-                <div className="absolute left-0 top-full mt-1.5 w-64 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-2xl p-1.5 z-40 space-y-1">
+                <div className="absolute left-0 top-full mt-2 w-64 rounded-2xl glass-panel p-1.5 z-40 space-y-1 shadow-2xl">
                   <div className="px-2.5 py-1 text-[10px] uppercase tracking-wider font-semibold text-[var(--text-muted)]">
-                    Study Capability Models
+                    Capability Models
                   </div>
                   {CAPABILITY_MODELS.map((m) => (
                     <button
@@ -150,13 +151,25 @@ export function AppHeader({
         )}
       </div>
 
-      {/* Center: Segmented Switcher Pill (Inspired by Aptivus Image 2) */}
-      <div className="flex items-center p-1 rounded-2xl bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] text-xs shadow-sm">
+      {/* Center: Segmented Floating Capsule Toggle (Inspired by reference image) */}
+      <div className="flex items-center p-0.5 rounded-full bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] text-xs shadow-2xs">
+        <button
+          onClick={() => onSelectView('chat')}
+          className={`flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs transition cursor-pointer ${
+            currentView === 'chat'
+              ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] font-semibold shadow-xs'
+              : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+          }`}
+        >
+          <MessageSquare size={13} />
+          <span>Chats</span>
+        </button>
+
         <button
           onClick={() => onSelectView('overview')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold transition cursor-pointer ${
+          className={`flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs transition cursor-pointer ${
             currentView === 'overview'
-              ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-sm'
+              ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] font-semibold shadow-xs'
               : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
           }`}
         >
@@ -164,61 +177,59 @@ export function AppHeader({
           <span>Overview</span>
         </button>
 
-        <button
-          onClick={() => onSelectView('chat')}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold transition cursor-pointer ${
-            currentView === 'chat'
-              ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-sm'
-              : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-          }`}
-        >
-          <MessageSquare size={13} />
-          <span>Chat Workspace</span>
-        </button>
+        {onOpenNotesModal && (
+          <button
+            onClick={onOpenNotesModal}
+            className="hidden sm:flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition cursor-pointer"
+          >
+            <BookMarked size={13} />
+            <span>Notes</span>
+          </button>
+        )}
       </div>
 
-      {/* Right: Usage, Settings & User Profile */}
-      <div className="flex items-center gap-2 sm:gap-2.5">
-        {/* Quota Button / Indicator */}
+      {/* Right: 5h Quota Capsule, Settings Button, and User Avatar */}
+      <div className="flex items-center gap-1.5 sm:gap-2">
+        {/* Quota Indicator Button */}
         <button
           onClick={onOpenUsageModal}
-          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition cursor-pointer ${
             isExhausted
               ? 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
               : isNearLimit
               ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
               : 'bg-[var(--bg-surface-elevated)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
           }`}
-          title={usage ? `Global message quota: ${usage.limit} questions per ${usage.window_hours} hours` : 'Message quota unavailable'}
+          title={usage ? `Quota: ${usage.remaining} of ${usage.limit} left` : 'Quota info'}
         >
           <Clock size={12} className={isExhausted ? 'text-rose-500' : isNearLimit ? 'text-amber-500' : 'text-emerald-500'} />
           <span>
             {usage ? `${remaining}/${usage.limit}` : '30/30'}
           </span>
-          <span className="hidden md:inline text-[var(--text-muted)] font-normal">left</span>
+          <span className="hidden lg:inline text-[var(--text-muted)] font-normal">left</span>
         </button>
 
         {/* Settings Button */}
         <button
           onClick={onOpenSettingsModal}
-          className="p-1.5 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition cursor-pointer"
-          title="Customization & Settings"
+          className="p-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition cursor-pointer"
+          title="Customize Workspace"
           aria-label="Open settings"
         >
-          <Sliders size={15} />
+          <Sliders size={14} />
         </button>
 
-        {/* User Avatar & Dropdown */}
+        {/* User Profile Dropdown */}
         <div className="relative">
           <button
             onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-            className="flex items-center gap-1.5 p-1 rounded-xl hover:bg-[var(--bg-surface-elevated)] transition cursor-pointer"
+            className="flex items-center gap-1 p-0.5 rounded-full hover:bg-[var(--bg-surface-elevated)] transition cursor-pointer"
             aria-label="User account menu"
           >
-            <div className="w-7 h-7 rounded-full bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 flex items-center justify-center text-xs font-bold">
+            <div className="w-7 h-7 rounded-full bg-[var(--text-primary)] text-[var(--bg-app)] flex items-center justify-center text-xs font-bold shadow-xs">
               {user.first_name ? user.first_name[0].toUpperCase() : 'U'}
             </div>
-            <ChevronDown size={12} className="text-[var(--text-muted)] hidden sm:block" />
+            <ChevronDown size={11} className="text-[var(--text-muted)] hidden sm:block" />
           </button>
 
           {userDropdownOpen && (
@@ -227,7 +238,7 @@ export function AppHeader({
                 className="fixed inset-0 z-30"
                 onClick={() => setUserDropdownOpen(false)}
               />
-              <div className="absolute right-0 top-full mt-1.5 w-52 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-2xl p-1.5 z-40 space-y-1 text-xs">
+              <div className="absolute right-0 top-full mt-2 w-52 rounded-2xl glass-panel p-1.5 z-40 space-y-1 text-xs shadow-2xl">
                 <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
                   <div className="font-bold text-[var(--text-primary)] truncate">{user.first_name}</div>
                   {user.username && (
@@ -240,10 +251,10 @@ export function AppHeader({
                     setUserDropdownOpen(false)
                     onOpenSettingsModal()
                   }}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition cursor-pointer"
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] transition cursor-pointer"
                 >
                   <Sliders size={13} />
-                  <span>Settings & Preferences</span>
+                  <span>Customize Workspace</span>
                 </button>
 
                 <button
@@ -251,7 +262,7 @@ export function AppHeader({
                     setUserDropdownOpen(false)
                     onOpenUsageModal()
                   }}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition cursor-pointer"
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] transition cursor-pointer"
                 >
                   <Clock size={13} />
                   <span>5-Hour Quota Details</span>

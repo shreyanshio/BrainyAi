@@ -36,7 +36,7 @@ export default function RootLayout({
         <script src="https://telegram.org/js/telegram-web-app.js" async />
         <script src="https://accounts.google.com/gsi/client" async defer />
       </head>
-      <body className="antialiased bg-[#090a0f] text-zinc-100 min-h-[100dvh]">
+      <body className="antialiased bg-[var(--bg-app)] text-[var(--text-primary)] min-h-[100dvh] transition-colors selection:bg-emerald-600 selection:text-white">
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
