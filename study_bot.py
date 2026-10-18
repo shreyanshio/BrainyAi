@@ -1305,7 +1305,8 @@ def _stream_groq(messages, system_prompt, max_tokens, model_id=None):
 def _stream_cerebras(messages, system_prompt, max_tokens, model_id=None):
     if not CEREBRAS_API_KEYS:
         raise Exception("NO_KEYS: cerebras")
-    CEREBRAS_MODELS = ["llama3.1-8b", "llama-3.3-70b", "llama3.3-70b"]
+    # Current active Cerebras models
+    CEREBRAS_MODELS = ["gpt-oss-120b", "qwen-3.8-27b", "llama3.1-8b", "llama-3.3-70b"]
     last_err = None
     for _ in range(len(CEREBRAS_API_KEYS)):
         try:
@@ -1352,11 +1353,14 @@ def _stream_cerebras(messages, system_prompt, max_tokens, model_id=None):
 def _stream_openrouter(messages, system_prompt, max_tokens, model_id=None):
     if not OPENROUTER_API_KEYS:
         raise Exception("NO_KEYS: openrouter")
+    # Active free models on OpenRouter
     OPENROUTER_MODELS = [
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "google/gemini-2.0-flash-lite-preview-02-05:free",
-        "mistralai/mistral-7b-instruct:free",
-        "qwen/qwen-2.5-72b-instruct:free",
+        "google/gemma-4-31b-it:free",
+        "google/gemma-4-26b-a4b-it:free",
+        "nvidia/nemotron-3.5-lightning:free",
+        "liquid/lfm-2.5-2.6b:free",
+        "thinkingmachines/inkling:free",
+        "cohere/north-mini-code:free",
     ]
     last_err = None
     for _ in range(len(OPENROUTER_API_KEYS)):
@@ -1592,9 +1596,8 @@ def _call_nvidia(messages, system_prompt, max_tokens):
 def _call_cerebras(messages, system_prompt, max_tokens):
     if not CEREBRAS_API_KEYS:
         raise Exception("NO_KEYS: cerebras")
-    # NOTE: Llama 3.3 70B was removed from Cerebras's public catalog — these are the
-    # current models as of mid-2026. (Re-applying this fix; it reverted in this upload.)
-    CEREBRAS_MODELS = ["llama3.1-8b", "llama3.3-70b"]
+    # Current active Cerebras models
+    CEREBRAS_MODELS = ["gpt-oss-120b", "qwen-3.8-27b", "llama3.1-8b", "llama-3.3-70b"]
     for _ in range(len(CEREBRAS_API_KEYS)):
         try:
             key = _rotate_key("cerebras", CEREBRAS_API_KEYS)
@@ -1687,12 +1690,14 @@ def _call_mistral(messages, system_prompt, max_tokens):
 def _call_openrouter(messages, system_prompt, max_tokens):
     if not OPENROUTER_API_KEYS:
         raise Exception("NO_KEYS: openrouter")
-    # Free models on OpenRouter (":free" suffix = zero cost, ~20 RPM / shared daily cap)
+    # Free models on OpenRouter (":free" suffix = zero cost)
     OPENROUTER_MODELS = [
-        "meta-llama/llama-3.3-70b-instruct:free",
-        "google/gemini-2.0-flash-lite-preview-02-05:free",
-        "mistralai/mistral-7b-instruct:free",
-        "qwen/qwen-2.5-72b-instruct:free",
+        "google/gemma-4-31b-it:free",
+        "google/gemma-4-26b-a4b-it:free",
+        "nvidia/nemotron-3.5-lightning:free",
+        "liquid/lfm-2.5-2.6b:free",
+        "thinkingmachines/inkling:free",
+        "cohere/north-mini-code:free",
     ]
     for _ in range(len(OPENROUTER_API_KEYS)):
         key = _rotate_key("openrouter", OPENROUTER_API_KEYS)

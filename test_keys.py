@@ -85,7 +85,7 @@ def test_gemini(key):
     return "FAILED", last_err[:120]
 
 def test_cerebras(key):
-    models = ["llama3.1-8b", "llama-3.3-70b", "llama3.3-70b"]
+    models = ["gpt-oss-120b", "qwen-3.8-27b", "llama3.1-8b"]
     last_err = ""
     for model in models:
         try:
@@ -108,7 +108,12 @@ def test_cerebras(key):
     return "FAILED", last_err[:120]
 
 def test_openrouter(key):
-    models = ["meta-llama/llama-3.3-70b-instruct:free", "mistralai/mistral-7b-instruct:free"]
+    models = [
+        "google/gemma-4-31b-it:free",
+        "google/gemma-4-26b-a4b-it:free",
+        "nvidia/nemotron-3.5-lightning:free",
+        "liquid/lfm-2.5-2.6b:free",
+    ]
     last_err = ""
     for model in models:
         try:
