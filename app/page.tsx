@@ -123,7 +123,7 @@ export default function BrainyApp() {
   }, [preferences])
 
   // ── Initial Auth & Bootstrap ──────────────────────────────
-  const loadInitialData = useCallback(async () => {
+  const loadInitialData = useCallback(async (userId: number) => {
     try {
       // 1. Load Local Preferences from localStorage first
       if (typeof window !== 'undefined') {
@@ -150,6 +150,22 @@ export default function BrainyApp() {
       if (usageStatus) setUsage(usageStatus)
       if (mem) setMemoryData(mem)
       if (profile) setProfileStats(profile)
+
+      // Restore the last selected conversation for this account after refresh.
+      if (typeof window !== 'undefined') {
+        const savedSessionId = localStorage.getItem(`brainy_active_session_${userId}`)
+        if (savedSessionId && sessList.some((item) => item.id === savedSessionId)) {
+          try {
+            const history = await fetchSessionHistory(savedSessionId)
+            setActiveSessionId(savedSessionId)
+            setActiveSessionTitle(history.title || 'New Study Session')
+            setMessages(history.messages || [])
+            setCurrentView('chat')
+          } catch (err) {
+            console.error('Failed to restore the active conversation:', err)
+          }
+        }
+      }
 
       if (serverPrefs && Object.keys(serverPrefs).length > 0) {
         setPreferences((prev) => {
@@ -179,7 +195,7 @@ export default function BrainyApp() {
               setUser(statusRes.user)
               setCurrentView('chat')
               window.history.replaceState({}, document.title, window.location.pathname)
-              await loadInitialData()
+              await loadInitialData(statusRes.user.id)
               setAuthLoading(false)
               return
             }
@@ -193,7 +209,7 @@ export default function BrainyApp() {
                 setUser(googleUser)
                 setCurrentView('chat')
                 window.history.replaceState({}, document.title, window.location.pathname)
-                await loadInitialData()
+                await loadInitialData(googleUser.id)
                 setAuthLoading(false)
                 return
               }
@@ -212,7 +228,7 @@ export default function BrainyApp() {
           if (loggedUser) {
             setUser(loggedUser)
             setCurrentView('chat')
-            await loadInitialData()
+            await loadInitialData(loggedUser.id)
             setAuthLoading(false)
             return
           }
@@ -223,7 +239,7 @@ export default function BrainyApp() {
         if (currentUser) {
           setUser(currentUser)
           setCurrentView('chat')
-          await loadInitialData()
+          await loadInitialData(currentUser.id)
         }
       } catch (err) {
         console.warn('Auth check skipped:', err)
@@ -234,6 +250,12 @@ export default function BrainyApp() {
 
     authenticate()
   }, [loadInitialData])
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && user && activeSessionId) {
+      localStorage.setItem(`brainy_active_session_${user.id}`, activeSessionId)
+    }
+  }, [activeSessionId, user])
 
   // ── Session Operations ────────────────────────────────────
   const selectSession = async (sessionId: string, title?: string) => {
@@ -253,6 +275,9 @@ export default function BrainyApp() {
   }
 
   const handleNewSession = () => {
+    if (typeof window !== 'undefined' && user) {
+      localStorage.removeItem(`brainy_active_session_${user.id}`)
+    }
     setActiveSessionId(null)
     setActiveSessionTitle('New Study Session')
     setMessages([])
@@ -491,6 +516,9 @@ export default function BrainyApp() {
 
   const handleLogout = async () => {
     await logoutUser()
+    if (typeof window !== 'undefined' && user) {
+      localStorage.removeItem(`brainy_active_session_${user.id}`)
+    }
     setUser(null)
     setSessions([])
     setActiveSessionId(null)
@@ -520,7 +548,7 @@ export default function BrainyApp() {
         onLoginSuccess={(loggedInUser) => {
           setUser(loggedInUser)
           setCurrentView('chat')
-          loadInitialData()
+          loadInitialData(loggedInUser.id)
         }}
       />
     )

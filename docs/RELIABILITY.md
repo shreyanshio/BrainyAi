@@ -4,6 +4,8 @@
 
 `POST /api/chat/stream` returns newline-delimited JSON events: `start` (including a request ID), `status`, `delta`, then `done` or `error`. The browser reads through the final unterminated line and keeps partial output visible after an interruption. Safe error responses and server diagnostics carry a request ID; logs record the ID and failure category without conversation text.
 
+Each AI request receives the full message history for its active session, loaded in chronological order from Supabase. Long histories are fetched in stable pages instead of being cut off at the REST API's per-response row cap. A new session starts with no prior chat messages. The provider still has a finite context window, so exceptionally long chats can eventually exceed what a model can process in one request.
+
 Chat history writes are best effort for answer delivery. A generated answer is still streamed if saving the user message, creating a new session, saving the assistant message, or renaming the session fails. A `done.persistence_warning` flag tells the UI to show that the conversation may not have been saved. The message row idempotency key is scoped to a session; apply `migrations/20261018_chat_idempotency.sql` before relying on idempotent retries. The migration stops if existing duplicate keys need review.
 
 ## Limits and quotas

@@ -631,13 +631,31 @@ def sb_get_messages(session_id: str) -> list:
     return msgs
 
 
-def sb_get_recent_messages(session_id: str, limit: int = 15) -> list:
+def sb_get_recent_messages(session_id: str, limit: int | None = 15) -> list:
     if not (SUPABASE_URL and SUPABASE_KEY):
         all_msgs = MEM_MESSAGES.get(session_id, [])
-        return list(all_msgs[-limit:])
-    raw_msgs = _sb_json(_sb_request("GET", "chat_messages",
-        params=f"?session_id=eq.{session_id}&select=role,content,created_at&order=id.desc&limit={limit}"), "chat_messages")
-    msgs = list(reversed(raw_msgs))
+        return list(all_msgs if limit is None else all_msgs[-limit:])
+
+    if limit is None:
+        # Read the full conversation in stable pages. Supabase projects often
+        # cap a single REST response, so a long chat must not silently lose its
+        # oldest context at the API row limit.
+        page_size = 500
+        msgs = []
+        offset = 0
+        while True:
+            page = _sb_json(_sb_request("GET", "chat_messages",
+                params=(f"?session_id=eq.{session_id}&select=role,content,created_at"
+                        f"&order=id.asc&limit={page_size}&offset={offset}")), "chat_messages")
+            msgs.extend(page)
+            if len(page) < page_size:
+                break
+            offset += page_size
+    else:
+        raw_msgs = _sb_json(_sb_request("GET", "chat_messages",
+            params=f"?session_id=eq.{session_id}&select=role,content,created_at&order=id.desc&limit={limit}"), "chat_messages")
+        msgs = list(reversed(raw_msgs))
+
     for m in msgs:
         if m.get("content"):
             m["content"] = unmask_secure_hash(m["content"])
@@ -1788,7 +1806,7 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
     messages_context = []
     if session_id:
         try:
-            messages_context = [{"role": m["role"], "content": m["content"]} for m in sb_get_recent_messages(session_id, 15)]
+            messages_context = [{"role": m["role"], "content": m["content"]} for m in sb_get_recent_messages(session_id, None)]
         except SupabaseOperationError as exc:
             logger.warning("Chat history read failed request_id=%s category=%s", getattr(g, "request_id", ""), type(exc).__name__)
             persistence_warning = True
@@ -1860,7 +1878,7 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
         f"- The user has a {QUOTA_WINDOW_HOURS}-hour quota of {GLOBAL_MESSAGE_LIMIT} messages total across Brainy.\n"
         f"- {quota_status['used']} messages used so far in this window, {quota_status['remaining']} remaining.\n"
         f"- The window resets at {quota_status['reset_at']}.\n"
-        f"- The last 15 messages of a session are kept as context."
+        f"- The complete message history of the active chat is provided as context."
     )
 
     user_profile = study_bot.get_user_data(user_id)
@@ -1868,17 +1886,15 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
     if intent == "joke":
         system_prompt = study_bot.JOKE_SYSTEM_PROMPT
         max_tok = 150
-        messages_context = [{"role": "user", "content": "Tell one genuinely funny joke — preferably a science, programming, or Hinglish wordplay joke."}]
     elif intent == "fact":
         system_prompt = study_bot.FACT_SYSTEM_PROMPT
         max_tok = 200
         categories = ["science", "space", "human body", "history", "technology and AI", "mathematics", "psychology"]
         category = random.choice(categories)
-        messages_context = [{"role": "user", "content": f"Give one mind-blowing lesser-known fact about {category}."}]
+        system_prompt += f"\nFor this turn, choose one mind-blowing lesser-known fact about {category}."
     elif intent == "tip":
         system_prompt = study_bot.TIP_SYSTEM_PROMPT
         max_tok = 250
-        messages_context = [{"role": "user", "content": "Give one powerful productivity tip. Make it practical and actionable."}]
     elif intent == "define":
         system_prompt = study_bot.DEFINE_SYSTEM_PROMPT
         max_tok = 350
@@ -1907,7 +1923,7 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
             f"{context_hint}\n"
             "Make it punchy, real, personal — not generic quotes. Mix English + Hinglish. 5-7 lines max."
         )
-        messages_context = [{"role": "user", "content": prompt}]
+        system_prompt += "\nFor this turn, follow these instructions while answering the user's latest message:\n" + prompt
     elif intent == "search":
         query = payload or content
         try:
@@ -1927,7 +1943,13 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
                     "Tell the user no useful search result is available right now; do not answer from memory "
                     "or invent sources, citations, titles, or links."
                 )
-            messages_context = [{"role": "user", "content": ai_prompt}]
+            # Keep the user's actual question and the preceding turns intact;
+            # add retrieved web material to the latest turn for grounding.
+            if messages_context and messages_context[-1].get("role") == "user":
+                messages_context[-1] = {
+                    "role": "user",
+                    "content": f"{content}\n\n{ai_prompt}",
+                }
             system_prompt = study_bot.SEARCH_SYSTEM_PROMPT
             max_tok = 600
         except Exception as e:
@@ -1937,6 +1959,13 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
         max_tok = 1000
     elif study_bot.is_offtopic_chat(content):
         system_prompt = study_bot.BANTER_SYSTEM_PROMPT or study_bot.SYSTEM_PROMPT
+
+    system_prompt += (
+        "\n\nOngoing conversation: Use the complete earlier conversation supplied in the message history. "
+        "Keep names, facts, goals, explanations, and constraints consistent within this chat. "
+        "When the user says 'it', 'that', 'continue', or asks a follow-up, resolve it from the prior turns. "
+        "Treat a new chat as a separate conversation."
+    )
 
     # Inject learning contexts
     liked_ctx = study_bot.get_liked_context(user_id, 5)
