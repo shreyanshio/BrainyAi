@@ -1,6 +1,7 @@
 """Deterministic regression tests for shared rate limits and DDG fallback behavior."""
 import os
 import json
+import threading
 import unittest
 from unittest.mock import Mock, patch
 
@@ -10,6 +11,122 @@ import app
 
 
 class ReliabilityContractTests(unittest.TestCase):
+    def test_database_history_error_does_not_fall_back_to_new_chat_context(self):
+        with app.app.test_request_context("/api/chat/stream"):
+            with patch("app.is_user_suspended", return_value=False), \
+                 patch("app.sb_get_session", return_value={"id": "00000000-0000-0000-0000-000000000123", "title": "Existing"}), \
+                 patch("app.sanitize_input", side_effect=lambda value: value), \
+                 patch("study_bot.detect_intent", return_value=("joke", None)), \
+                 patch("app.check_rate_limit", return_value=True), \
+                 patch("app.consume_user_quota", return_value=(True, {"used": 1, "remaining": 29, "reset_at": "later"})), \
+                 patch("app.sb_insert_message"), \
+                 patch("app.sb_get_recent_messages", side_effect=app.SupabaseOperationError("offline")), \
+                 patch("app.refund_user_quota") as refund:
+                prepared, response, status = app._prepare_chat_request({
+                    "session_id": "00000000-0000-0000-0000-000000000123",
+                    "message": "And what about the second feature?",
+                }, 77, "Student", "student", "127.0.0.1")
+
+        self.assertIsNone(prepared)
+        self.assertEqual(status, 503)
+        self.assertEqual(response.get_json()["code"], "CHAT_HISTORY_UNAVAILABLE")
+        refund.assert_called_once_with(77)
+
+    def test_persisted_current_question_is_not_duplicated_if_retry_write_fails(self):
+        message = "What about the second feature?"
+        history = [
+            {"role": "user", "content": "We discussed three features."},
+            {"role": "assistant", "content": "The second one was chat memory."},
+            {"role": "user", "content": message},
+        ]
+        with app.app.test_request_context("/api/chat/stream"):
+            with patch("app.is_user_suspended", return_value=False), \
+                 patch("app.sb_get_session", return_value={"id": "00000000-0000-0000-0000-000000000123", "title": "Existing"}), \
+                 patch("app.sanitize_input", side_effect=lambda value: value), \
+                 patch("study_bot.detect_intent", return_value=("joke", None)), \
+                 patch("app.check_rate_limit", return_value=True), \
+                 patch("app.consume_user_quota", return_value=(True, {"used": 1, "remaining": 29, "reset_at": "later"})), \
+                 patch("app.sb_insert_message", side_effect=app.SupabaseOperationError("write failed")), \
+                 patch("app.sb_get_recent_messages", return_value=history), \
+                 patch("study_bot.load_user_into_memory"), \
+                 patch("study_bot.get_user_data", return_value={}), \
+                 patch("study_bot.get_liked_context", return_value=""), \
+                 patch("study_bot.is_offtopic_chat", return_value=False):
+                prepared, response, status = app._prepare_chat_request({
+                    "session_id": "00000000-0000-0000-0000-000000000123",
+                    "message": message,
+                }, 77, "Student", "student", "127.0.0.1")
+
+        self.assertIsNone(response)
+        self.assertEqual(status, 200)
+        self.assertEqual(prepared["messages_context"], history)
+        self.assertEqual(sum(1 for item in prepared["messages_context"] if item["role"] == "user" and item["content"] == message), 1)
+
+    def test_rolling_summary_advances_only_through_summarized_messages(self):
+        old_schema_state = app._CHAT_SUMMARY_SCHEMA_AVAILABLE
+        app._CHAT_SUMMARY_SCHEMA_AVAILABLE = True
+        pending = [
+            {"id": index + 1, "role": "user" if index % 2 == 0 else "assistant", "content": f"turn {index + 1}"}
+            for index in range(41)
+        ]
+        worker_lock = threading.Lock()
+        worker_lock.acquire()
+        try:
+            with patch("app.sb_get_session", side_effect=[
+                    {"id": "session", "context_summary": None, "summary_through_message_id": None},
+                    {"id": "session", "context_summary": "Updated summary", "summary_through_message_id": 17},
+                 ]), \
+                 patch("app.sb_get_messages_after", side_effect=[pending, pending[17:]]), \
+                 patch("study_bot.ai_call", return_value="Updated summary") as summarize, \
+                 patch("study_bot.clean_response", side_effect=lambda value: value), \
+                 patch("app.sb_update_session_summary", return_value=True) as save_summary:
+                app._refresh_chat_summary("session", 77, worker_lock)
+        finally:
+            app._CHAT_SUMMARY_SCHEMA_AVAILABLE = old_schema_state
+
+        summarize.assert_called_once()
+        save_summary.assert_called_once_with(
+            "session", 77, "Updated summary", 17, expected_previous_id=None
+        )
+        self.assertFalse(worker_lock.locked())
+
+    def test_prepared_context_combines_owned_summary_and_newer_turns(self):
+        session_id = "00000000-0000-0000-0000-000000000123"
+        current = "What about the second feature?"
+        recent = [
+            {"role": "assistant", "content": "We chose persistent chat memory."},
+            {"role": "user", "content": current},
+        ]
+        with app.app.test_request_context("/api/chat/stream"):
+            with patch("app.is_user_suspended", return_value=False), \
+                 patch("app.sb_get_session", return_value={
+                    "id": session_id,
+                    "title": "Study project",
+                    "context_summary": "The user is building a study app with Python and Supabase.",
+                    "summary_through_message_id": 80,
+                 }), \
+                 patch("app.sanitize_input", side_effect=lambda value: value), \
+                 patch("study_bot.detect_intent", return_value=("joke", None)), \
+                 patch("app.check_rate_limit", return_value=True), \
+                 patch("app.consume_user_quota", return_value=(True, {"used": 1, "remaining": 29, "reset_at": "later"})), \
+                 patch("app.sb_insert_message"), \
+                 patch("app.sb_get_recent_messages", return_value=recent) as read_history, \
+                 patch("study_bot.load_user_into_memory"), \
+                 patch("study_bot.get_user_data", return_value={}), \
+                 patch("study_bot.get_liked_context", return_value=""), \
+                 patch("study_bot.is_offtopic_chat", return_value=False):
+                prepared, response, status = app._prepare_chat_request({
+                    "session_id": session_id,
+                    "message": current,
+                }, 77, "Student", "student", "127.0.0.1")
+
+        self.assertIsNone(response)
+        self.assertEqual(status, 200)
+        self.assertIn("Python and Supabase", prepared["system_prompt"])
+        self.assertEqual(prepared["messages_context"], recent)
+        self.assertEqual(sum(1 for item in prepared["messages_context"] if item.get("content") == current), 1)
+        read_history.assert_called_once_with(session_id, 41, user_id=77, after_id=80)
+
     def test_code_debug_prompt_tile_streams_without_punctuation_rejection(self):
         old_url, old_key = app.SUPABASE_URL, app.SUPABASE_KEY
         old_env = os.environ.get("RAILWAY_SERVICE_ID")

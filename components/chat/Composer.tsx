@@ -11,6 +11,8 @@ interface ComposerProps {
   onSendMessage: () => void
   onStop?: () => void
   isThinking: boolean
+  disabled?: boolean
+  disabledMessage?: string
   usage: UsageStatus | null
   activeModel: string
   onSelectModel: (modelId: string) => void
@@ -26,6 +28,8 @@ export function Composer({
   onSendMessage,
   onStop,
   isThinking,
+  disabled = false,
+  disabledMessage,
   usage,
   activeModel,
   onSelectModel,
@@ -48,7 +52,7 @@ export function Composer({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (inputMessage.trim() && !isThinking && !isExhausted) {
+      if (inputMessage.trim() && !isThinking && !isExhausted && !disabled) {
         onSendMessage()
       }
     }
@@ -133,9 +137,11 @@ export function Composer({
           value={inputMessage}
           onChange={(e) => onInputChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          disabled={isThinking || isExhausted}
+          disabled={isThinking || isExhausted || disabled}
           placeholder={
-            isExhausted
+            disabledMessage
+              ? disabledMessage
+              : isExhausted
               ? `${usage?.window_hours}-hour quota reached. Please wait for the window to reset.`
               : 'Ask a question, enter code, or paste a problem... (Shift+Enter for new line)'
           }
@@ -175,7 +181,7 @@ export function Composer({
             <button
               type="button"
               onClick={toggleVoice}
-              disabled={isThinking || isExhausted}
+              disabled={isThinking || isExhausted || disabled}
               title={isListening ? 'Stop listening' : 'Dictate with voice'}
               className={`p-2 rounded-xl transition cursor-pointer ${
                 isListening
@@ -200,7 +206,7 @@ export function Composer({
               <button
                 type="button"
                 onClick={onSendMessage}
-                disabled={!inputMessage.trim() || isExhausted}
+                disabled={!inputMessage.trim() || isExhausted || disabled}
                 aria-label="Send message"
                 className="p-2 rounded-xl bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 hover:opacity-90 disabled:opacity-30 transition shadow-xs cursor-pointer"
               >

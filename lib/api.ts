@@ -241,6 +241,16 @@ export async function fetchSessions(): Promise<ChatSession[]> {
   return data.sessions || []
 }
 
+export interface ChatSessionPage {
+  sessions: ChatSession[]
+  has_more: boolean
+  next_offset: number
+}
+
+export async function fetchSessionPage(limit = 50, offset = 0): Promise<ChatSessionPage> {
+  return request<ChatSessionPage>(`/api/sessions?view=all&limit=${limit}&offset=${offset}`)
+}
+
 export async function createSession(title: string = 'New Study Session'): Promise<ChatSession> {
   return request<ChatSession>('/api/sessions', {
     method: 'POST',
@@ -354,6 +364,7 @@ export async function streamChatMessage(
   let buffer = ''
   let accumulatedText = ''
   let reportedError: Error | null = null
+  let lastDeltaDispatchAt = 0
 
   const processLine = (line: string) => {
     const trimmed = line.trim()
@@ -364,12 +375,22 @@ export async function streamChatMessage(
       case 'status': callbacks.onStatus?.(event.stage); break
       case 'delta':
         accumulatedText += event.text
-        callbacks.onDelta?.(event.text, accumulatedText)
+        // Avoid rerendering the entire Markdown transcript for every provider
+        // token. Dispatch the first token immediately, then coalesce small
+        // deltas into short 30 ms batches; the final text is flushed on done.
+        if (!lastDeltaDispatchAt || performance.now() - lastDeltaDispatchAt >= 30) {
+          lastDeltaDispatchAt = performance.now()
+          callbacks.onDelta?.(event.text, accumulatedText)
+        }
         break
-      case 'done': callbacks.onDone?.(event); break
+      case 'done':
+        callbacks.onDelta?.('', accumulatedText)
+        callbacks.onDone?.(event)
+        break
       case 'error': {
         const streamErr = new ApiError(event.message, 500, event)
         reportedError = streamErr
+        callbacks.onDelta?.('', accumulatedText)
         callbacks.onError?.(streamErr, accumulatedText)
         throw streamErr
       }
@@ -405,7 +426,10 @@ export async function streamChatMessage(
     if (err?.name === 'AbortError') {
       return accumulatedText
     }
-    if (err !== reportedError) callbacks.onError?.(err, accumulatedText)
+    if (err !== reportedError) {
+      callbacks.onDelta?.('', accumulatedText)
+      callbacks.onError?.(err, accumulatedText)
+    }
     throw err
   } finally {
     if (signal?.aborted) reader.cancel().catch(() => {})

@@ -7,7 +7,7 @@ import {
   createSession,
   deleteSession,
   fetchSessionHistory,
-  fetchSessions,
+  fetchSessionPage,
   fetchUsage,
   fetchUserMemory,
   fetchUserProfile,
@@ -57,12 +57,21 @@ export default function BrainyApp() {
 
   // Chat & Session state
   const [sessions, setSessions] = useState<ChatSession[]>([])
+  const [sessionsLoading, setSessionsLoading] = useState(true)
+  const [sessionsError, setSessionsError] = useState<string | null>(null)
+  const [sessionsHasMore, setSessionsHasMore] = useState(false)
+  const [sessionsNextOffset, setSessionsNextOffset] = useState(0)
+  const [sessionsLoadingMore, setSessionsLoadingMore] = useState(false)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [activeSessionTitle, setActiveSessionTitle] = useState('New Study Session')
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState<string | null>(null)
   const [inputMessage, setInputMessage] = useState('')
   const [isThinking, setIsThinking] = useState(false)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const selectionRequestRef = useRef(0)
+  const viewGenerationRef = useRef(0)
 
   // Capabilities & Preferences state
   const [activeModel, setActiveModel] = useState('brainy-balanced')
@@ -123,8 +132,40 @@ export default function BrainyApp() {
     if (preferences.defaultLength) setActiveLength(preferences.defaultLength)
   }, [preferences])
 
+  const loadSessionIntoView = useCallback(async (sessionId: string, fallbackTitle?: string) => {
+    const requestNumber = ++selectionRequestRef.current
+    viewGenerationRef.current += 1
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
+    setIsThinking(false)
+    setActiveSessionId(sessionId)
+    setActiveSessionTitle(fallbackTitle || 'Loading chat...')
+    setCurrentView('chat')
+    setSidebarMobileOpen(false)
+    setMessages([])
+    setHistoryError(null)
+    setHistoryLoading(true)
+
+    try {
+      const data = await fetchSessionHistory(sessionId)
+      if (requestNumber !== selectionRequestRef.current) return
+      setMessages(data.messages || [])
+      if (data.usage) setUsage(data.usage)
+      setActiveSessionTitle(data.title || fallbackTitle || 'New Study Session')
+      setHistoryError(null)
+    } catch (error) {
+      if (requestNumber !== selectionRequestRef.current) return
+      console.error('Failed to load session history:', error)
+      setHistoryError(error instanceof Error ? error.message : 'Chat history could not be loaded.')
+    } finally {
+      if (requestNumber === selectionRequestRef.current) setHistoryLoading(false)
+    }
+  }, [])
+
   // ── Initial Auth & Bootstrap ──────────────────────────────
   const loadInitialData = useCallback(async (userId: number) => {
+    setSessionsLoading(true)
+    setSessionsError(null)
     try {
       // 1. Load Local Preferences from localStorage first
       if (typeof window !== 'undefined') {
@@ -139,33 +180,32 @@ export default function BrainyApp() {
       }
 
       // 2. Fetch Sessions, Quota, Memory, and Server Preferences concurrently
-      const [sessList, usageStatus, mem, serverPrefs, profile] = await Promise.all([
-        fetchSessions().catch(() => []),
-        fetchUsage().catch(() => null),
-        fetchUserMemory().catch(() => null),
-        fetchUserPreferences().catch(() => ({})),
-        fetchUserProfile().catch(() => null),
+      const [sessionResult, usageResult, memoryResult, preferencesResult, profileResult] = await Promise.allSettled([
+        fetchSessionPage(50, 0),
+        fetchUsage(),
+        fetchUserMemory(),
+        fetchUserPreferences(),
+        fetchUserProfile(),
       ])
 
-      setSessions(sessList)
-      if (usageStatus) setUsage(usageStatus)
-      if (mem) setMemoryData(mem)
-      if (profile) setProfileStats(profile)
+      if (sessionResult.status === 'fulfilled') {
+        setSessions(sessionResult.value.sessions)
+        setSessionsHasMore(sessionResult.value.has_more)
+        setSessionsNextOffset(sessionResult.value.next_offset)
+      } else {
+        setSessionsError(sessionResult.reason instanceof Error ? sessionResult.reason.message : 'Chat list could not be loaded.')
+      }
+      if (usageResult.status === 'fulfilled') setUsage(usageResult.value)
+      if (memoryResult.status === 'fulfilled') setMemoryData(memoryResult.value)
+      if (profileResult.status === 'fulfilled') setProfileStats(profileResult.value)
+      const serverPrefs = preferencesResult.status === 'fulfilled' ? preferencesResult.value : {}
 
       // Restore the last selected conversation for this account after refresh.
       if (typeof window !== 'undefined') {
         const savedSessionId = localStorage.getItem(`brainy_active_session_${userId}`)
-        if (savedSessionId && sessList.some((item) => item.id === savedSessionId)) {
-          try {
-            const history = await fetchSessionHistory(savedSessionId)
-            setActiveSessionId(savedSessionId)
-            setActiveSessionTitle(history.title || 'New Study Session')
-            setMessages(history.messages || [])
-            setCurrentView('chat')
-          } catch (err) {
-            console.error('Failed to restore the active conversation:', err)
-          }
-        }
+        // Do not require the active chat to be in the first sidebar page.
+        // This restores older conversations even when the user has many chats.
+        if (savedSessionId) await loadSessionIntoView(savedSessionId)
       }
 
       if (serverPrefs && Object.keys(serverPrefs).length > 0) {
@@ -179,8 +219,10 @@ export default function BrainyApp() {
       }
     } catch (err) {
       console.error('Failed to load initial data:', err)
+    } finally {
+      setSessionsLoading(false)
     }
-  }, [])
+  }, [loadSessionIntoView])
 
   useEffect(() => {
     const authenticate = async () => {
@@ -260,28 +302,60 @@ export default function BrainyApp() {
 
   // ── Session Operations ────────────────────────────────────
   const selectSession = async (sessionId: string, title?: string) => {
-    setActiveSessionId(sessionId)
-    if (title) setActiveSessionTitle(title)
-    setCurrentView('chat')
-    setSidebarMobileOpen(false)
+    await loadSessionIntoView(sessionId, title)
+  }
 
+  const retrySessionList = async () => {
+    setSessionsLoading(true)
+    setSessionsError(null)
     try {
-      const data = await fetchSessionHistory(sessionId)
-      setMessages(data.messages || [])
-      if (data.usage) setUsage(data.usage)
-      if (data.title) setActiveSessionTitle(data.title)
-    } catch (err) {
-      console.error('Failed to load session history:', err)
+      const page = await fetchSessionPage(50, 0)
+      setSessions((previous) => {
+        const refreshedIds = new Set(page.sessions.map((item) => item.id))
+        return [...page.sessions, ...previous.filter((item) => !refreshedIds.has(item.id))]
+      })
+      setSessionsHasMore(page.has_more || sessions.length > page.sessions.length)
+      setSessionsNextOffset(Math.max(page.next_offset, sessions.length))
+    } catch (error) {
+      setSessionsError(error instanceof Error ? error.message : 'Chat list could not be loaded.')
+    } finally {
+      setSessionsLoading(false)
+    }
+  }
+
+  const loadMoreSessions = async () => {
+    if (sessionsLoadingMore || !sessionsHasMore) return
+    setSessionsLoadingMore(true)
+    setSessionsError(null)
+    try {
+      const page = await fetchSessionPage(50, sessionsNextOffset)
+      setSessions((previous) => {
+        const existing = new Set(previous.map((item) => item.id))
+        return [...previous, ...page.sessions.filter((item) => !existing.has(item.id))]
+      })
+      setSessionsHasMore(page.has_more)
+      setSessionsNextOffset(page.next_offset)
+    } catch (error) {
+      setSessionsError(error instanceof Error ? error.message : 'More chats could not be loaded.')
+    } finally {
+      setSessionsLoadingMore(false)
     }
   }
 
   const handleNewSession = () => {
+    selectionRequestRef.current += 1
+    viewGenerationRef.current += 1
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
+    setIsThinking(false)
     if (typeof window !== 'undefined' && user) {
       localStorage.removeItem(`brainy_active_session_${user.id}`)
     }
     setActiveSessionId(null)
     setActiveSessionTitle('New Study Session')
     setMessages([])
+    setHistoryError(null)
+    setHistoryLoading(false)
     setInputMessage('')
     setCurrentView('chat')
     setSidebarMobileOpen(false)
@@ -333,7 +407,9 @@ export default function BrainyApp() {
   // ── Message Operations ────────────────────────────────────
   const handleSendMessage = async (customPrompt?: string) => {
     const textToSend = (customPrompt || inputMessage).trim()
-    if (!textToSend || isThinking) return
+    if (!textToSend || isThinking || historyLoading || historyError) return
+    const sendViewGeneration = viewGenerationRef.current
+    const belongsToCurrentView = () => sendViewGeneration === viewGenerationRef.current
 
     // Cancel any ongoing stream
     if (abortControllerRef.current) {
@@ -382,11 +458,13 @@ export default function BrainyApp() {
         },
         {
           onStart: (sessionId, requestId) => {
+            if (!belongsToCurrentView()) return
             if (sessionId && sessionId !== activeSessionId) {
               setActiveSessionId(sessionId)
             }
           },
           onDelta: (deltaText, accumulatedText) => {
+            if (!belongsToCurrentView()) return
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId ? { ...m, content: accumulatedText } : m
@@ -394,6 +472,7 @@ export default function BrainyApp() {
             )
           },
           onDone: (doneEvent) => {
+            if (!belongsToCurrentView()) return
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === assistantMsgId
@@ -424,9 +503,14 @@ export default function BrainyApp() {
                 optimisticSession,
                 ...prev.filter((s) => s.id !== doneEvent.session_id),
               ])
-              fetchSessions()
-                .then((updated) => {
-                  if (updated && updated.length > 0) setSessions(updated)
+              fetchSessionPage(50, 0)
+                .then((page) => {
+                  setSessions((previous) => {
+                    const refreshedIds = new Set(page.sessions.map((item) => item.id))
+                    return [...page.sessions, ...previous.filter((item) => !refreshedIds.has(item.id))]
+                  })
+                  setSessionsHasMore(page.has_more || sessions.length > page.sessions.length)
+                  setSessionsNextOffset(Math.max(page.next_offset, sessions.length))
                 })
                 .catch((error) => console.warn('Could not refresh saved chats:', error))
             } else if (doneEvent.new_title) {
@@ -441,12 +525,14 @@ export default function BrainyApp() {
             if (doneEvent.usage) setUsage(doneEvent.usage)
           },
           onError: (err, partialText) => {
+            if (!belongsToCurrentView()) return
             console.error('Streaming error callback:', err)
           },
         },
         abortController.signal
       )
     } catch (err: any) {
+      if (!belongsToCurrentView()) return
       if (err?.name === 'AbortError') {
         console.log('User stopped generation')
         setMessages((prev) =>
@@ -495,8 +581,8 @@ export default function BrainyApp() {
         )
       }
     } finally {
-      setIsThinking(false)
-      abortControllerRef.current = null
+      if (belongsToCurrentView()) setIsThinking(false)
+      if (abortControllerRef.current === abortController) abortControllerRef.current = null
     }
   }
 
@@ -533,14 +619,24 @@ export default function BrainyApp() {
   }
 
   const handleLogout = async () => {
+    selectionRequestRef.current += 1
+    viewGenerationRef.current += 1
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
     await logoutUser()
     if (typeof window !== 'undefined' && user) {
       localStorage.removeItem(`brainy_active_session_${user.id}`)
     }
     setUser(null)
     setSessions([])
+    setSessionsError(null)
+    setSessionsHasMore(false)
+    setSessionsNextOffset(0)
     setActiveSessionId(null)
     setMessages([])
+    setHistoryError(null)
+    setHistoryLoading(false)
+    setIsThinking(false)
     setUsage(null)
     setMemoryData(null)
     setProfileStats(null)
@@ -581,6 +677,12 @@ export default function BrainyApp() {
         currentView={currentView}
         onSelectView={setCurrentView}
         sessions={sessions}
+        sessionsLoading={sessionsLoading}
+        sessionsError={sessionsError}
+        sessionsHasMore={sessionsHasMore}
+        sessionsLoadingMore={sessionsLoadingMore}
+        onRetrySessions={retrySessionList}
+        onLoadMoreSessions={loadMoreSessions}
         activeSessionId={activeSessionId}
         onSelectSession={(id) => selectSession(id)}
         onNewSession={handleNewSession}
@@ -632,7 +734,21 @@ export default function BrainyApp() {
           /* View 2: Focused Chat Workspace */
           <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
             <main className="flex-1 overflow-y-auto scrollbar-thin">
-              {messages.length === 0 ? (
+              {historyLoading ? (
+                <div className="h-full flex items-center justify-center text-sm text-[var(--text-muted)]">
+                  Restoring your chat…
+                </div>
+              ) : historyError ? (
+                <div className="h-full flex flex-col items-center justify-center gap-3 px-6 text-center">
+                  <p className="text-sm text-rose-500">This chat could not be restored: {historyError}</p>
+                  {activeSessionId && (
+                    <button
+                      onClick={() => loadSessionIntoView(activeSessionId, activeSessionTitle)}
+                      className="rounded-lg px-3 py-2 text-xs font-semibold bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] cursor-pointer"
+                    >Retry loading chat</button>
+                  )}
+                </div>
+              ) : messages.length === 0 ? (
                 <EmptyState onSelectPrompt={(prompt) => handleSendMessage(prompt)} />
               ) : (
                 <MessageList
@@ -652,6 +768,8 @@ export default function BrainyApp() {
               onSendMessage={() => handleSendMessage()}
               onStop={handleStopGeneration}
               isThinking={isThinking}
+              disabled={historyLoading || Boolean(historyError)}
+              disabledMessage={historyLoading ? 'Restoring this chat…' : historyError ? 'Retry loading this chat before sending.' : undefined}
               usage={usage}
               activeModel={activeModel}
               onSelectModel={setActiveModel}

@@ -88,11 +88,19 @@ export interface ChatSendResponse {
 export type StreamStage = 'preparing' | 'searching' | 'generating' | 'persisting'
 
 export interface StreamLatencyMetrics {
+  auth_ms?: number
+  security_validation_ms?: number
+  session_validation_ms?: number
+  history_fetch_ms?: number
+  context_build_ms?: number
+  pipeline_ms?: number
   pre_gen_ms?: number
+  model_ttft_ms?: number
   ttft_ms?: number
   generation_ms?: number
   persistence_ms?: number
   total_duration_ms?: number
+  request_total_ms?: number
 }
 
 export type StreamEvent =

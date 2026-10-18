@@ -23,7 +23,7 @@ import requests
 from datetime import datetime, timezone, timedelta
 from html import escape
 from functools import wraps
-from flask import Flask, request, jsonify, session, send_from_directory, redirect, Response, stream_with_context, g
+from flask import Flask, request, jsonify, session, send_from_directory, redirect, Response, stream_with_context, g, has_request_context
 from flask_cors import CORS
 
 logging.basicConfig(level=logging.INFO)
@@ -184,6 +184,9 @@ def _supabase_configured() -> bool:
     return bool(SUPABASE_URL and SUPABASE_KEY)
 
 
+_CHAT_SUMMARY_SCHEMA_AVAILABLE: bool | None = None
+
+
 def _require_supabase_in_production() -> None:
     if _is_production() and not _supabase_configured():
         raise SupabaseOperationError("Supabase credentials are not configured")
@@ -247,27 +250,39 @@ def unmask_secure_hash(stored_val: str) -> str:
     if not stored_val or not isinstance(stored_val, str) or not stored_val.startswith("hsh_v1_"):
         return stored_val
     try:
-        raw = base64.urlsafe_b64decode(stored_val[7:].encode('ascii'))
+        raw = base64.b64decode(stored_val[7:].encode('ascii'), altchars=b'-_', validate=True)
         if len(raw) < 32:
-            return stored_val
+            raise ValueError("invalid encrypted content length")
         salt = raw[:16]
         mac = raw[16:32]
         ciphertext = raw[32:]
-        secret = _get_auth_secret_key()
-        key = hashlib.pbkdf2_hmac('sha256', secret.encode('utf-8'), salt, 50000, dklen=32)
-        expected_mac = hmac.new(key, ciphertext, hashlib.sha256).digest()[:16]
-        if not hmac.compare_digest(mac, expected_mac):
-            return stored_val
-        keystream = bytearray()
-        counter = 0
-        while len(keystream) < len(ciphertext):
-            keystream.extend(hmac.new(key, counter.to_bytes(4, 'big'), hashlib.sha256).digest())
-            counter += 1
-        plain_bytes = bytes(a ^ b for a, b in zip(ciphertext, keystream[:len(ciphertext)]))
-        return plain_bytes.decode('utf-8', errors='replace')
-    except Exception as e:
-        logger.warning("Decryption of masked hash failed: %s", e)
-        return stored_val
+        # Keep the active key first. A previous key is optional and exists only
+        # to support a deliberate Railway key rotation without losing old chats.
+        candidate_secrets = [_get_auth_secret_key()]
+        previous_secrets = [value.strip() for value in os.getenv("CHAT_ENCRYPTION_PREVIOUS_KEYS", "").split(",") if value.strip()]
+        previous_secret = os.getenv("CHAT_ENCRYPTION_PREVIOUS_KEY", "").strip()
+        if previous_secret:
+            previous_secrets.append(previous_secret)
+        candidate_secrets.extend(secret for secret in previous_secrets if secret not in candidate_secrets)
+        for secret in candidate_secrets:
+            key = hashlib.pbkdf2_hmac('sha256', secret.encode('utf-8'), salt, 50000, dklen=32)
+            expected_mac = hmac.new(key, ciphertext, hashlib.sha256).digest()[:16]
+            if not hmac.compare_digest(mac, expected_mac):
+                continue
+            keystream = bytearray()
+            counter = 0
+            while len(keystream) < len(ciphertext):
+                keystream.extend(hmac.new(key, counter.to_bytes(4, 'big'), hashlib.sha256).digest())
+                counter += 1
+            plain_bytes = bytes(a ^ b for a, b in zip(ciphertext, keystream[:len(ciphertext)]))
+            return plain_bytes.decode('utf-8')
+        raise StoredChatContentUnavailable("Stored chat content could not be decrypted")
+    except StoredChatContentUnavailable:
+        raise
+    except Exception as exc:
+        # Never return the encrypted payload to the user or send it to a model.
+        logger.warning("Stored chat content could not be decoded category=%s", type(exc).__name__)
+        raise StoredChatContentUnavailable("Stored chat content could not be decrypted") from exc
 
 # ── GLOBAL USER MESSAGE QUOTA: 30 MESSAGES PER 5 HOURS ──
 GLOBAL_MESSAGE_LIMIT = 30
@@ -530,6 +545,14 @@ class SupabaseOperationError(RuntimeError):
     """A configured Supabase operation failed; never treat it as empty data."""
 
 
+class SupabaseSchemaUnavailable(SupabaseOperationError):
+    """An additive optional database migration has not been applied yet."""
+
+
+class StoredChatContentUnavailable(SupabaseOperationError):
+    """Encrypted historical text needs its original key before it can be shown or used."""
+
+
 @app.errorhandler(SupabaseOperationError)
 def handle_supabase_operation_error(exc):
     """Return a safe, consistent response for a failed Supabase operation."""
@@ -559,6 +582,15 @@ def _sb_request(method: str, table: str, *, params: str = "", json_body=None,
             method.lower(), table, getattr(upstream, "status_code", None) or "network",
             upstream.headers.get("sb-request-id", "") if upstream is not None else "",
             type(exc).__name__)
+        if upstream is not None and upstream.status_code == 400:
+            try:
+                error_body = upstream.json()
+            except (ValueError, AttributeError):
+                error_body = {}
+            code = str(error_body.get("code", "")) if isinstance(error_body, dict) else ""
+            message = str(error_body.get("message", "")).lower() if isinstance(error_body, dict) else ""
+            if code in {"42703", "PGRST204"} or ("column" in message and ("does not exist" in message or "could not find" in message)):
+                raise SupabaseSchemaUnavailable("An optional chat summary migration is not installed") from exc
         raise SupabaseOperationError(f"Supabase {method.lower()} {table} failed") from exc
 
 
@@ -604,7 +636,11 @@ def sb_record_login(user_id: int, username: str, first_name: str, login_type: st
         logger.warning("Supabase record login failed user_id=%s category=%s", user_id, type(exc).__name__)
 
 
-def sb_list_sessions(user_id: int, view: str = "recent") -> list:
+def sb_list_sessions(user_id: int, view: str = "recent", limit: int = 100, offset: int = 0) -> list:
+    if not isinstance(limit, int) or not 1 <= limit <= 101:
+        raise ValueError("Conversation page size is invalid")
+    if not isinstance(offset, int) or offset < 0:
+        raise ValueError("Conversation page offset must be zero or greater")
     view_filters = {
         "all": "",
         "recent": "&is_archived=eq.false",
@@ -628,10 +664,11 @@ def sb_list_sessions(user_id: int, view: str = "recent") -> list:
             rows = [r for r in rows if r.get("is_pinned", False) and not r.get("is_archived", False)]
         else:
             rows = [r for r in rows if r.get("is_archived", False)]
-        return rows
+        return rows[offset:offset + limit]
     rows = _sb_json(_sb_request("GET", "chat_sessions",
         params=(f"?user_id=eq.{user_id}&select=id,title,created_at,updated_at,last_message_at,is_saved,is_pinned,is_archived"
-                f"{view_filters[view]}&order=is_pinned.desc,last_message_at.desc.nullslast,created_at.desc&limit=100")), "chat_sessions")
+                f"{view_filters[view]}&order=is_pinned.desc,last_message_at.desc.nullslast,created_at.desc"
+                f"&limit={limit}&offset={offset}")), "chat_sessions")
     for row in rows:
         if row.get("title"):
             row["title"] = unmask_secure_hash(row["title"])
@@ -662,19 +699,167 @@ def sb_create_session(user_id: int, title: str, session_id: str | None = None) -
 
 
 def sb_get_session(session_id: str, user_id: int) -> dict | None:
+    global _CHAT_SUMMARY_SCHEMA_AVAILABLE
     if not (SUPABASE_URL and SUPABASE_KEY):
         _require_supabase_in_production()
+        _CHAT_SUMMARY_SCHEMA_AVAILABLE = False
         for s in MEM_SESSIONS.get(user_id, []):
             if s.get("id") == session_id:
                 return s
         return None
-    rows = _sb_json(_sb_request("GET", "chat_sessions",
-        params=f"?id=eq.{session_id}&user_id=eq.{user_id}&select=id,title,user_id"), "chat_sessions")
+    summary_columns = "context_summary,summary_through_message_id,summary_updated_at"
+    if _CHAT_SUMMARY_SCHEMA_AVAILABLE is not False:
+        try:
+            rows = _sb_json(_sb_request("GET", "chat_sessions",
+                params=f"?id=eq.{session_id}&user_id=eq.{user_id}&select=id,title,user_id,{summary_columns}"), "chat_sessions")
+            _CHAT_SUMMARY_SCHEMA_AVAILABLE = True
+        except SupabaseSchemaUnavailable:
+            _CHAT_SUMMARY_SCHEMA_AVAILABLE = False
+            rows = _sb_json(_sb_request("GET", "chat_sessions",
+                params=f"?id=eq.{session_id}&user_id=eq.{user_id}&select=id,title,user_id"), "chat_sessions")
+    else:
+        rows = _sb_json(_sb_request("GET", "chat_sessions",
+            params=f"?id=eq.{session_id}&user_id=eq.{user_id}&select=id,title,user_id"), "chat_sessions")
     if not rows:
         return None
     row = rows[0]
     row["title"] = unmask_secure_hash(row.get("title", ""))
+    if row.get("context_summary"):
+        row["context_summary"] = unmask_secure_hash(row["context_summary"])
     return row
+
+
+def sb_get_messages_after(session_id: str, user_id: int, after_id: int = 0, limit: int = 65) -> list:
+    """Read a bounded chronological slice after a persisted conversation summary."""
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        _require_supabase_in_production()
+        return []
+    if after_id < 0 or not 1 <= limit <= 100:
+        raise ValueError("Invalid summary message cursor")
+    rows = _sb_json(_sb_request("GET", "chat_messages",
+        params=(f"?session_id=eq.{session_id}&user_id=eq.{int(user_id)}&id=gt.{int(after_id)}"
+                f"&select=id,role,content,created_at&order=id.asc&limit={int(limit)}")), "chat_messages")
+    for row in rows:
+        if row.get("content"):
+            row["content"] = unmask_secure_hash(row["content"])
+    return rows
+
+
+def sb_update_session_summary(session_id: str, user_id: int, summary: str, through_message_id: int,
+                              expected_previous_id: int | None = None) -> bool:
+    """Persist an encrypted rolling summary without changing any existing chat rows."""
+    global _CHAT_SUMMARY_SCHEMA_AVAILABLE
+    if _CHAT_SUMMARY_SCHEMA_AVAILABLE is False:
+        return False
+    compare_cursor = "summary_through_message_id=is.null" if expected_previous_id is None else f"summary_through_message_id=eq.{int(expected_previous_id)}"
+    rows = _sb_json(_sb_request("PATCH", "chat_sessions",
+        params=f"?id=eq.{session_id}&user_id=eq.{int(user_id)}&{compare_cursor}",
+        json_body={
+            "context_summary": mask_secure_hash(summary),
+            "summary_through_message_id": int(through_message_id),
+            "summary_updated_at": datetime.now(timezone.utc).isoformat(),
+        }, prefer="return=representation"), "chat_sessions")
+    if not rows:
+        # Another worker advanced the summary cursor, or the owner removed the
+        # conversation. Leave the authoritative row untouched.
+        return False
+    _CHAT_SUMMARY_SCHEMA_AVAILABLE = True
+    return True
+
+
+_summary_workers_lock = threading.Lock()
+_summary_worker_locks: dict[tuple[str, int], threading.Lock] = {}
+
+
+def _refresh_chat_summary(session_id: str, user_id: int, worker_lock: threading.Lock) -> None:
+    """Compress old turns in the background so summary work never delays a reply."""
+    try:
+        for _ in range(4):
+            owner_session = sb_get_session(session_id, user_id)
+            if not owner_session:
+                return
+            if not owner_session.get("context_summary") and _CHAT_SUMMARY_SCHEMA_AVAILABLE is not True:
+                return
+            summary = owner_session.get("context_summary") or ""
+            previous_cursor = owner_session.get("summary_through_message_id")
+            through_id = int(previous_cursor or 0)
+            pending = sb_get_messages_after(session_id, user_id, through_id, limit=65)
+            if len(pending) <= 40:
+                return
+
+            # Preserve the latest 24 unsummarized messages verbatim in each model
+            # context. Summarize a bounded earlier batch and advance the cursor
+            # only through messages included in full.
+            batch_limit = min(len(pending) - 24, 40)
+            selected = []
+            source_chars = 0
+            for message in pending[:batch_limit]:
+                line_size = len(message.get("content") or "") + 20
+                if source_chars + line_size > 30000:
+                    break
+                selected.append(message)
+                source_chars += line_size
+            if not selected:
+                return
+
+            prior = f"Existing summary of older turns:\n{summary[:12000]}\n\n" if summary else ""
+            transcript = "\n".join(
+                f"{message['role']}: {message.get('content', '')}" for message in selected
+            )
+            summary_prompt = (
+                prior
+                + "Summarize the following earlier turns from one private study chat for future continuity. "
+                "Retain concrete facts, names, goals, chosen options, constraints, definitions, unresolved "
+                "questions, and references such as 'the second feature'. Do not invent details. Keep it concise.\n\n"
+                + transcript
+            )
+            updated_summary = study_bot.ai_call(
+                [{"role": "user", "content": summary_prompt}],
+                "You create accurate, compact conversation memory. Preserve important details and uncertainty.",
+                1200,
+            )
+            updated_summary = study_bot.clean_response(updated_summary or "").strip()
+            if not updated_summary:
+                return
+            if not sb_update_session_summary(
+                session_id,
+                user_id,
+                updated_summary[:16000],
+                int(selected[-1]["id"]),
+                expected_previous_id=int(previous_cursor) if previous_cursor is not None else None,
+            ):
+                return
+    except Exception as exc:
+        logger.warning("Chat summary refresh failed category=%s", type(exc).__name__)
+    finally:
+        worker_lock.release()
+        with _summary_workers_lock:
+            if _summary_worker_locks.get((session_id, user_id)) is worker_lock:
+                _summary_worker_locks.pop((session_id, user_id), None)
+
+
+def _schedule_chat_summary(session_id: str, user_id: int) -> None:
+    """Schedule at most one summary worker per owned conversation."""
+    if not _supabase_configured() or _CHAT_SUMMARY_SCHEMA_AVAILABLE is not True:
+        return
+    key = (session_id, int(user_id))
+    with _summary_workers_lock:
+        worker_lock = _summary_worker_locks.setdefault(key, threading.Lock())
+        if not worker_lock.acquire(blocking=False):
+            return
+    try:
+        threading.Thread(
+            target=_refresh_chat_summary,
+            args=(session_id, int(user_id), worker_lock),
+            name="chat-summary-refresh",
+            daemon=True,
+        ).start()
+    except RuntimeError as exc:
+        worker_lock.release()
+        with _summary_workers_lock:
+            if _summary_worker_locks.get(key) is worker_lock:
+                _summary_worker_locks.pop(key, None)
+        logger.warning("Chat summary worker could not start category=%s", type(exc).__name__)
 
 
 def sb_rename_session(session_id: str, user_id: int, title: str) -> None:
@@ -730,24 +915,36 @@ def sb_get_messages(session_id: str, user_id: int) -> list:
         if not any(s.get("id") == session_id for s in MEM_SESSIONS.get(user_id, [])):
             return []
         return list(MEM_MESSAGES.get(session_id, []))
-    msgs = _sb_json(_sb_request("GET", "chat_messages",
-        params=(f"?session_id=eq.{session_id}&user_id=eq.{int(user_id)}"
-                "&select=role,content,created_at&order=id.asc")), "chat_messages")
+    page_size = 500
+    msgs = []
+    offset = 0
+    while True:
+        page = _sb_json(_sb_request("GET", "chat_messages",
+            params=(f"?session_id=eq.{session_id}&user_id=eq.{int(user_id)}"
+                    f"&select=id,role,content,created_at&order=id.asc&limit={page_size}&offset={offset}")), "chat_messages")
+        msgs.extend(page)
+        if len(page) < page_size:
+            break
+        offset += page_size
     for m in msgs:
         if m.get("content"):
             m["content"] = unmask_secure_hash(m["content"])
     return msgs
 
 
-def sb_get_recent_messages(session_id: str, limit: int | None = 15, user_id: int | None = None) -> list:
+def sb_get_recent_messages(session_id: str, limit: int | None = 15, user_id: int | None = None,
+                           after_id: int | None = None) -> list:
     if not (SUPABASE_URL and SUPABASE_KEY):
         _require_supabase_in_production()
         if user_id is not None and not any(s.get("id") == session_id for s in MEM_SESSIONS.get(user_id, [])):
             return []
         all_msgs = MEM_MESSAGES.get(session_id, [])
+        if after_id is not None:
+            all_msgs = [message for message in all_msgs if int(message.get("id", 0)) > after_id]
         return list(all_msgs if limit is None else all_msgs[-limit:])
     if user_id is None:
         raise SupabaseOperationError("An authenticated owner is required to read chat messages")
+    id_filter = f"&id=gt.{int(after_id)}" if after_id is not None else ""
 
     if limit is None:
         # Read the full conversation in stable pages. Supabase projects often
@@ -758,8 +955,8 @@ def sb_get_recent_messages(session_id: str, limit: int | None = 15, user_id: int
         offset = 0
         while True:
             page = _sb_json(_sb_request("GET", "chat_messages",
-                params=(f"?session_id=eq.{session_id}&user_id=eq.{int(user_id)}"
-                        "&select=role,content,created_at"
+                params=(f"?session_id=eq.{session_id}&user_id=eq.{int(user_id)}{id_filter}"
+                        "&select=id,role,content,created_at"
                         f"&order=id.asc&limit={page_size}&offset={offset}")), "chat_messages")
             msgs.extend(page)
             if len(page) < page_size:
@@ -767,8 +964,8 @@ def sb_get_recent_messages(session_id: str, limit: int | None = 15, user_id: int
             offset += page_size
     else:
         raw_msgs = _sb_json(_sb_request("GET", "chat_messages",
-            params=(f"?session_id=eq.{session_id}&user_id=eq.{int(user_id)}"
-                    f"&select=role,content,created_at&order=id.desc&limit={limit}")), "chat_messages")
+            params=(f"?session_id=eq.{session_id}&user_id=eq.{int(user_id)}{id_filter}"
+                    f"&select=id,role,content,created_at&order=id.desc&limit={limit}")), "chat_messages")
         msgs = list(reversed(raw_msgs))
 
     for m in msgs:
@@ -1730,10 +1927,23 @@ def admin_health():
 def get_sessions():
     user_id = session["user_id"]
     view = request.args.get("view", "all")
+    paginated = "limit" in request.args or "offset" in request.args
     try:
-        return jsonify(sb_list_sessions(user_id, view=view))
-    except ValueError:
-        return jsonify({"error": "Unsupported conversation view"}), 400
+        limit = int(request.args.get("limit", "50")) if paginated else 100
+        offset = int(request.args.get("offset", "0")) if paginated else 0
+        if paginated and not 1 <= limit <= 100:
+            raise ValueError("Page size is invalid")
+        rows = sb_list_sessions(user_id, view=view, limit=limit + 1 if paginated else limit, offset=offset)
+        if not paginated:
+            return jsonify(rows)
+        page_rows = rows[:limit]
+        return jsonify({
+            "sessions": page_rows,
+            "has_more": len(rows) > limit,
+            "next_offset": offset + len(page_rows),
+        })
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid conversation view or page parameters"}), 400
 
 
 @app.route("/api/sessions", methods=["POST"])
@@ -1870,6 +2080,7 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
     Ensures identical sanitization, quota consumption, intent detection,
     and prompt construction without any code divergence.
     """
+    pipeline_started = time.perf_counter()
     session_id = data.get("session_id")
     # Unified contract: accept both 'message' and 'content'
     raw_content = data.get("message") or data.get("content") or ""
@@ -1897,10 +2108,12 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
         }), 403
 
     # Validate an existing session against the durable store before charging quota.
+    session_check_started = time.perf_counter()
     try:
         sess = sb_get_session(session_id, user_id) if session_id else None
     except SupabaseOperationError:
         return None, jsonify({"error": "Chat storage is temporarily unavailable. Please retry.", "code": "STORAGE_UNAVAILABLE", "retryable": True}), 503
+    session_validation_ms = round((time.perf_counter() - session_check_started) * 1000, 2)
     if session_id and not sess:
         return None, jsonify({"error": "Session not found", "code": "SESSION_NOT_FOUND"}), 404
 
@@ -1964,26 +2177,56 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
             sess = {"title": None}
             persistence_warning = True
 
-    user_message_saved = False
     if session_id:
         try:
             sb_insert_message(session_id, "user", content,
                 idempotency_key=data.get("idempotency_key"), user_id=user_id)
-            user_message_saved = True
         except SupabaseOperationError as exc:
             logger.warning("User message persistence failed request_id=%s category=%s", getattr(g, "request_id", ""), type(exc).__name__)
             persistence_warning = True
 
     # Include the current question even if its insert or the history read fails.
     messages_context = []
+    history_started = time.perf_counter()
     if session_id:
         try:
-            messages_context = [{"role": m["role"], "content": m["content"]}
-                for m in sb_get_recent_messages(session_id, None, user_id=user_id)]
+            summary_available = bool(sess and sess.get("context_summary"))
+            if summary_available:
+                summary_through_id = int(sess.get("summary_through_message_id") or 0)
+                history_rows = sb_get_recent_messages(
+                    session_id,
+                    41,
+                    user_id=user_id,
+                    after_id=summary_through_id,
+                )
+                # If summary refresh fell behind, temporarily load the entire
+                # unsummarized tail so no middle turns disappear from context.
+                if len(history_rows) == 41:
+                    history_rows = sb_get_recent_messages(
+                        session_id, None, user_id=user_id, after_id=summary_through_id
+                    )
+            else:
+                history_rows = sb_get_recent_messages(session_id, None, user_id=user_id)
+            messages_context = [{"role": m["role"], "content": m["content"]} for m in history_rows]
         except SupabaseOperationError as exc:
             logger.warning("Chat history read failed request_id=%s category=%s", getattr(g, "request_id", ""), type(exc).__name__)
-            persistence_warning = True
-    if not user_message_saved or not messages_context or messages_context[-1].get("content") != content:
+            try:
+                refund_user_quota(user_id)
+            except SupabaseOperationError:
+                logger.error("Quota refund failed after history read error request_id=%s", getattr(g, "request_id", ""))
+            return None, jsonify({
+                "error": "This chat's history is temporarily unavailable. Retry after the database reconnects.",
+                "code": "CHAT_HISTORY_UNAVAILABLE",
+                "retryable": True,
+            }), 503
+    history_fetch_ms = round((time.perf_counter() - history_started) * 1000, 2)
+    context_started = time.perf_counter()
+    current_turn_is_loaded = bool(
+        messages_context
+        and messages_context[-1].get("role") == "user"
+        and messages_context[-1].get("content") == content
+    )
+    if not current_turn_is_loaded:
         messages_context.append({"role": "user", "content": content})
 
     # Durable personal profile is loaded before model context is assembled.
@@ -2139,6 +2382,13 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
         "When the user says 'it', 'that', 'continue', or asks a follow-up, resolve it from the prior turns. "
         "Treat a new chat as a separate conversation."
     )
+    if sess and sess.get("context_summary"):
+        system_prompt += (
+            "\n\nEarlier turns from this same conversation are summarized below. Treat this as trusted "
+            "conversation context, reconcile it with the newer messages, and preserve specific names, "
+            "decisions, constraints, and unresolved questions.\n"
+            + sess["context_summary"][:16000]
+        )
 
     # Inject learning contexts
     liked_ctx = study_bot.get_liked_context(user_id, 5)
@@ -2152,6 +2402,7 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
     extra = "\n\n".join(c for c in (preference_context, liked_ctx) if c)
     if extra:
         system_prompt = system_prompt + "\n\n" + extra
+    context_build_ms = round((time.perf_counter() - context_started) * 1000, 2)
 
     return {
         "session_id": session_id,
@@ -2164,6 +2415,14 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
         "max_tok": max_tok,
         "quota_status": quota_status,
         "persistence_warning": persistence_warning,
+        "latency_ms": {
+            "auth_ms": getattr(g, "auth_validation_ms", None) if has_request_context() else None,
+            "security_validation_ms": getattr(g, "security_validation_ms", None) if has_request_context() else None,
+            "session_validation_ms": session_validation_ms,
+            "history_fetch_ms": history_fetch_ms,
+            "context_build_ms": context_build_ms,
+            "pipeline_ms": round((time.perf_counter() - pipeline_started) * 1000, 2),
+        },
     }, None, 200
 
 
@@ -2233,6 +2492,9 @@ def send_message():
         except SupabaseOperationError as exc:
             logger.warning("Session title update failed request_id=%s category=%s", getattr(g, "request_id", ""), type(exc).__name__)
             prep["persistence_warning"] = True
+
+    if assistant_saved and session_id and len(prep["messages_context"]) >= 40:
+        _schedule_chat_summary(session_id, user_id)
 
     # Return unified typed API response
     return jsonify({
@@ -2308,6 +2570,7 @@ def stream_message():
         persistence_started = False
         assistant_saved = False
         persistence_warning = prep["persistence_warning"]
+        model_started = time.perf_counter()
 
         try:
             for chunk in study_bot.ai_stream(
@@ -2329,6 +2592,7 @@ def stream_message():
 
             t_generation_done = time.perf_counter()
             ttft_ms = round((first_token_time - t_start) * 1000, 2) if first_token_time else round((t_generation_done - t_start) * 1000, 2)
+            model_ttft_ms = round((first_token_time - model_started) * 1000, 2) if first_token_time else round((t_generation_done - model_started) * 1000, 2)
 
             full_text = "".join(tokens)
             clean_text = study_bot.clean_response(full_text)
@@ -2363,10 +2627,33 @@ def stream_message():
                     logger.warning("Session title update failed request_id=%s category=%s", request_id, type(exc).__name__)
                     persistence_warning = True
 
+            if assistant_saved and session_id and len(prep["messages_context"]) >= 40:
+                _schedule_chat_summary(session_id, user_id)
+
             t_persist_done = time.perf_counter()
             total_duration_ms = round((t_persist_done - t_start) * 1000, 2)
-            generation_ms = round((t_generation_done - t_start) * 1000, 2)
+            generation_ms = round((t_generation_done - model_started) * 1000, 2)
             persistence_ms = round((t_persist_done - t_persist_start) * 1000, 2)
+            latency_metrics = {
+                **prep["latency_ms"],
+                "pre_gen_ms": pre_gen_ms,
+                "model_ttft_ms": model_ttft_ms,
+                "ttft_ms": ttft_ms,
+                "generation_ms": generation_ms,
+                "persistence_ms": persistence_ms,
+                "total_duration_ms": total_duration_ms,
+                "request_total_ms": total_duration_ms
+                    + (prep["latency_ms"].get("auth_ms") or 0)
+                    + (prep["latency_ms"].get("security_validation_ms") or 0),
+            }
+            logger.info(
+                "chat_latency request_id=%s model=%s history_messages=%s auth_ms=%s security_validation_ms=%s history_fetch_ms=%s "
+                "context_build_ms=%s model_ttft_ms=%s generation_ms=%s persistence_ms=%s total_ms=%s",
+                request_id, model_id, len(prep["messages_context"]), latency_metrics.get("auth_ms"),
+                latency_metrics.get("security_validation_ms"),
+                latency_metrics["history_fetch_ms"], latency_metrics["context_build_ms"],
+                model_ttft_ms, generation_ms, persistence_ms, total_duration_ms,
+            )
 
             yield json.dumps({
                 "type": "done",
@@ -2377,13 +2664,7 @@ def stream_message():
                 "usage": quota_status,
                 "persistence_warning": persistence_warning or not assistant_saved,
                 "request_id": request_id,
-                "latency_ms": {
-                    "pre_gen_ms": pre_gen_ms,
-                    "ttft_ms": ttft_ms,
-                    "generation_ms": generation_ms,
-                    "persistence_ms": persistence_ms,
-                    "total_duration_ms": total_duration_ms
-                }
+                "latency_ms": latency_metrics
             }) + "\n"
 
         except Exception as e:

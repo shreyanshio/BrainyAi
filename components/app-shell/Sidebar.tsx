@@ -27,6 +27,12 @@ interface SidebarProps {
   sessions: ChatSession[]
   activeSessionId: string | null
   onSelectSession: (sessionId: string) => void
+  sessionsLoading: boolean
+  sessionsError: string | null
+  sessionsHasMore: boolean
+  sessionsLoadingMore: boolean
+  onRetrySessions: () => void
+  onLoadMoreSessions: () => void
   onNewSession: () => void
   onRenameSession: (sessionId: string, newTitle: string) => void
   onDeleteSession: (sessionId: string) => void
@@ -47,6 +53,12 @@ export function Sidebar({
   sessions,
   activeSessionId,
   onSelectSession,
+  sessionsLoading,
+  sessionsError,
+  sessionsHasMore,
+  sessionsLoadingMore,
+  onRetrySessions,
+  onLoadMoreSessions,
   onNewSession,
   onRenameSession,
   onDeleteSession,
@@ -324,9 +336,20 @@ export function Sidebar({
 
         {/* Chat History List */}
         <div className="flex-1 overflow-y-auto px-3 py-3 scrollbar-thin">
-          {workspaceSessions.length === 0 ? (
+          {sessionsLoading && sessions.length === 0 ? (
+            <div className="text-center py-8 text-xs text-[var(--text-muted)]">Loading your chats…</div>
+          ) : sessionsError && sessions.length === 0 ? (
+            <div className="text-center py-6 text-xs text-rose-500">
+              <p>{sessionsError}</p>
+              <button onClick={onRetrySessions} className="mt-2 underline cursor-pointer">Retry</button>
+            </div>
+          ) : workspaceSessions.length === 0 ? (
             <div className="text-center py-8 text-xs text-[var(--text-muted)]">
-              {searchQuery ? 'No matching study chats' : `No ${workspace} chats`}
+              {sessionsError
+                ? <><p className="text-rose-500">{sessionsError}</p><button onClick={onRetrySessions} className="mt-2 underline cursor-pointer">Retry</button></>
+                : searchQuery
+                  ? (sessionsHasMore ? 'No matching chats in the loaded history' : 'No matching study chats')
+                  : (sessionsHasMore ? `No loaded ${workspace} chats` : `No ${workspace} chats`)}
             </div>
           ) : (
             <>
@@ -335,6 +358,21 @@ export function Sidebar({
               {renderGroup('Previous 7 Days', groupedSessions.prev7Days)}
               {renderGroup('Older', groupedSessions.older)}
             </>
+          )}
+          {sessionsError && sessions.length > 0 && (
+            <div className="text-center py-2 text-[10px] text-rose-500">
+              <span>{sessionsError}</span>{' '}
+              <button onClick={onRetrySessions} className="underline cursor-pointer">Retry</button>
+            </div>
+          )}
+          {sessionsHasMore && (
+            <button
+              onClick={onLoadMoreSessions}
+              disabled={sessionsLoadingMore}
+              className="w-full mt-2 rounded-lg py-2 text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] disabled:opacity-50 cursor-pointer"
+            >
+              {sessionsLoadingMore ? 'Loading older chats…' : 'Load older chats'}
+            </button>
           )}
         </div>
 

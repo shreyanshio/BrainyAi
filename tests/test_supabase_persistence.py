@@ -1,5 +1,7 @@
 """Regression tests for durable chat reads and writes (mocked PostgREST)."""
 import unittest
+import os
+import re
 from unittest.mock import patch
 from requests import HTTPError
 
@@ -56,11 +58,100 @@ class SupabasePersistenceTests(unittest.TestCase):
 
         request.side_effect = None
         request.return_value = FakeResponse([{
-            "role": "assistant", "content": "Saved answer", "created_at": "2026-10-18T00:00:00Z"
+            "id": 42, "role": "assistant", "content": "Saved answer", "created_at": "2026-10-18T00:00:00Z"
         }])
         rows = app.sb_get_messages("session", 123)
         self.assertEqual(rows[0]["content"], "Saved answer")
+        self.assertEqual(rows[0]["id"], 42)
         self.assertIn("user_id=eq.123", request.call_args.args[1])
+        self.assertIn("select=id,role,content,created_at", request.call_args.args[1])
+
+    @patch("app.requests.request")
+    def test_history_read_pages_past_the_supabase_row_limit(self, request):
+        first_page = [
+            {"id": index, "role": "assistant", "content": f"answer-{index}", "created_at": "2026-10-18T00:00:00Z"}
+            for index in range(1, 501)
+        ]
+        last_page = [{"id": 501, "role": "assistant", "content": "answer-501", "created_at": "2026-10-18T00:00:00Z"}]
+        request.side_effect = [FakeResponse(first_page), FakeResponse(last_page)]
+
+        history = app.sb_get_messages("session", 123)
+
+        self.assertEqual(len(history), 501)
+        self.assertEqual(history[0]["id"], 1)
+        self.assertEqual(history[-1]["id"], 501)
+        self.assertIn("offset=500", request.call_args_list[1].args[1])
+
+    def test_conversation_list_pagination_reaches_older_chats(self):
+        app.SUPABASE_URL, app.SUPABASE_KEY = "", ""
+        client = app.app.test_client()
+        client.post("/api/auth/web", json={"name": "Paged Owner", "username": "paged_owner"})
+        for title in ("Chat A", "Chat B", "Chat C", "Chat D", "Chat E"):
+            self.assertEqual(client.post("/api/sessions", json={"title": title}).status_code, 200)
+
+        first = client.get("/api/sessions?limit=2&offset=0").get_json()
+        second = client.get("/api/sessions?limit=2&offset=2").get_json()
+        third = client.get("/api/sessions?limit=2&offset=4").get_json()
+        self.assertEqual(len(first["sessions"]), 2)
+        self.assertTrue(first["has_more"])
+        self.assertTrue(second["has_more"])
+        self.assertFalse(third["has_more"])
+        ids = [row["id"] for page in (first, second, third) for row in page["sessions"]]
+        self.assertEqual(len(ids), 5)
+        self.assertEqual(len(set(ids)), 5)
+        self.assertEqual(third["next_offset"], 5)
+
+    def test_previous_chat_encryption_key_can_read_existing_content(self):
+        with patch("app._get_auth_secret_key", return_value="old-chat-key"):
+            stored = app.mask_secure_hash("A saved earlier question")
+        with patch("app._get_auth_secret_key", return_value="new-chat-key"), \
+             patch.dict(os.environ, {"CHAT_ENCRYPTION_PREVIOUS_KEY": "old-chat-key"}):
+            self.assertEqual(app.unmask_secure_hash(stored), "A saved earlier question")
+
+    def test_unreadable_encrypted_chat_text_fails_closed_without_returning_payload(self):
+        with patch("app._get_auth_secret_key", return_value="original-key"):
+            stored = app.mask_secure_hash("Private historical message")
+        with patch("app._get_auth_secret_key", return_value="different-key"), \
+             patch.dict(os.environ, {"CHAT_ENCRYPTION_PREVIOUS_KEY": ""}):
+            with self.assertRaises(app.StoredChatContentUnavailable) as raised:
+                app.unmask_secure_hash(stored)
+        self.assertNotIn(stored, str(raised.exception))
+        self.assertNotRegex(str(raised.exception), re.compile(r"hsh_v1_"))
+
+    @patch("app._sb_request")
+    def test_chat_session_read_falls_back_cleanly_before_optional_summary_migration(self, request):
+        old_schema_state = app._CHAT_SUMMARY_SCHEMA_AVAILABLE
+        app._CHAT_SUMMARY_SCHEMA_AVAILABLE = None
+        request.side_effect = [
+            app.SupabaseSchemaUnavailable("optional migration missing"),
+            FakeResponse([{"id": "session", "title": "Existing title", "user_id": 123}]),
+        ]
+        try:
+            row = app.sb_get_session("session", 123)
+            schema_after = app._CHAT_SUMMARY_SCHEMA_AVAILABLE
+        finally:
+            app._CHAT_SUMMARY_SCHEMA_AVAILABLE = old_schema_state
+        self.assertEqual(row["title"], "Existing title")
+        self.assertFalse(schema_after)
+        self.assertIn("context_summary", request.call_args_list[0].kwargs["params"])
+        self.assertNotIn("context_summary", request.call_args_list[1].kwargs["params"])
+
+    @patch("app._sb_request")
+    def test_rolling_summary_write_is_owner_scoped_and_encrypted(self, request):
+        old_schema_state = app._CHAT_SUMMARY_SCHEMA_AVAILABLE
+        app._CHAT_SUMMARY_SCHEMA_AVAILABLE = True
+        request.return_value = FakeResponse([{"id": "session"}])
+        try:
+            saved = app.sb_update_session_summary("session", 123, "The user is building a study app.", 81)
+        finally:
+            app._CHAT_SUMMARY_SCHEMA_AVAILABLE = old_schema_state
+        self.assertTrue(saved)
+        self.assertIn("id=eq.session&user_id=eq.123", request.call_args.kwargs["params"])
+        self.assertIn("summary_through_message_id=is.null", request.call_args.kwargs["params"])
+        payload = request.call_args.kwargs["json_body"]
+        self.assertTrue(payload["context_summary"].startswith("hsh_v1_"))
+        self.assertNotIn("study app", payload["context_summary"])
+        self.assertEqual(payload["summary_through_message_id"], 81)
 
     @patch("app.requests.request")
     def test_public_health_reports_database_connectivity_without_secrets(self, request):

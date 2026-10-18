@@ -46,10 +46,11 @@ export function MessageList({
     <div className={`w-full ${maxWidthClass} mx-auto px-4 py-6 space-y-6`}>
       {messages.map((msg, idx) => {
         const isUser = msg.role === 'user'
+        const messageKey = msg.id ?? `${msg.role}-${msg.created_at || 'pending'}-${idx}`
 
         if (isUser) {
           return (
-            <div key={idx} className="flex justify-end items-start gap-2.5">
+            <div key={messageKey} className="flex justify-end items-start gap-2.5">
               <div className="max-w-[85%] sm:max-w-[75%] rounded-2xl rounded-tr-xs bg-zinc-900 text-white dark:bg-zinc-800 border border-zinc-800 dark:border-zinc-700/60 px-4 py-2.5 text-xs sm:text-sm leading-relaxed shadow-xs break-words">
                 {msg.content}
               </div>
@@ -63,7 +64,7 @@ export function MessageList({
         const isStreaming = Boolean(msg.isStreaming)
 
         return (
-          <div key={idx} className="flex items-start gap-3">
+          <div key={messageKey} className="flex items-start gap-3">
             <div className="w-7 h-7 rounded-lg bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 flex items-center justify-center font-bold text-xs flex-shrink-0 mt-0.5">
               B
             </div>

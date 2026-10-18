@@ -316,6 +316,7 @@ def login_required(f):
     """
     @wraps(f)
     def decorated(*args, **kwargs):
+        auth_started = time.perf_counter()
         g.request_id = getattr(g, "request_id", None) or uuid.uuid4().hex
         # 0. Allow OPTIONS preflight through immediately
         if request.method == "OPTIONS":
@@ -333,11 +334,13 @@ def login_required(f):
                 session["email"] = payload.get("email", "")
                 session["role"] = payload.get("role", "student")
                 request.authenticated_user_id = payload["sub"]
+                g.auth_validation_ms = round((time.perf_counter() - auth_started) * 1000, 2)
                 return f(*args, **kwargs)
 
         # 2. Check Flask session cookie
         if "user_id" in session:
             request.authenticated_user_id = session["user_id"]
+            g.auth_validation_ms = round((time.perf_counter() - auth_started) * 1000, 2)
             return f(*args, **kwargs)
 
         response = jsonify({"error": "Authentication required", "request_id": g.request_id})
@@ -360,6 +363,7 @@ def security_guard(f):
 
     @wraps(f)
     def decorated(*args, **kwargs):
+        guard_started = time.perf_counter()
         ip = request.remote_addr or "unknown"
         g.request_id = getattr(g, "request_id", None) or uuid.uuid4().hex
 
@@ -398,6 +402,7 @@ def security_guard(f):
                     log_security_event("blacklist_match", ip, session.get("user_id"), f"POST param: {key}")
                     return jsonify({"error": "Invalid input detected", "request_id": g.request_id}), 403
 
+        g.security_validation_ms = round((time.perf_counter() - guard_started) * 1000, 2)
         result = f(*args, **kwargs)
         response = result[0] if isinstance(result, tuple) else result
         if hasattr(response, "headers"):

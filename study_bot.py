@@ -172,6 +172,8 @@ def _collect_keys(prefix: str, count: int = 10) -> list:
 
 # ── API Keys (supports singular GROQ_API_KEY and multi-key GROQ_API_KEY_1..N) ──
 GROQ_API_KEYS       = _collect_keys("GROQ_API_KEY", 10)
+GROQ_FAST_MODEL = (os.getenv("GROQ_MODEL_FAST") or "openai/gpt-oss-20b").strip()
+GROQ_BALANCED_MODEL = (os.getenv("GROQ_MODEL_BALANCED") or "openai/gpt-oss-120b").strip()
 NVIDIA_API_KEYS     = _collect_keys("NVIDIA_API_KEY", 10)
 DEEPSEEK_API_KEYS   = _collect_keys("DEEPSEEK_API_KEY", 10)
 GEMINI_API_KEYS     = _collect_keys("GEMINI_API_KEY", 10)
@@ -1192,8 +1194,9 @@ def _call_groq(messages, system_prompt, max_tokens):
             key = _rotate_key("groq", GROQ_API_KEYS)
             client = _get_groq_client(key)
             kwargs = dict(
-                model="llama-3.3-70b-versatile",
-                max_tokens=max_tokens,
+                model=GROQ_BALANCED_MODEL,
+                max_completion_tokens=max_tokens,
+                reasoning_effort="medium",
                 messages=[{"role": "system", "content": system_prompt}] + messages
             )
             if system_prompt == QUIZ_SYSTEM_PROMPT:
@@ -1212,11 +1215,9 @@ def _stream_groq(messages, system_prompt, max_tokens, model_id=None):
     if not GROQ_API_KEYS:
         raise Exception("NO_KEYS: groq")
 
-    # High performance model routing
-    if model_id == "brainy-fast":
-        model_name = "llama-3.1-8b-instant"
-    else:
-        model_name = "llama-3.3-70b-versatile"
+    # Model IDs are configurable in Railway, with active Groq models as defaults.
+    fast = model_id == "brainy-fast"
+    model_name = GROQ_FAST_MODEL if fast else GROQ_BALANCED_MODEL
 
     for _ in range(len(GROQ_API_KEYS)):
         try:
@@ -1224,7 +1225,8 @@ def _stream_groq(messages, system_prompt, max_tokens, model_id=None):
             client = _get_groq_client(key)
             kwargs = dict(
                 model=model_name,
-                max_tokens=max_tokens or 1024,
+                max_completion_tokens=max_tokens or 1024,
+                reasoning_effort="low" if fast else "medium",
                 messages=[{"role": "system", "content": system_prompt}] + messages,
                 stream=True
             )
