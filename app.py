@@ -38,6 +38,7 @@ from security import (
     is_blacklisted, check_rate_limit, rate_limit_retry_after, log_security_event, security_headers,
     create_auth_token, verify_auth_token, _get_auth_secret_key, RateLimitStoreUnavailable
 )
+from security import _is_production
 
 app = Flask(__name__)
 
@@ -172,11 +173,52 @@ def handle_uncaught(e):
     from werkzeug.exceptions import HTTPException
     if isinstance(e, HTTPException):
         return e
-    log_security_event("uncaught_exception", request.remote_addr or "unknown", session.get("user_id"), str(e)[:200])
+    log_security_event("uncaught_exception", request.remote_addr or "unknown", session.get("user_id"), type(e).__name__)
     return jsonify({"error": "Unexpected error. Please try again."}), 500
 
 SUPABASE_URL = (os.getenv("SUPABASE_URL") or study_bot.SUPABASE_URL or "").rstrip("/")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY") or study_bot.SUPABASE_KEY
+
+
+def _supabase_configured() -> bool:
+    return bool(SUPABASE_URL and SUPABASE_KEY)
+
+
+def _require_supabase_in_production() -> None:
+    if _is_production() and not _supabase_configured():
+        raise SupabaseOperationError("Supabase credentials are not configured")
+
+
+@app.route("/api/health", methods=["GET"])
+def api_health():
+    """Public liveness check with a credential-free Supabase connectivity status."""
+    database_status = "unconfigured"
+    latency_ms = None
+    if _supabase_configured():
+        started = time.perf_counter()
+        try:
+            _sb_request("GET", "chat_sessions", params="?select=id&limit=1", timeout=5)
+            database_status = "connected"
+        except SupabaseOperationError:
+            database_status = "unavailable"
+        latency_ms = round((time.perf_counter() - started) * 1000, 2)
+    healthy = database_status == "connected"
+    return jsonify({
+        "status": "healthy" if healthy else "degraded",
+        "database": {"status": database_status, "latency_ms": latency_ms},
+    }), 200
+
+
+def _memory_storage_error(exc: Exception):
+    """Return a safe retryable response when per-user memory persistence fails."""
+    logger.error("User memory operation failed request_id=%s category=%s",
+        getattr(g, "request_id", ""), type(exc).__name__)
+    return jsonify({
+        "error": "Your saved profile is temporarily unavailable. Please retry.",
+        "code": "MEMORY_STORAGE_UNAVAILABLE",
+        "retryable": True,
+        "request_id": getattr(g, "request_id", None),
+    }), 503
 
 # ── SECURE HASH ENCRYPTION FOR CHAT TITLES & USER QUESTIONS ──
 # Prevents sensitive user questions and chat titles from leaking if the Supabase database is dumped
@@ -302,6 +344,7 @@ def _quota_rpc(name: str, body: dict) -> dict:
 def get_user_quota(user_id: int | str) -> dict:
     """Read or initialize quota state using the shared atomic Supabase store."""
     if not (SUPABASE_URL and SUPABASE_KEY):
+        _require_supabase_in_production()
         logger.warning("Supabase unconfigured; using local development quota fallback")
         return _dev_get_quota(user_id)
     try:
@@ -334,6 +377,7 @@ def get_user_quota(user_id: int | str) -> dict:
 def consume_user_quota(user_id: int | str) -> tuple[bool, dict]:
     """Atomically consume a credit across workers and return current usage."""
     if not (SUPABASE_URL and SUPABASE_KEY):
+        _require_supabase_in_production()
         logger.warning("Supabase unconfigured; using local development quota fallback")
         return _dev_consume_quota(user_id)
     try:
@@ -352,6 +396,7 @@ def consume_user_quota(user_id: int | str) -> tuple[bool, dict]:
 def refund_user_quota(user_id: int | str) -> dict:
     """Refund one previously consumed credit after a pre-generation failure."""
     if not (SUPABASE_URL and SUPABASE_KEY):
+        _require_supabase_in_production()
         logger.warning("Supabase unconfigured; using local development quota fallback")
         return _dev_refund_quota(user_id)
     try:
@@ -471,11 +516,11 @@ MEM_LOGINS = []    # [ { user_id, username, first_name, login_type, ip_address, 
 # ── SUPABASE HELPERS (chat_sessions / chat_messages / user_logins) ──
 
 def _sb_headers(prefer: str | None = None) -> dict:
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
-    }
+    headers = {"apikey": SUPABASE_KEY, "Content-Type": "application/json"}
+    # Supabase's newer sb_secret_* keys are API keys, not JWTs; sending one as
+    # a Bearer token fails JWT validation. Legacy service_role JWTs need both.
+    if not SUPABASE_KEY.startswith("sb_secret_"):
+        headers["Authorization"] = f"Bearer {SUPABASE_KEY}"
     if prefer:
         headers["Prefer"] = prefer
     return headers
@@ -483,6 +528,20 @@ def _sb_headers(prefer: str | None = None) -> dict:
 
 class SupabaseOperationError(RuntimeError):
     """A configured Supabase operation failed; never treat it as empty data."""
+
+
+@app.errorhandler(SupabaseOperationError)
+def handle_supabase_operation_error(exc):
+    """Return a safe, consistent response for a failed Supabase operation."""
+    request_id = getattr(g, "request_id", None)
+    logger.error("Supabase operation failed request_id=%s category=%s",
+        request_id or "", type(exc).__name__)
+    return jsonify({
+        "error": "Database service is temporarily unavailable. Please retry.",
+        "code": "SUPABASE_UNAVAILABLE",
+        "retryable": True,
+        "request_id": request_id,
+    }), 503
 
 
 def _sb_request(method: str, table: str, *, params: str = "", json_body=None,
@@ -542,15 +601,17 @@ def sb_record_login(user_id: int, username: str, first_name: str, login_type: st
     try:
         _sb_request("POST", "user_logins", json_body=payload, prefer="return=minimal", timeout=5)
     except Exception as exc:
-        logger.warning("Supabase record login failed for user_id=%s (non-fatal): %s", user_id, exc)
+        logger.warning("Supabase record login failed user_id=%s category=%s", user_id, type(exc).__name__)
 
 
 def sb_list_sessions(user_id: int) -> list:
     if not (SUPABASE_URL and SUPABASE_KEY):
+        _require_supabase_in_production()
         logger.warning("Supabase unconfigured; using in-memory sessions for dev")
         return list(MEM_SESSIONS.get(user_id, []))
     rows = _sb_json(_sb_request("GET", "chat_sessions",
-        params=f"?user_id=eq.{user_id}&select=id,title,created_at&order=created_at.desc"), "chat_sessions")
+        params=(f"?user_id=eq.{user_id}&select=id,title,created_at,updated_at,last_message_at"
+                "&order=last_message_at.desc.nullslast,created_at.desc")), "chat_sessions")
     for row in rows:
         if row.get("title"):
             row["title"] = unmask_secure_hash(row["title"])
@@ -562,6 +623,7 @@ def sb_create_session(user_id: int, title: str, session_id: str | None = None) -
         session_id = str(uuid.uuid4())
     sess_obj = {"id": session_id, "user_id": user_id, "title": title, "created_at": datetime.now(timezone.utc).isoformat()}
     if not (SUPABASE_URL and SUPABASE_KEY):
+        _require_supabase_in_production()
         logger.warning("Supabase unconfigured; using in-memory session for dev")
         MEM_SESSIONS.setdefault(user_id, []).insert(0, sess_obj)
         return sess_obj
@@ -581,6 +643,7 @@ def sb_create_session(user_id: int, title: str, session_id: str | None = None) -
 
 def sb_get_session(session_id: str, user_id: int) -> dict | None:
     if not (SUPABASE_URL and SUPABASE_KEY):
+        _require_supabase_in_production()
         for s in MEM_SESSIONS.get(user_id, []):
             if s.get("id") == session_id:
                 return s
@@ -596,6 +659,7 @@ def sb_get_session(session_id: str, user_id: int) -> dict | None:
 
 def sb_rename_session(session_id: str, user_id: int, title: str) -> None:
     if not (SUPABASE_URL and SUPABASE_KEY):
+        _require_supabase_in_production()
         for s in MEM_SESSIONS.get(user_id, []):
             if s["id"] == session_id:
                 s["title"] = title
@@ -612,6 +676,7 @@ def sb_rename_session(session_id: str, user_id: int, title: str) -> None:
 
 def sb_delete_session(session_id: str, user_id: int) -> None:
     if not (SUPABASE_URL and SUPABASE_KEY):
+        _require_supabase_in_production()
         MEM_SESSIONS[user_id] = [s for s in MEM_SESSIONS.get(user_id, []) if s["id"] != session_id]
         MEM_MESSAGES.pop(session_id, None)
         return
@@ -620,21 +685,30 @@ def sb_delete_session(session_id: str, user_id: int) -> None:
     MEM_MESSAGES.pop(session_id, None)
 
 
-def sb_get_messages(session_id: str) -> list:
+def sb_get_messages(session_id: str, user_id: int) -> list:
     if not (SUPABASE_URL and SUPABASE_KEY):
+        _require_supabase_in_production()
+        if not any(s.get("id") == session_id for s in MEM_SESSIONS.get(user_id, [])):
+            return []
         return list(MEM_MESSAGES.get(session_id, []))
     msgs = _sb_json(_sb_request("GET", "chat_messages",
-        params=f"?session_id=eq.{session_id}&select=role,content,created_at&order=id.asc"), "chat_messages")
+        params=(f"?session_id=eq.{session_id}&user_id=eq.{int(user_id)}"
+                "&select=role,content,created_at&order=id.asc")), "chat_messages")
     for m in msgs:
         if m.get("content"):
             m["content"] = unmask_secure_hash(m["content"])
     return msgs
 
 
-def sb_get_recent_messages(session_id: str, limit: int | None = 15) -> list:
+def sb_get_recent_messages(session_id: str, limit: int | None = 15, user_id: int | None = None) -> list:
     if not (SUPABASE_URL and SUPABASE_KEY):
+        _require_supabase_in_production()
+        if user_id is not None and not any(s.get("id") == session_id for s in MEM_SESSIONS.get(user_id, [])):
+            return []
         all_msgs = MEM_MESSAGES.get(session_id, [])
         return list(all_msgs if limit is None else all_msgs[-limit:])
+    if user_id is None:
+        raise SupabaseOperationError("An authenticated owner is required to read chat messages")
 
     if limit is None:
         # Read the full conversation in stable pages. Supabase projects often
@@ -645,7 +719,8 @@ def sb_get_recent_messages(session_id: str, limit: int | None = 15) -> list:
         offset = 0
         while True:
             page = _sb_json(_sb_request("GET", "chat_messages",
-                params=(f"?session_id=eq.{session_id}&select=role,content,created_at"
+                params=(f"?session_id=eq.{session_id}&user_id=eq.{int(user_id)}"
+                        "&select=role,content,created_at"
                         f"&order=id.asc&limit={page_size}&offset={offset}")), "chat_messages")
             msgs.extend(page)
             if len(page) < page_size:
@@ -653,7 +728,8 @@ def sb_get_recent_messages(session_id: str, limit: int | None = 15) -> list:
             offset += page_size
     else:
         raw_msgs = _sb_json(_sb_request("GET", "chat_messages",
-            params=f"?session_id=eq.{session_id}&select=role,content,created_at&order=id.desc&limit={limit}"), "chat_messages")
+            params=(f"?session_id=eq.{session_id}&user_id=eq.{int(user_id)}"
+                    f"&select=role,content,created_at&order=id.desc&limit={limit}")), "chat_messages")
         msgs = list(reversed(raw_msgs))
 
     for m in msgs:
@@ -662,16 +738,28 @@ def sb_get_recent_messages(session_id: str, limit: int | None = 15) -> list:
     return msgs
 
 
-def sb_insert_message(session_id: str, role: str, content: str, idempotency_key: str | None = None) -> None:
+def sb_insert_message(session_id: str, role: str, content: str,
+                      idempotency_key: str | None = None, user_id: int | None = None) -> None:
     msg_obj = {"role": role, "content": content, "created_at": datetime.now(timezone.utc).isoformat()}
     if idempotency_key:
         msg_obj["idempotency_key"] = idempotency_key
     if not (SUPABASE_URL and SUPABASE_KEY):
+        _require_supabase_in_production()
+        if user_id is not None and not any(s.get("id") == session_id for s in MEM_SESSIONS.get(user_id, [])):
+            raise SupabaseOperationError("Session is not owned by the authenticated user")
         logger.warning("Supabase unconfigured; using in-memory message storage for dev")
         MEM_MESSAGES.setdefault(session_id, []).append(msg_obj)
         return
+    if user_id is None:
+        owner_rows = _sb_json(_sb_request("GET", "chat_sessions",
+            params=f"?id=eq.{session_id}&select=user_id&limit=1"), "chat_sessions")
+        if not owner_rows:
+            raise SupabaseOperationError("Session was not found")
+        user_id = owner_rows[0].get("user_id")
+    if user_id is None:
+        raise SupabaseOperationError("Session owner could not be determined")
     stored_content = mask_secure_hash(content) if role == "user" else content
-    payload = {"session_id": session_id, "role": role, "content": stored_content}
+    payload = {"session_id": session_id, "user_id": int(user_id), "role": role, "content": stored_content}
     if idempotency_key:
         payload["idempotency_key"] = idempotency_key
     if idempotency_key:
@@ -1131,6 +1219,11 @@ def auth_initdata():
 @security_guard
 def auth_web():
     """Handle direct web login with Name and optional Username."""
+    if _is_production():
+        return jsonify({
+            "error": "Name-only sign-in is not available in production. Use Google or Telegram login.",
+            "code": "UNVERIFIED_LOGIN_DISABLED",
+        }), 403
     data = request.json or {}
     name = (data.get("name") or "").strip()
     username = (data.get("username") or "").strip()
@@ -1152,7 +1245,7 @@ def auth_web():
     try:
         study_bot.load_user_into_memory(user_id, name, username)
     except Exception as me:
-        logger.warning("Could not sync user memory for user_id=%s during web auth (non-fatal): %s", user_id, me)
+        logger.warning("Could not sync user memory during web auth user_id=%s category=%s", user_id, type(me).__name__)
 
     # Record login in Supabase user_logins table
     sb_record_login(
@@ -1219,16 +1312,19 @@ def auth_me():
 
 @app.route("/api/auth/google", methods=["POST"])
 def auth_google():
-    """Handle Google Identity Services login credential token.
-    Supports local google.oauth2 verification, public tokeninfo fallback, and userinfo fallback.
-    """
+    """Verify a Google Identity Services ID token and create a Brainy app session."""
     data = request.json or {}
     token = data.get("credential")
     if not token:
         return jsonify({"error": "Missing Google credential token"}), 400
 
     id_info = None
-    google_client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip() or "793579888403-76l0ls9vr4jjrjshmmdbue6apsiabhpk.apps.googleusercontent.com"
+    google_client_id = os.environ.get("GOOGLE_CLIENT_ID", "").strip()
+    if not google_client_id:
+        return jsonify({
+            "error": "Google sign-in is not configured on the server.",
+            "code": "GOOGLE_AUTH_NOT_CONFIGURED",
+        }), 503
 
     # 1. Attempt verification with client ID if configured
     if google_client_id:
@@ -1239,57 +1335,87 @@ def auth_google():
                 token, google_requests.Request(), google_client_id
             )
         except Exception as e:
-            logger.warning("Google token verification with client ID failed: %s", e)
+            logger.warning("Google ID token verification failed category=%s", type(e).__name__)
 
-    # 2. Resilient fallback: verify signature and payload directly with Google's public tokeninfo endpoint (id_token)
+    # 2. Verify ID-token fallback with Google's tokeninfo endpoint.
     if not id_info:
         try:
-            g_resp = requests.get(f"https://oauth2.googleapis.com/tokeninfo?id_token={token}", timeout=8)
+            g_resp = requests.get("https://oauth2.googleapis.com/tokeninfo",
+                params={"id_token": token}, timeout=8)
             if g_resp.status_code == 200:
                 id_info = g_resp.json()
             else:
-                logger.warning("Google tokeninfo returned status %s: %s", g_resp.status_code, g_resp.text[:150])
+                logger.info("Google ID-token verification fallback status=%s", g_resp.status_code)
         except Exception as ge:
-            logger.warning("Call to Google tokeninfo failed: %s", ge)
+            logger.warning("Google ID-token verification fallback failed category=%s", type(ge).__name__)
 
-    # 3. Resilient fallback: check userinfo endpoint if it is an access_token
+    # 3. Preserve the repository's legacy browser redirect flow, which returns
+    # an OAuth access token when the GIS button cannot load. Accept it only if
+    # Google's tokeninfo binds it to this exact client and its userinfo subject
+    # matches Google's tokeninfo user ID. Never accept unverified userinfo alone.
     if not id_info:
         try:
-            u_resp = requests.get(
-                "https://www.googleapis.com/oauth2/v3/userinfo",
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=8
-            )
-            if u_resp.status_code == 200:
-                id_info = u_resp.json()
-                if "email_verified" not in id_info and id_info.get("email"):
-                    id_info["email_verified"] = True
+            access_resp = requests.get("https://oauth2.googleapis.com/tokeninfo",
+                params={"access_token": token}, timeout=8)
+            if access_resp.status_code == 200:
+                access_info = access_resp.json()
+                audience = access_info.get("issued_to") or access_info.get("audience") or access_info.get("aud")
+                try:
+                    expires_in = int(access_info.get("expires_in", 0))
+                except (TypeError, ValueError):
+                    expires_in = 0
+                token_user_id = access_info.get("user_id") or access_info.get("sub")
+                if audience == google_client_id and expires_in > 0 and token_user_id:
+                    profile_resp = requests.get("https://www.googleapis.com/oauth2/v3/userinfo",
+                        headers={"Authorization": f"Bearer {token}"}, timeout=8)
+                    if profile_resp.status_code == 200:
+                        profile_info = profile_resp.json()
+                        if (profile_info.get("sub") == token_user_id
+                                and profile_info.get("email")
+                                and profile_info.get("email_verified") in (True, "true", "True", 1, "1")):
+                            id_info = {
+                                "sub": profile_info["sub"],
+                                "email": profile_info["email"],
+                                "email_verified": profile_info["email_verified"],
+                                "name": profile_info.get("name"),
+                                "picture": profile_info.get("picture", ""),
+                                "aud": google_client_id,
+                                "iss": "https://accounts.google.com",
+                                "exp": int(time.time()) + expires_in,
+                            }
+                        else:
+                            logger.warning("Google access-token profile subject or email verification mismatch")
+                    else:
+                        logger.warning("Google userinfo returned status=%s", profile_resp.status_code)
+                else:
+                    logger.warning("Google access token rejected for client, expiry, or subject mismatch")
             else:
-                logger.warning("Google userinfo returned status %s: %s", u_resp.status_code, u_resp.text[:150])
-        except Exception as ue:
-            logger.warning("Call to Google userinfo failed: %s", ue)
-
-    # 4. Fallback: check tokeninfo for access_token
-    if not id_info:
-        try:
-            a_resp = requests.get(f"https://oauth2.googleapis.com/tokeninfo?access_token={token}", timeout=8)
-            if a_resp.status_code == 200:
-                id_info = a_resp.json()
-                if "email_verified" not in id_info and id_info.get("email"):
-                    id_info["email_verified"] = True
-        except Exception as ae:
-            logger.warning("Call to Google access tokeninfo failed: %s", ae)
+                logger.warning("Google access-token verification returned status=%s", access_resp.status_code)
+        except Exception as ge:
+            logger.warning("Google access-token verification failed category=%s", type(ge).__name__)
 
     if not id_info:
         return jsonify({"error": "Google token verification failed. Please try again or use Telegram login."}), 401
 
+    issuer = id_info.get("iss")
+    try:
+        token_expiry = int(id_info.get("exp", 0))
+    except (TypeError, ValueError):
+        token_expiry = 0
+    if (id_info.get("aud") != google_client_id
+            or issuer not in ("accounts.google.com", "https://accounts.google.com")
+            or token_expiry <= int(time.time())
+            or not id_info.get("sub")):
+        logger.warning("Google ID token rejected for invalid audience, issuer, expiry, or subject")
+        return jsonify({"error": "Google token is invalid or intended for another application."}), 401
+
     email_verified = id_info.get("email_verified")
-    if email_verified not in (True, "true", "True", 1, "1") and not id_info.get("email"):
+    if email_verified not in (True, "true", "True", 1, "1"):
         return jsonify({"error": "Google account email is not verified."}), 401
 
-    email = id_info.get("email", "")
+    email = (id_info.get("email") or "").strip().lower()
     name = id_info.get("name") or (email.split("@")[0] if email else "Google Student")
-    google_sub = id_info.get("sub") or email or name
+    google_sub = id_info["sub"]
     picture = id_info.get("picture", "")
 
     # Deterministic integer user_id
@@ -1307,7 +1433,7 @@ def auth_google():
         try:
             study_bot.load_user_into_memory(user_id, name, username)
         except Exception as me:
-            logger.warning("Could not sync user memory for user_id=%s during Google auth (non-fatal): %s", user_id, me)
+            logger.warning("Could not sync user memory during Google auth user_id=%s category=%s", user_id, type(me).__name__)
 
         # Record login in Supabase (non-fatal)
         try:
@@ -1320,7 +1446,7 @@ def auth_google():
                 user_agent=request.headers.get("User-Agent", "")
             )
         except Exception as re:
-            logger.warning("Could not record login event for user_id=%s (non-fatal): %s", user_id, re)
+            logger.warning("Could not record login event user_id=%s category=%s", user_id, type(re).__name__)
 
         role = "admin" if is_admin_session() else "student"
         token_str = create_auth_token(user_id, username, name, email, role)
@@ -1339,7 +1465,7 @@ def auth_google():
             "token": token_str
         })
     except Exception as exc:
-        logger.error("Unhandled error finalizing Google login: %s", exc, exc_info=True)
+        logger.error("Unhandled error finalizing Google login category=%s", type(exc).__name__)
         return jsonify({"error": "Failed to finalize Google login. Please try again or use Student Pass."}), 500
 
 
@@ -1564,11 +1690,7 @@ def admin_health():
 @login_required
 def get_sessions():
     user_id = session["user_id"]
-    try:
-        return jsonify(sb_list_sessions(user_id))
-    except Exception as e:
-        print(f"get_sessions failed: {e}")
-        return jsonify({"error": "Could not load sessions"}), 500
+    return jsonify(sb_list_sessions(user_id))
 
 
 @app.route("/api/sessions", methods=["POST"])
@@ -1577,12 +1699,8 @@ def create_session():
     user_id = session["user_id"]
     data = request.json or {}
     title = data.get("title", "New Chat")
-    try:
-        row = sb_create_session(user_id, title)
-        return jsonify({"id": row["id"], "title": row["title"]})
-    except Exception as e:
-        print(f"create_session failed: {e}")
-        return jsonify({"error": "Could not create session"}), 500
+    row = sb_create_session(user_id, title)
+    return jsonify({"id": row["id"], "title": row["title"]})
 
 
 @app.route("/api/sessions/<session_id>", methods=["PATCH"])
@@ -1593,6 +1711,8 @@ def rename_session(session_id):
     title = data.get("title")
     if not title:
         return jsonify({"error": "Title required"}), 400
+    if not sb_get_session(session_id, user_id):
+        return jsonify({"error": "Session not found"}), 404
     sb_rename_session(session_id, user_id, title)
     return jsonify({"status": "ok"})
 
@@ -1601,6 +1721,8 @@ def rename_session(session_id):
 @login_required
 def delete_session(session_id):
     user_id = session["user_id"]
+    if not sb_get_session(session_id, user_id):
+        return jsonify({"error": "Session not found"}), 404
     sb_delete_session(session_id, user_id)
     return jsonify({"status": "ok"})
 
@@ -1627,7 +1749,7 @@ def get_chat_history(session_id):
     if not sess:
         return jsonify({"error": "Session not found"}), 404
 
-    messages = sb_get_messages(session_id)
+    messages = sb_get_messages(session_id, user_id)
     for m in messages:
         if m.get("role") == "assistant":
             m["content"] = format_for_web(m["content"])
@@ -1796,7 +1918,8 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
     user_message_saved = False
     if session_id:
         try:
-            sb_insert_message(session_id, "user", content, idempotency_key=data.get("idempotency_key"))
+            sb_insert_message(session_id, "user", content,
+                idempotency_key=data.get("idempotency_key"), user_id=user_id)
             user_message_saved = True
         except SupabaseOperationError as exc:
             logger.warning("User message persistence failed request_id=%s category=%s", getattr(g, "request_id", ""), type(exc).__name__)
@@ -1806,7 +1929,8 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
     messages_context = []
     if session_id:
         try:
-            messages_context = [{"role": m["role"], "content": m["content"]} for m in sb_get_recent_messages(session_id, None)]
+            messages_context = [{"role": m["role"], "content": m["content"]}
+                for m in sb_get_recent_messages(session_id, None, user_id=user_id)]
         except SupabaseOperationError as exc:
             logger.warning("Chat history read failed request_id=%s category=%s", getattr(g, "request_id", ""), type(exc).__name__)
             persistence_warning = True
@@ -2044,7 +2168,8 @@ def send_message():
     if session_id:
         try:
             sb_insert_message(session_id, "assistant", response_text,
-                idempotency_key=f"{request_key}:assistant" if request_key else None)
+                idempotency_key=f"{request_key}:assistant" if request_key else None,
+                user_id=user_id)
             assistant_saved = True
         except SupabaseOperationError as exc:
             logger.warning("Assistant message persistence failed request_id=%s category=%s", getattr(g, "request_id", ""), type(exc).__name__)
@@ -2168,7 +2293,8 @@ def stream_message():
             if session_id:
                 try:
                     assistant_key = f"{request_key}:assistant" if request_key else None
-                    sb_insert_message(session_id, "assistant", clean_text, idempotency_key=assistant_key)
+                    sb_insert_message(session_id, "assistant", clean_text,
+                        idempotency_key=assistant_key, user_id=user_id)
                     assistant_saved = True
                 except SupabaseOperationError as exc:
                     logger.warning("Assistant message persistence failed request_id=%s category=%s", request_id, type(exc).__name__)
@@ -2248,7 +2374,10 @@ def stream_message():
 @login_required
 def get_user_profile():
     user_id = session["user_id"]
-    study_bot.load_user_into_memory(user_id, session["first_name"], session["username"])
+    try:
+        study_bot.load_user_into_memory(user_id, session["first_name"], session["username"])
+    except RuntimeError as exc:
+        return _memory_storage_error(exc)
     profile = study_bot.get_user_data(user_id)
 
     return jsonify({
@@ -2266,7 +2395,10 @@ def get_user_profile():
 @login_required
 def get_user_memory():
     user_id = session["user_id"]
-    study_bot.load_user_into_memory(user_id, session["first_name"], session["username"])
+    try:
+        study_bot.load_user_into_memory(user_id, session["first_name"], session["username"])
+    except RuntimeError as exc:
+        return _memory_storage_error(exc)
     profile = study_bot.get_user_data(user_id)
     liked_notes = profile.get("liked_notes") or []
 
@@ -2286,13 +2418,22 @@ def save_user_memory():
     data = request.get_json(silent=True) or {}
     note = (data.get("note") or "").strip()
     if note:
-        study_bot.load_user_into_memory(user_id, session["first_name"], session["username"])
-        profile = study_bot.get_user_data(user_id)
-        if "liked_notes" not in profile:
-            profile["liked_notes"] = []
-        if note not in profile["liked_notes"]:
-            profile["liked_notes"].append(note)
-            study_bot.save_user_memory_async(user_id)
+        try:
+            study_bot.load_user_into_memory(user_id, session["first_name"], session["username"])
+            profile = study_bot.get_user_data(user_id)
+            previous_notes = profile.get("liked_notes")
+            updated_notes = list(previous_notes or [])
+            if note not in updated_notes:
+                updated_notes.append(note)
+                profile["liked_notes"] = updated_notes
+                study_bot.save_user_memory_async(user_id)
+        except RuntimeError as exc:
+            if "previous_notes" in locals():
+                if previous_notes is None:
+                    profile.pop("liked_notes", None)
+                else:
+                    profile["liked_notes"] = previous_notes
+            return _memory_storage_error(exc)
     return jsonify({"success": True})
 
 
@@ -2300,7 +2441,10 @@ def save_user_memory():
 @login_required
 def get_user_preferences():
     user_id = session["user_id"]
-    study_bot.load_user_into_memory(user_id, session["first_name"], session["username"])
+    try:
+        study_bot.load_user_into_memory(user_id, session["first_name"], session["username"])
+    except RuntimeError as exc:
+        return _memory_storage_error(exc)
     profile = study_bot.get_user_data(user_id)
     prefs = profile.get("preferences") or {}
     return jsonify(prefs)
@@ -2311,12 +2455,18 @@ def get_user_preferences():
 def update_user_preferences():
     user_id = session["user_id"]
     data = request.get_json(silent=True) or {}
-    study_bot.load_user_into_memory(user_id, session["first_name"], session["username"])
-    profile = study_bot.get_user_data(user_id)
-    if "preferences" not in profile:
-        profile["preferences"] = {}
-    profile["preferences"].update(data)
-    study_bot.save_user_memory_async(user_id)
+    try:
+        study_bot.load_user_into_memory(user_id, session["first_name"], session["username"])
+        profile = study_bot.get_user_data(user_id)
+        previous_preferences = dict(profile.get("preferences") or {})
+        updated_preferences = dict(previous_preferences)
+        updated_preferences.update(data)
+        profile["preferences"] = updated_preferences
+        study_bot.save_user_memory_async(user_id)
+    except RuntimeError as exc:
+        if "previous_preferences" in locals():
+            profile["preferences"] = previous_preferences
+        return _memory_storage_error(exc)
     return jsonify({"success": True, "preferences": profile["preferences"]})
 
 

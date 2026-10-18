@@ -105,7 +105,7 @@ worker: python study_bot.py
    | `FRONTEND_URL` | `https://brainyai.cenai.workers.dev` | Frontend origin |
    | `ALLOWED_ORIGINS` | `https://brainyai.cenai.workers.dev,http://localhost:3000` | Permitted CORS origins |
    | `SUPABASE_URL` | `https://your-project.supabase.co` | Supabase URL |
-   | `SUPABASE_KEY` | `your_service_role_key` | Supabase service_role key |
+   | `SUPABASE_SERVICE_KEY` | `your_service_role_key` | Supabase service_role key; backend-only secret |
    | `TELEGRAM_TOKEN` | `your_telegram_bot_token` | Bot token from @BotFather |
    | `OWNER_ID` | `7544007323` | Bot owner user ID |
    | `ADMIN_USER_IDS` | `7544007323` | Users permitted in `/admin` |
@@ -139,7 +139,7 @@ After deployment, verify the following endpoints:
 1. **Backend Health Probe**:
    ```bash
    curl -i https://brainyai-production.up.railway.app/api/health
-   # Expected: HTTP 200 OK, {"status": "ok", "service": "brainy-api"}
+   # Expected: HTTP 200 OK, database.status is connected when Supabase is reachable
    ```
 2. **Frontend Availability**:
    Visit `https://brainyai.cenai.workers.dev` in your browser. Verify that the login view renders and that authentication via 1-Click Student Pass immediately transitions to the chat workspace.
@@ -152,4 +152,6 @@ After deployment, verify the following endpoints:
 
 * **Frontend**: Cloudflare Workers maintains versioned releases. In the Cloudflare dashboard, navigate to Workers & Pages > `brainy` > Deployments > Roll back to a previous successful deployment.
 * **Backend**: Railway maintains git commit snapshots. Select any previous deployment card and click **Redeploy**.
-* **Database**: `supabase_schema.sql` only adds columns and tables using `IF NOT EXISTS`. Schema rollbacks should be evaluated on an individual column basis.
+* **Database**: `supabase_schema.sql` uses idempotent table/column setup but also refreshes policies. Compare it with the live project before using it on an existing database; evaluate schema rollbacks individually.
+
+For the current Brainy identity model, additive chat-owner migration, exact Railway variables, and the Supabase Dashboard checklist, see [Supabase and Railway setup](SUPABASE_RAILWAY_SETUP.md). Review schema migrations against the live project before running them; the guide does not apply SQL automatically.

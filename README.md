@@ -155,7 +155,7 @@ cp .env.example .env
 ```
 Open `.env` in your editor and configure your secrets:
 * `FLASK_SECRET_KEY`: Generate a random hex string: `python -c "import secrets; print(secrets.token_hex(32))"`
-* `SUPABASE_URL` and `SUPABASE_KEY`: Copy from your Supabase Dashboard (**Settings > API**)
+* `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`: Copy the Project URL from the Connect dialog and the Secret API key from **Settings > API Keys**. The legacy `SUPABASE_KEY` name is still accepted.
 * `GROQ_API_KEY` or `GEMINI_API_KEY`: Provide your AI API credentials
 
 ### Step 3: Setup the Backend (Python Flask API)
@@ -225,7 +225,7 @@ Open two terminal windows:
 | `ALLOWED_ORIGINS` | **Required** | Flask | Comma-separated allowed CORS origins |
 | `NEXT_PUBLIC_API_URL` | Optional | Next.js | Base backend URL (leave empty for same-origin dev) |
 | `SUPABASE_URL` | **Required** | Flask / Bot | Supabase project REST URL |
-| `SUPABASE_KEY` | **Required** | Flask / Bot | Supabase `service_role` key (kept private on server) |
+| `SUPABASE_SERVICE_KEY` | **Required** | Flask / Bot | Supabase Secret API key (or legacy service-role JWT), kept private on server |
 | `ADMIN_USER_IDS` | Optional | Flask | Comma-separated Telegram user IDs allowed in `/admin` |
 | `ADMIN_USERNAMES` | Optional | Flask | Comma-separated usernames allowed in `/admin` |
 | `ADMIN_EMAILS` | Optional | Flask | Comma-separated admin emails allowed in `/admin` |
@@ -287,7 +287,7 @@ For detailed production configuration, custom domain mapping, and CORS alignment
 | **`429 Too Many Requests` (Quota Exceeded)** | 5-hour quota exhausted | Wait for the 5-hour window to reset (default: 30 messages / 5 hours). Administrators can adjust `GLOBAL_MESSAGE_LIMIT` in `.env`. |
 | **`403 Forbidden` on `/admin`** | User not in admin allowlist | Add your user ID, username, or email to `ADMIN_USER_IDS`, `ADMIN_USERNAMES`, or `ADMIN_EMAILS` on the server and restart. |
 | **AI responses fail / timeouts** | Missing or rate-limited API keys | Verify that at least one AI key (`GROQ_API_KEY` or `GEMINI_API_KEY`) is populated in `.env`. Check backend logs for provider error status. |
-| **Supabase permission errors** | Anon key used instead of service_role | Ensure `SUPABASE_KEY` in your backend `.env` is the `service_role` secret key, not the public `anon` key. |
+| **Supabase permission errors** | Public key used instead of a backend key | Ensure `SUPABASE_SERVICE_KEY` in Railway is the private Secret API key (or legacy `service_role` key), never the publishable/anon key. |
 
 ---
 

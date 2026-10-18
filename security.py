@@ -104,9 +104,12 @@ def check_rate_limit(identifier: str, limit: int = 100, window: int = 60) -> boo
     if shared_available:
         bucket_key = hashlib.sha256(identifier.encode("utf-8")).hexdigest()
         try:
+            headers = {"apikey": supabase_key, "Content-Type": "application/json"}
+            if not supabase_key.startswith("sb_secret_"):
+                headers["Authorization"] = f"Bearer {supabase_key}"
             response = requests.post(
                 f"{supabase_url}/rest/v1/rpc/brainy_check_rate_limit",
-                headers={"apikey": supabase_key, "Authorization": f"Bearer {supabase_key}", "Content-Type": "application/json"},
+                headers=headers,
                 json={"p_bucket_key": bucket_key, "p_limit": limit, "p_window_seconds": window},
                 timeout=3,
             )

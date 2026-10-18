@@ -198,11 +198,10 @@ print(f"Supabase: {'connected' if (SUPABASE_URL and SUPABASE_KEY) else 'NOT conf
 
 
 def _supabase_headers() -> dict:
-    return {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
-    }
+    headers = {"apikey": SUPABASE_KEY, "Content-Type": "application/json"}
+    if not SUPABASE_KEY.startswith("sb_secret_"):
+        headers["Authorization"] = f"Bearer {SUPABASE_KEY}"
+    return headers
 
 
 def supabase_register_user(chat_id: int, chat_type: str, username: str, first_name: str) -> None:
@@ -410,6 +409,12 @@ if OWNER_ID: print(f"Owner ID: {OWNER_ID}")
 MAX_SAVED_HISTORY = 20   # how many messages to persist (same as in-memory MAX_HISTORY)
 MAX_LIKED_NOTES   = 15   # how many 👍'd answer summaries to keep per user
 
+
+def _production_runtime() -> bool:
+    return (os.getenv("FLASK_ENV", "").lower() == "production"
+            or os.getenv("ENVIRONMENT", "").lower() == "production"
+            or bool(os.getenv("RAILWAY_SERVICE_ID")))
+
 def _sb_save_user_memory(user_id: int, first_name: str = "", username: str = "",
                           history: list = None, ask_history: list = None,
                           liked_notes: list = None,
@@ -417,6 +422,8 @@ def _sb_save_user_memory(user_id: int, first_name: str = "", username: str = "",
                           level: str = "", score: int = 0, total: int = 0) -> None:
     """Persist user state and fail visibly if Supabase does not confirm the write."""
     if not (SUPABASE_URL and SUPABASE_KEY):
+        if _production_runtime():
+            raise RuntimeError("Supabase is required for persistent user memory in production")
         logging.getLogger(__name__).warning("Supabase unconfigured; using in-memory user memory for dev")
         if user_id not in user_data_store:
             user_data_store[user_id] = {"joined": datetime.now().strftime("%d %b %Y")}
@@ -473,6 +480,8 @@ def _sb_save_user_memory(user_id: int, first_name: str = "", username: str = "",
 def _sb_load_user_memory(user_id: int) -> dict:
     """Load a user's full state. An empty row set means missing; errors stay errors."""
     if not (SUPABASE_URL and SUPABASE_KEY):
+        if _production_runtime():
+            raise RuntimeError("Supabase is required for persistent user memory in production")
         logging.getLogger(__name__).warning("Supabase unconfigured; using in-memory user memory for dev")
         data = user_data_store.get(user_id, {})
         return {
@@ -589,33 +598,35 @@ def get_or_create_chat_session(user_id: int) -> str:
             session_id = str(_uuid.uuid4())
             create_headers = _supabase_headers()
             create_headers["Prefer"] = "return=minimal"
-            requests.post(
+            created = requests.post(
                 f"{SUPABASE_URL}/rest/v1/chat_sessions",
                 headers=create_headers,
                 json={"id": session_id, "user_id": user_id, "title": "Telegram Chat"},
                 timeout=8
             )
+            created.raise_for_status()
         _telegram_session_cache[user_id] = session_id
         return session_id
     except Exception as e:
-        print(f"[sync] get_or_create_chat_session failed (non-fatal): {str(e)[:80]}")
+        logging.getLogger(__name__).warning("Telegram history session persistence failed category=%s", type(e).__name__)
         return None
 
 
-def _sb_insert_chat_message(session_id: str, role: str, content: str) -> None:
+def _sb_insert_chat_message(session_id: str, user_id: int, role: str, content: str) -> None:
     if not (SUPABASE_URL and SUPABASE_KEY and session_id):
         return
     try:
         headers = _supabase_headers()
         headers["Prefer"] = "return=minimal"
-        requests.post(
+        response = requests.post(
             f"{SUPABASE_URL}/rest/v1/chat_messages",
             headers=headers,
-            json={"session_id": session_id, "role": role, "content": content},
+            json={"session_id": session_id, "user_id": int(user_id), "role": role, "content": content},
             timeout=8
         )
+        response.raise_for_status()
     except Exception as e:
-        print(f"[sync] insert chat message failed (non-fatal): {str(e)[:80]}")
+        logging.getLogger(__name__).warning("Telegram history message persistence failed category=%s", type(e).__name__)
 
 
 def sync_to_web_history(user_id: int, user_msg: str, assistant_msg: str) -> None:
@@ -630,8 +641,8 @@ def sync_to_web_history(user_id: int, user_msg: str, assistant_msg: str) -> None
         session_id = get_or_create_chat_session(user_id)
         if not session_id:
             return
-        _sb_insert_chat_message(session_id, "user", clean_user_msg)
-        _sb_insert_chat_message(session_id, "assistant", assistant_msg)
+        _sb_insert_chat_message(session_id, user_id, "user", clean_user_msg)
+        _sb_insert_chat_message(session_id, user_id, "assistant", assistant_msg)
 
     import threading
     threading.Thread(target=_worker, daemon=True).start()

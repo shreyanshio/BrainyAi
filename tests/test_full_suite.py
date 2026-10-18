@@ -1,5 +1,6 @@
 """Comprehensive test suite covering production reliability, memory isolation, context, quotas, and API contracts."""
 import json
+import os
 import unittest
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timezone, timedelta
@@ -175,6 +176,12 @@ class FullSuiteTests(unittest.TestCase):
         me_data = me_resp.get_json()
         self.assertEqual(me_data["user"]["first_name"], "Alice Study")
 
+    @patch("app._is_production", return_value=True)
+    def test_unverified_name_login_is_disabled_in_production(self, _production):
+        response = self.client.post("/api/auth/web", json={"name": "Impersonated User"})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["code"], "UNVERIFIED_LOGIN_DISABLED")
+
     def test_api_usage_contract(self):
         """GET /api/usage returns 200 with quota fields for logged-in user."""
         # Log in
@@ -289,6 +296,7 @@ class FullSuiteTests(unittest.TestCase):
         resp = self.client.post("/api/auth/google", json={})
         self.assertEqual(resp.status_code, 400)
 
+    @patch.dict(os.environ, {"GOOGLE_CLIENT_ID": "brainyai-test.apps.googleusercontent.com"})
     @patch("requests.get")
     def test_google_auth_success_with_tokeninfo(self, mock_get):
         """POST /api/auth/google verifies id_token via Google tokeninfo fallback."""
@@ -299,7 +307,10 @@ class FullSuiteTests(unittest.TestCase):
             "email": "scholar@example.com",
             "email_verified": "true",
             "name": "Jane Scholar",
-            "picture": "https://example.com/avatar.jpg"
+            "picture": "https://example.com/avatar.jpg",
+            "aud": "brainyai-test.apps.googleusercontent.com",
+            "iss": "https://accounts.google.com",
+            "exp": str(int(datetime.now(timezone.utc).timestamp()) + 600),
         }
         mock_get.return_value = mock_resp
 
@@ -310,9 +321,47 @@ class FullSuiteTests(unittest.TestCase):
         self.assertEqual(data["user"]["first_name"], "Jane Scholar")
         self.assertEqual(data["user"]["email"], "scholar@example.com")
         self.assertIn("token", data)
+        authenticated = app.app.test_client().get("/api/auth/me", headers={"Authorization": f"Bearer {data['token']}"})
+        self.assertEqual(authenticated.status_code, 200)
+        self.assertEqual(authenticated.get_json()["user"]["id"], data["user"]["id"])
+
+    @patch.dict(os.environ, {"GOOGLE_CLIENT_ID": "brainyai-test.apps.googleusercontent.com"})
+    @patch("requests.get")
+    def test_google_auth_rejects_token_for_another_client(self, mock_get):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "sub": "subject-123", "email": "student@example.com", "email_verified": True,
+            "aud": "other-client.apps.googleusercontent.com", "iss": "https://accounts.google.com",
+            "exp": str(int(datetime.now(timezone.utc).timestamp()) + 600),
+        }
+        mock_get.return_value = mock_resp
+        response = self.client.post("/api/auth/google", json={"credential": "wrong-audience-token"})
+        self.assertEqual(response.status_code, 401)
+
+    @patch.dict(os.environ, {"GOOGLE_CLIENT_ID": "brainyai-test.apps.googleusercontent.com"})
+    @patch("requests.get")
+    def test_legacy_google_access_token_flow_checks_client_and_profile(self, mock_get):
+        rejected_id_token = MagicMock(status_code=400)
+        access_info = MagicMock(status_code=200)
+        access_info.json.return_value = {
+            "issued_to": "brainyai-test.apps.googleusercontent.com",
+            "user_id": "google-sub-456",
+            "expires_in": "300",
+        }
+        user_info = MagicMock(status_code=200)
+        user_info.json.return_value = {
+            "sub": "google-sub-456", "email": "fallback@example.com",
+            "email_verified": True, "name": "Fallback Scholar",
+        }
+        mock_get.side_effect = [rejected_id_token, access_info, user_info]
+        response = self.client.post("/api/auth/google", json={"credential": "legacy-access-token"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["user"]["email"], "fallback@example.com")
 
     @patch("app.sb_record_login")
     @patch("study_bot.load_user_into_memory")
+    @patch.dict(os.environ, {"GOOGLE_CLIENT_ID": "brainyai-test.apps.googleusercontent.com"})
     @patch("requests.get")
     def test_google_auth_resilient_to_background_failures(self, mock_get, mock_mem, mock_rec):
         """POST /api/auth/google succeeds even if background audit/memory raises an error."""
@@ -322,7 +371,10 @@ class FullSuiteTests(unittest.TestCase):
             "sub": "999888777",
             "email": "resilient@example.com",
             "email_verified": True,
-            "name": "Resilient Scholar"
+            "name": "Resilient Scholar",
+            "aud": "brainyai-test.apps.googleusercontent.com",
+            "iss": "accounts.google.com",
+            "exp": str(int(datetime.now(timezone.utc).timestamp()) + 600),
         }
         mock_get.return_value = mock_resp
         mock_mem.side_effect = RuntimeError("Supabase connection timeout")
@@ -334,6 +386,7 @@ class FullSuiteTests(unittest.TestCase):
         self.assertTrue(data.get("authenticated"))
         self.assertEqual(data["user"]["first_name"], "Resilient Scholar")
 
+    @patch.dict(os.environ, {"GOOGLE_CLIENT_ID": "brainyai-test.apps.googleusercontent.com"})
     @patch("requests.get")
     def test_google_auth_invalid_token(self, mock_get):
         """POST /api/auth/google returns 401 when token verification fails."""
