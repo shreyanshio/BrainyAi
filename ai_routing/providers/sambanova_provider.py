@@ -40,7 +40,7 @@ class SambaNovaProvider(BaseProvider):
                     payload = {
                         "model": model,
                         "messages": [{"role": "system", "content": system_prompt}] + messages,
-                        "max_tokens": max_tokens or 2048
+                        "max_tokens": max_tokens or 4096
                     }
                     if json_output:
                         payload["response_format"] = {"type": "json_object"}
@@ -82,6 +82,7 @@ class SambaNovaProvider(BaseProvider):
         model_id: Optional[str] = None,
         multimodal_parts: Optional[List[Dict[str, Any]]] = None
     ) -> Iterator[str]:
+        self.last_stream_finish_reason = None
         rot = registry.get_rotator("sambanova")
         if not rot or rot.key_count == 0:
             raise RuntimeError("NO_KEYS: sambanova")
@@ -98,7 +99,7 @@ class SambaNovaProvider(BaseProvider):
                     payload = {
                         "model": model,
                         "messages": [{"role": "system", "content": system_prompt}] + messages,
-                        "max_tokens": max_tokens or 1024,
+                        "max_tokens": max_tokens or 4096,
                         "stream": True
                     }
                     resp = requests.post(
@@ -118,7 +119,11 @@ class SambaNovaProvider(BaseProvider):
                                     break
                                 try:
                                     chunk_obj = json.loads(data_str)
-                                    delta = chunk_obj["choices"][0]["delta"].get("content")
+                                    c0 = chunk_obj["choices"][0]
+                                    fr = c0.get("finish_reason")
+                                    if fr:
+                                        self.last_stream_finish_reason = fr
+                                    delta = c0["delta"].get("content")
                                     if delta:
                                         yield delta
                                 except Exception:

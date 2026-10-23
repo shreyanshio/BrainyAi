@@ -79,6 +79,7 @@ class CerebrasProvider(BaseProvider):
         model_id: Optional[str] = None,
         multimodal_parts: Optional[List[Dict[str, Any]]] = None
     ) -> Iterator[str]:
+        self.last_stream_finish_reason = None
         rot = registry.get_rotator("cerebras")
         if not rot or rot.key_count == 0:
             raise RuntimeError("NO_KEYS: cerebras")
@@ -95,7 +96,7 @@ class CerebrasProvider(BaseProvider):
                     payload = {
                         "model": model,
                         "messages": [{"role": "system", "content": system_prompt}] + messages,
-                        "max_tokens": min(max_tokens or 1024, 2048),
+                        "max_tokens": min(max_tokens or 2048, 2048),
                         "stream": True
                     }
                     resp = requests.post(
@@ -115,9 +116,15 @@ class CerebrasProvider(BaseProvider):
                                     break
                                 try:
                                     chunk_obj = json.loads(data_str)
-                                    delta = chunk_obj["choices"][0]["delta"].get("content")
-                                    if delta:
-                                        yield delta
+                                    choices = chunk_obj.get("choices", [])
+                                    if choices:
+                                        c0 = choices[0]
+                                        fr = c0.get("finish_reason")
+                                        if fr:
+                                            self.last_stream_finish_reason = fr
+                                        delta = c0.get("delta", {}).get("content")
+                                        if delta:
+                                            yield delta
                                 except Exception:
                                     continue
                     return

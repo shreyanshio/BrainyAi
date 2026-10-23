@@ -28,6 +28,8 @@ class TelemetryRecord:
     fallback_from: Optional[str] = None
     error_category: Optional[str] = None
     status: str = "success"  # success, error, fallback_recovered
+    continuation_used: bool = False
+    continuation_rounds: int = 0
     timestamp: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:

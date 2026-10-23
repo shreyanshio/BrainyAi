@@ -53,7 +53,7 @@ class GeminiProvider(BaseProvider):
         payload: Dict[str, Any] = {
             "system_instruction": {"parts": [{"text": system_prompt}]},
             "contents": contents,
-            "generationConfig": {"maxOutputTokens": max_tokens or 2048}
+            "generationConfig": {"maxOutputTokens": max_tokens or 8192}
         }
         if json_output:
             payload["generationConfig"]["responseMimeType"] = "application/json"
@@ -98,6 +98,7 @@ class GeminiProvider(BaseProvider):
         model_id: Optional[str] = None,
         multimodal_parts: Optional[List[Dict[str, Any]]] = None
     ) -> Iterator[str]:
+        self.last_stream_finish_reason = None
         rot = registry.get_rotator("gemini")
         if not rot or rot.key_count == 0:
             raise RuntimeError("NO_KEYS: gemini")
@@ -124,7 +125,7 @@ class GeminiProvider(BaseProvider):
         payload = {
             "system_instruction": {"parts": [{"text": system_prompt}]},
             "contents": contents,
-            "generationConfig": {"maxOutputTokens": max_tokens or 2048}
+            "generationConfig": {"maxOutputTokens": max_tokens or 8192}
         }
 
         last_exc = None
@@ -143,7 +144,11 @@ class GeminiProvider(BaseProvider):
                                     chunk_obj = json.loads(line_str[6:].strip())
                                     candidates = chunk_obj.get("candidates", [])
                                     if candidates:
-                                        p = candidates[0].get("content", {}).get("parts", [])
+                                        c0 = candidates[0]
+                                        fr = c0.get("finishReason")
+                                        if fr:
+                                            self.last_stream_finish_reason = fr
+                                        p = c0.get("content", {}).get("parts", [])
                                         if p and "text" in p[0]:
                                             yield p[0]["text"]
                                 except Exception:

@@ -2207,7 +2207,7 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
     model_id = (data.get("model") or "brainy-fast").strip().lower()
     if model_id not in ALLOWED_MODELS:
         model_id = "brainy-fast"
-    answer_length = (data.get("answer_length") or "short").strip().lower()
+    answer_length = (data.get("answer_length") or "").strip().lower()
 
     if not content:
         return None, jsonify({"error": "Message content cannot be empty"}), 400
@@ -2388,23 +2388,24 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
             "Provide an exhaustive, in-depth explanation. Include background context, "
             "detailed step-by-step breakdown or derivations, real-world examples, common pitfalls, and review questions."
         )
-        max_tok = 3000
+        max_tok = 8192
     elif answer_length == "medium":
         system_prompt += (
             "\n\nANSWER LENGTH CONSTRAINT — MEDIUM MODE:\n"
-            "Provide a balanced, well-structured explanation (~400-600 words) with clear headings, "
+            "Provide a balanced, well-structured explanation with clear headings, "
             "bullet points, and relevant examples."
         )
-        max_tok = 2048
-    else:
-        # Default: Fast & Short mode (quickest TTFT, concise bullet points)
-        answer_length = "short"
+        max_tok = 4096
+    elif answer_length == "short":
         system_prompt += (
-            "\n\nANSWER LENGTH CONSTRAINT — SHORT MODE (DEFAULT):\n"
+            "\n\nANSWER LENGTH CONSTRAINT — SHORT MODE:\n"
             "Keep your response concise, fast, and direct. Focus strictly on "
             "core definitions, key bullet points, and essential formulas. Avoid conversational filler."
         )
-        max_tok = 1024
+        max_tok = 2048
+    else:
+        # Default: adaptive task budget determined dynamically by output budget manager
+        max_tok = None
 
     # Ground the model in real facts about this user's quota
     system_prompt += (
@@ -2419,28 +2420,28 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
 
     if intent == "joke":
         system_prompt = study_bot.JOKE_SYSTEM_PROMPT
-        max_tok = 150
+        max_tok = None
     elif intent == "fact":
         system_prompt = study_bot.FACT_SYSTEM_PROMPT
-        max_tok = 200
+        max_tok = None
         categories = ["science", "space", "human body", "history", "technology and AI", "mathematics", "psychology"]
         category = random.choice(categories)
         system_prompt += f"\nFor this turn, choose one mind-blowing lesser-known fact about {category}."
     elif intent == "tip":
         system_prompt = study_bot.TIP_SYSTEM_PROMPT
-        max_tok = 250
+        max_tok = None
     elif intent == "define":
         system_prompt = study_bot.DEFINE_SYSTEM_PROMPT
-        max_tok = 350
+        max_tok = None
     elif intent == "summarize":
         system_prompt = study_bot.SUMMARIZE_SYSTEM_PROMPT
-        max_tok = 500
+        max_tok = None
     elif intent == "translate":
         system_prompt = study_bot.TRANSLATE_SYSTEM_PROMPT
-        max_tok = 400
+        max_tok = None
     elif intent == "motivate":
         system_prompt = study_bot.MOTIVATE_SYSTEM_PROMPT
-        max_tok = 250
+        max_tok = None
         total = user_profile.get("total", 0)
         score = user_profile.get("score", 0)
         context_hint = ""
@@ -2455,7 +2456,7 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
         prompt = (
             f"Give a short, powerful motivational message for {first_name}.\n"
             f"{context_hint}\n"
-            "Make it punchy, real, personal — not generic quotes. Mix English + Hinglish. 5-7 lines max."
+            "Make it punchy, real, personal — not generic quotes. Mix English + Hinglish."
         )
         system_prompt += "\nFor this turn, follow these instructions while answering the user's latest message:\n" + prompt
     elif intent == "search":
@@ -2485,14 +2486,23 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
                     "content": f"{content}\n\n{ai_prompt}",
                 }
             system_prompt = study_bot.SEARCH_SYSTEM_PROMPT
-            max_tok = 600
+            max_tok = None
         except Exception as e:
             print(f"Web search failed: {e}")
     elif intent == "brainy":
         system_prompt = study_bot.BRAINY_SYSTEM_PROMPT
-        max_tok = 1000
+        max_tok = None
     elif study_bot.is_offtopic_chat(content):
         system_prompt = study_bot.BANTER_SYSTEM_PROMPT or study_bot.SYSTEM_PROMPT
+
+    # Phase 7 Completeness Directive
+    system_prompt += (
+        "\n\nCOMPLETENESS DIRECTIVE:\n"
+        "Answer the user's complete request accurately, comprehensively, and coherently. "
+        "Address every question, subtask, and step. Use sufficient detail to explain the answer properly, "
+        "while avoiding unnecessary fluff. Complete all code blocks, formulas, derivations, and examples "
+        "thoroughly without cutting off or omitting requested sections."
+    )
 
     system_prompt += (
         "\n\nOngoing conversation: Use the complete earlier conversation supplied in the message history. "

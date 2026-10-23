@@ -120,28 +120,29 @@ class ProviderRegistry:
             # 3. Model specifications & capabilities
             self._models.clear()
             # Groq
-            self._models[self.groq_fast_model] = ModelSpec(self.groq_fast_model, "groq", supports_streaming=True, supports_structured_json=True, max_output_tokens=2048, timeout_sec=20.0)
-            self._models[self.groq_balanced_model] = ModelSpec(self.groq_balanced_model, "groq", supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=25.0)
-            self._models["llama-3.1-8b-instant"] = ModelSpec("llama-3.1-8b-instant", "groq", supports_streaming=True, supports_structured_json=True, max_output_tokens=2048, timeout_sec=15.0)
+            self._models[self.groq_fast_model] = ModelSpec(self.groq_fast_model, "groq", supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=20.0)
+            self._models[self.groq_balanced_model] = ModelSpec(self.groq_balanced_model, "groq", supports_streaming=True, supports_structured_json=True, max_output_tokens=8192, timeout_sec=25.0)
+            self._models["llama-3.1-8b-instant"] = ModelSpec("llama-3.1-8b-instant", "groq", supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=15.0)
 
             # Gemini (Multimodal PDF native support)
             self._models[self.gemini_reasoning_model] = ModelSpec(self.gemini_reasoning_model, "gemini", supports_streaming=True, supports_structured_json=True, supports_vision_pdf=True, max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=30.0)
             self._models["gemini-2.0-flash"] = ModelSpec("gemini-2.0-flash", "gemini", supports_streaming=True, supports_structured_json=True, supports_vision_pdf=True, max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=25.0)
-            self._models["gemini-2.5-flash-lite"] = ModelSpec("gemini-2.5-flash-lite", "gemini", supports_streaming=True, supports_structured_json=True, supports_vision_pdf=True, max_context_tokens=1000000, max_output_tokens=4096, timeout_sec=20.0)
+            self._models["gemini-2.5-flash-lite"] = ModelSpec("gemini-2.5-flash-lite", "gemini", supports_streaming=True, supports_structured_json=True, supports_vision_pdf=True, max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=20.0)
 
             # SambaNova (SN40L high-speed 70B & 72B inference)
             self._models[self.sambanova_reasoning_model] = ModelSpec(self.sambanova_reasoning_model, "sambanova", supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=30.0)
             self._models["Qwen2.5-72B-Instruct"] = ModelSpec("Qwen2.5-72B-Instruct", "sambanova", supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=30.0)
-            self._models[self.sambanova_fast_model] = ModelSpec(self.sambanova_fast_model, "sambanova", supports_streaming=True, supports_structured_json=True, max_output_tokens=2048, timeout_sec=20.0)
+            self._models[self.sambanova_fast_model] = ModelSpec(self.sambanova_fast_model, "sambanova", supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=20.0)
 
-            # Cerebras
+            # Cerebras (2048 hardware limit per call; extended via seamless continuation)
             self._models["llama3.1-8b"] = ModelSpec("llama3.1-8b", "cerebras", supports_streaming=True, supports_structured_json=True, max_output_tokens=2048, timeout_sec=20.0)
             self._models["qwen-3.8-27b"] = ModelSpec("qwen-3.8-27b", "cerebras", supports_streaming=True, supports_structured_json=True, max_output_tokens=2048, timeout_sec=20.0)
             self._models["gpt-oss-120b"] = ModelSpec("gpt-oss-120b", "cerebras", supports_streaming=True, supports_structured_json=True, max_output_tokens=2048, timeout_sec=20.0)
 
             # OpenRouter
-            self._models[self.openrouter_coding_model] = ModelSpec(self.openrouter_coding_model, "openrouter", supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=30.0)
-            self._models["nvidia/nemotron-3.5-lightning:free"] = ModelSpec("nvidia/nemotron-3.5-lightning:free", "openrouter", supports_streaming=True, max_output_tokens=2048, timeout_sec=25.0)
+            self._models[self.openrouter_coding_model] = ModelSpec(self.openrouter_coding_model, "openrouter", supports_streaming=True, supports_structured_json=True, max_output_tokens=8192, timeout_sec=30.0)
+            self._models[self.openrouter_free_model] = ModelSpec(self.openrouter_free_model, "openrouter", supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=30.0)
+            self._models["nvidia/nemotron-3.5-lightning:free"] = ModelSpec("nvidia/nemotron-3.5-lightning:free", "openrouter", supports_streaming=True, max_output_tokens=4096, timeout_sec=25.0)
 
     def get_rotator(self, provider: str) -> Optional[ProviderKeyRotator]:
         with self._lock:

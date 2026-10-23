@@ -154,6 +154,18 @@ TRANSLATE_SYSTEM_PROMPT = TRANSLATE_SYSTEM_PROMPT + "\n" + FONT_INSTRUCTIONS
 SEARCH_SYSTEM_PROMPT    = SEARCH_SYSTEM_PROMPT + "\n" + FONT_INSTRUCTIONS
 ASK5_SYSTEM_PROMPT      = ASK5_SYSTEM_PROMPT + "\n" + FONT_INSTRUCTIONS
 
+COMPLETENESS_DIRECTIVE = (
+    "\n\nCOMPLETENESS DIRECTIVE:\n"
+    "Answer the user's complete request accurately, comprehensively, and coherently. "
+    "Address every question, subtask, and step. Use sufficient detail to explain the answer properly, "
+    "while avoiding unnecessary fluff. Complete all code blocks, formulas, derivations, and examples "
+    "thoroughly without cutting off or omitting requested sections."
+)
+SYSTEM_PROMPT += COMPLETENESS_DIRECTIVE
+DEFINE_SYSTEM_PROMPT += COMPLETENESS_DIRECTIVE
+SUMMARIZE_SYSTEM_PROMPT += COMPLETENESS_DIRECTIVE
+SEARCH_SYSTEM_PROMPT += COMPLETENESS_DIRECTIVE
+
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
@@ -1275,7 +1287,7 @@ def _stream_groq(messages, system_prompt, max_tokens, model_id=None):
     for _ in range(len(GROQ_API_KEYS)):
         key = _rotate_key("groq", GROQ_API_KEYS)
         client = _get_groq_client(key)
-        tok = max_tokens or 1024
+        tok = max_tokens or 4096
         for model_name in groq_models:
             try:
                 kwargs = dict(
@@ -1325,7 +1337,7 @@ def _stream_cerebras(messages, system_prompt, max_tokens, model_id=None):
                 try:
                     payload = {
                         "model": model,
-                        "max_tokens": min(max_tokens or 1024, 2048),
+                        "max_tokens": min(max_tokens or 2048, 2048),
                         "messages": [{"role": "system", "content": system_prompt}] + messages,
                         "stream": True
                     }
@@ -1383,7 +1395,7 @@ def _stream_openrouter(messages, system_prompt, max_tokens, model_id=None):
             try:
                 payload = {
                     "model": model,
-                    "max_tokens": max_tokens or 1024,
+                    "max_tokens": max_tokens or 4096,
                     "messages": [{"role": "system", "content": system_prompt}] + messages,
                     "stream": True
                 }
@@ -1444,7 +1456,7 @@ def _stream_gemini(messages, system_prompt, max_tokens, model_id=None):
             payload = {
                 "system_instruction": {"parts": [{"text": system_prompt}]},
                 "contents": contents,
-                "generationConfig": {"maxOutputTokens": max_tokens or 1024}
+                "generationConfig": {"maxOutputTokens": max_tokens or 8192}
             }
             for model in GEMINI_MODELS:
                 try:
@@ -1769,7 +1781,7 @@ def _stream_sambanova(messages, system_prompt, max_tokens, model_id=None):
                 try:
                     payload = {
                         "model": model,
-                        "max_tokens": max_tokens or 1024,
+                        "max_tokens": max_tokens or 4096,
                         "messages": [{"role": "system", "content": system_prompt}] + messages,
                         "stream": True
                     }

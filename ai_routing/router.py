@@ -21,6 +21,14 @@ from ai_routing.providers.sambanova_provider import SambaNovaProvider
 from ai_routing.providers.cerebras_provider import CerebrasProvider
 from ai_routing.providers.openrouter_provider import OpenRouterProvider
 from ai_routing.providers.search_provider import execute_search
+from ai_routing.budget import OutputBudgetManager
+from ai_routing.continuation import (
+    is_length_truncated,
+    stitch_continuation,
+    deduplicate_stream_overlap,
+    CONTINUATION_PROMPT,
+    MAX_CONTINUATION_ROUNDS
+)
 
 logger = logging.getLogger("ai_router")
 
@@ -37,6 +45,8 @@ class RouterResponse:
     input_tokens: Optional[int] = None
     output_tokens: Optional[int] = None
     citations: Optional[List[Dict[str, str]]] = None
+    continuation_used: bool = False
+    continuation_rounds: int = 0
 
 def _sanitize_grounding_text(text: str) -> str:
     """Sanitizes external web content to prevent prompt injection or boundary breakouts."""
@@ -87,14 +97,23 @@ class AIRouter:
     def get_provider(self, name: str) -> Optional[BaseProvider]:
         return self._providers.get(name.lower())
 
-    def _resolve_budget(self, task: TaskType, depth: ResponseDepth, max_tokens: Optional[int] = None) -> int:
-        if max_tokens:
-            return max_tokens
-        if depth == ResponseDepth.FAST:
-            return 1024
-        if depth == ResponseDepth.DEEP or task in (TaskType.DEEP_REASONING, TaskType.MATH_AND_LOGIC, TaskType.DETAILED_EXPLANATION, TaskType.NOTE_GENERATION):
-            return 3200
-        return 2048
+    def _resolve_budget(
+        self,
+        task: TaskType,
+        depth: ResponseDepth,
+        max_tokens: Optional[int] = None,
+        provider_name: str = "",
+        model_id: str = "",
+        estimated_input_tokens: int = 0
+    ) -> int:
+        return OutputBudgetManager.resolve_budget(
+            task=task,
+            depth=depth,
+            provider_name=provider_name,
+            model_id=model_id,
+            requested_max_tokens=max_tokens,
+            estimated_input_tokens=estimated_input_tokens
+        )
 
     def generate(
         self,
@@ -115,13 +134,9 @@ class AIRouter:
         if isinstance(prompt, list):
             messages = prompt
             prompt = ""
-        if isinstance(prompt, list):
-            messages = prompt
-            prompt = ""
         req_id = request_id or str(uuid.uuid4())
         resolved_depth = ResponseDepth.from_str(str(depth)) if depth else ResponseDepth.BALANCED
         resolved_task = classify_task(prompt, messages, document_context, explicit_task=task, depth=resolved_depth)
-        token_budget = self._resolve_budget(resolved_task, resolved_depth, max_tokens)
         sys_prompt = system_prompt or "You are Brainy, an intelligent, empathetic, academic AI study companion."
 
         # Prepare messages
@@ -146,6 +161,15 @@ class AIRouter:
                 continue
 
             try:
+                est_in_tokens = len(str(call_messages)) // 4
+                token_budget = self._resolve_budget(
+                    resolved_task,
+                    resolved_depth,
+                    max_tokens=max_tokens,
+                    provider_name=provider_name,
+                    model_id=model_id,
+                    estimated_input_tokens=est_in_tokens
+                )
                 res = provider.generate(
                     messages=call_messages,
                     system_prompt=sys_prompt,
@@ -155,6 +179,42 @@ class AIRouter:
                     multimodal_parts=document_context.get("multimodal_parts") if document_context else None
                 )
 
+                accumulated_text = res.text
+                continuation_used = False
+                continuation_rounds = 0
+                tot_in_tokens = res.input_tokens or 0
+                tot_out_tokens = res.output_tokens or 0
+                current_finish = res.finish_reason
+
+                # Seamless continuation loop if truncated by length
+                while is_length_truncated(current_finish) and continuation_rounds < MAX_CONTINUATION_ROUNDS:
+                    continuation_rounds += 1
+                    continuation_used = True
+                    logger.info(
+                        "Response truncated by length on %s/%s (round %d). Continuing generation...",
+                        provider_name, model_id, continuation_rounds
+                    )
+                    cont_messages = list(call_messages) + [
+                        {"role": "assistant", "content": accumulated_text},
+                        {"role": "user", "content": CONTINUATION_PROMPT}
+                    ]
+                    try:
+                        cont_res = provider.generate(
+                            messages=cont_messages,
+                            system_prompt=sys_prompt,
+                            max_tokens=token_budget,
+                            model_id=model_id,
+                            json_output=json_output,
+                            multimodal_parts=None
+                        )
+                        accumulated_text = stitch_continuation(accumulated_text, cont_res.text)
+                        tot_in_tokens += cont_res.input_tokens or 0
+                        tot_out_tokens += cont_res.output_tokens or 0
+                        current_finish = cont_res.finish_reason
+                    except Exception as cont_err:
+                        logger.warning("Continuation round %d failed (%s): returning accumulated text so far", continuation_rounds, cont_err)
+                        break
+
                 # Record successful telemetry
                 global_telemetry.record(TelemetryRecord(
                     request_id=req_id,
@@ -162,16 +222,18 @@ class AIRouter:
                     depth=resolved_depth.value,
                     provider=provider_name,
                     model=res.model,
-                    latency_ms=res.latency_ms,
-                    input_tokens=res.input_tokens,
-                    output_tokens=res.output_tokens,
+                    latency_ms=(time.perf_counter() - start_all) * 1000.0,
+                    input_tokens=tot_in_tokens or None,
+                    output_tokens=tot_out_tokens or None,
                     fallback_used=fallback_used,
                     fallback_from=fallback_from,
-                    status="success" if not fallback_used else "fallback_recovered"
+                    status="success" if not fallback_used else "fallback_recovered",
+                    continuation_used=continuation_used,
+                    continuation_rounds=continuation_rounds
                 ))
 
                 return RouterResponse(
-                    text=res.text,
+                    text=accumulated_text,
                     task=resolved_task,
                     depth=resolved_depth,
                     provider=provider_name,
@@ -179,9 +241,11 @@ class AIRouter:
                     latency_ms=(time.perf_counter() - start_all) * 1000.0,
                     fallback_used=fallback_used,
                     fallback_from=fallback_from,
-                    input_tokens=res.input_tokens,
-                    output_tokens=res.output_tokens,
-                    citations=citations
+                    input_tokens=tot_in_tokens or None,
+                    output_tokens=tot_out_tokens or None,
+                    citations=citations,
+                    continuation_used=continuation_used,
+                    continuation_rounds=continuation_rounds
                 )
             except Exception as e:
                 last_exc = e
@@ -229,7 +293,6 @@ class AIRouter:
         req_id = request_id or str(uuid.uuid4())
         resolved_depth = ResponseDepth.from_str(str(depth)) if depth else ResponseDepth.BALANCED
         resolved_task = classify_task(prompt, messages, document_context, explicit_task=task, depth=resolved_depth)
-        token_budget = self._resolve_budget(resolved_task, resolved_depth, max_tokens)
         sys_prompt = system_prompt or "You are Brainy, an intelligent, empathetic, academic AI study companion."
 
         call_messages = list(messages) if messages else []
@@ -253,6 +316,19 @@ class AIRouter:
 
             started = False
             first_token_t = None
+            accumulated_text = ""
+            continuation_used = False
+            continuation_rounds = 0
+            est_in_tokens = len(str(call_messages)) // 4
+            token_budget = self._resolve_budget(
+                resolved_task,
+                resolved_depth,
+                max_tokens=max_tokens,
+                provider_name=provider_name,
+                model_id=model_id,
+                estimated_input_tokens=est_in_tokens
+            )
+
             try:
                 for token in provider.stream(
                     messages=call_messages,
@@ -265,7 +341,49 @@ class AIRouter:
                         if not started:
                             started = True
                             first_token_t = (time.perf_counter() - start_t) * 1000.0
+                        accumulated_text += token
                         yield token
+
+                # Check if stream ended due to length truncation
+                while is_length_truncated(getattr(provider, "last_stream_finish_reason", None)) and continuation_rounds < MAX_CONTINUATION_ROUNDS:
+                    continuation_rounds += 1
+                    continuation_used = True
+                    logger.info(
+                        "Stream truncated by length on %s/%s (round %d). Continuing stream...",
+                        provider_name, model_id, continuation_rounds
+                    )
+                    cont_messages = list(call_messages) + [
+                        {"role": "assistant", "content": accumulated_text},
+                        {"role": "user", "content": CONTINUATION_PROMPT}
+                    ]
+                    first_cont_chunk = True
+                    round_chunks = 0
+                    try:
+                        for token in provider.stream(
+                            messages=cont_messages,
+                            system_prompt=sys_prompt,
+                            max_tokens=token_budget,
+                            model_id=model_id,
+                            multimodal_parts=None
+                        ):
+                            if token:
+                                if first_cont_chunk:
+                                    first_cont_chunk = False
+                                    clean_token = deduplicate_stream_overlap(accumulated_text, token)
+                                    if clean_token:
+                                        accumulated_text += clean_token
+                                        round_chunks += 1
+                                        yield clean_token
+                                else:
+                                    accumulated_text += token
+                                    round_chunks += 1
+                                    yield token
+                    except Exception as cont_stream_err:
+                        logger.warning("Streaming continuation round %d aborted: %s", continuation_rounds, cont_stream_err)
+                        break
+
+                    if round_chunks == 0:
+                        break
 
                 if started:
                     # Successfully completed stream
@@ -280,7 +398,9 @@ class AIRouter:
                         ttft_ms=first_token_t,
                         fallback_used=fallback_used,
                         fallback_from=fallback_from,
-                        status="success" if not fallback_used else "fallback_recovered"
+                        status="success" if not fallback_used else "fallback_recovered",
+                        continuation_used=continuation_used,
+                        continuation_rounds=continuation_rounds
                     ))
                     return
             except Exception as e:

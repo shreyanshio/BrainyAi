@@ -50,6 +50,9 @@ def is_model_not_found(exc: Exception) -> bool:
     ])
 
 class BaseProvider(ABC):
+    def __init__(self):
+        self.last_stream_finish_reason: Optional[str] = None
+
     def is_available(self) -> bool:
         return True
 

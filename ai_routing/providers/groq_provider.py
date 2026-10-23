@@ -13,6 +13,7 @@ logger = logging.getLogger("groq_provider")
 
 class GroqProvider(BaseProvider):
     def __init__(self):
+        super().__init__()
         self._client_pool: Dict[str, Groq] = {}
 
     def _get_client(self, api_key: str) -> Groq:
@@ -52,7 +53,7 @@ class GroqProvider(BaseProvider):
                     kwargs: Dict[str, Any] = {
                         "model": model,
                         "messages": [{"role": "system", "content": system_prompt}] + messages,
-                        "max_tokens": max_tokens or 1024,
+                        "max_tokens": max_tokens or 4096,
                     }
                     if json_output:
                         kwargs["response_format"] = {"type": "json_object"}
@@ -93,6 +94,7 @@ class GroqProvider(BaseProvider):
         model_id: Optional[str] = None,
         multimodal_parts: Optional[List[Dict[str, Any]]] = None
     ) -> Iterator[str]:
+        self.last_stream_finish_reason = None
         rot = registry.get_rotator("groq")
         if not rot or rot.key_count == 0:
             raise RuntimeError("NO_KEYS: groq")
@@ -111,7 +113,7 @@ class GroqProvider(BaseProvider):
                     kwargs: Dict[str, Any] = {
                         "model": model,
                         "messages": [{"role": "system", "content": system_prompt}] + messages,
-                        "max_tokens": max_tokens or 1024,
+                        "max_tokens": max_tokens or 4096,
                         "stream": True
                     }
                     if any(term in model.lower() for term in ("r1", "reasoning", "deepseek")):
@@ -120,7 +122,11 @@ class GroqProvider(BaseProvider):
                     stream_resp = client.chat.completions.create(**kwargs)
                     for chunk in stream_resp:
                         if chunk.choices and len(chunk.choices) > 0:
-                            delta = chunk.choices[0].delta
+                            c0 = chunk.choices[0]
+                            fr = getattr(c0, "finish_reason", None)
+                            if fr:
+                                self.last_stream_finish_reason = fr
+                            delta = c0.delta
                             if delta and delta.content:
                                 yield delta.content
                     return
