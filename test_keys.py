@@ -133,6 +133,41 @@ def test_openrouter(key):
             last_err = str(e)
     return "FAILED", last_err[:120]
 
+def test_sambanova(key):
+    models = ["Meta-Llama-3.3-70B-Instruct", "Qwen2.5-72B-Instruct", "Meta-Llama-3.1-8B-Instruct"]
+    last_err = ""
+    for model in models:
+        try:
+            r = requests.post(
+                "https://api.sambanova.ai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json={"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 5},
+                timeout=12
+            )
+            if r.status_code == 200:
+                ans = r.json()["choices"][0]["message"]["content"].strip()
+                return "SUCCESS", f"Model: {model} responded: '{ans}'"
+            else:
+                last_err = f"Status {r.status_code}: {r.text[:100]}"
+                continue
+        except Exception as e:
+            last_err = str(e)
+    return "FAILED", last_err[:120]
+
+def test_tavily(key):
+    try:
+        r = requests.post(
+            "https://api.tavily.com/search",
+            headers={"Content-Type": "application/json"},
+            json={"api_key": key, "query": "ping", "max_results": 1},
+            timeout=10
+        )
+        if r.status_code == 200:
+            return "SUCCESS", "Tavily search API responded 200 OK"
+        return "FAILED", f"Status {r.status_code}: {r.text[:100]}"
+    except Exception as e:
+        return "FAILED", str(e)[:120]
+
 def main():
     print("=" * 60)
     print("      BrainyAI Provider & API Key Diagnostic Test       ")
@@ -141,8 +176,10 @@ def main():
     providers = [
         ("Groq", "GROQ_API_KEY", test_groq),
         ("Gemini", "GEMINI_API_KEY", test_gemini),
+        ("SambaNova", "SAMBANOVA_API_KEY", test_sambanova),
         ("Cerebras", "CEREBRAS_API_KEY", test_cerebras),
         ("OpenRouter", "OPENROUTER_API_KEY", test_openrouter),
+        ("Tavily", "TAVILY_API_KEY", test_tavily),
     ]
 
     total_keys = 0

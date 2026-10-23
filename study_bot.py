@@ -1172,13 +1172,27 @@ ABUSE_KEYWORDS = [
 #   MULTI-PROVIDER AI ENGINE
 
 def _rotate_key(provider: str, keys: list) -> str:
-    key = keys[key_idx[provider]]
-    key_idx[provider] = (key_idx[provider] + 1) % len(keys)
+    if not keys:
+        return ""
+    idx = key_idx.get(provider, 0)
+    key = keys[idx % len(keys)]
+    key_idx[provider] = (idx + 1) % len(keys)
     return key
 
 def _is_rate_err(e: Exception) -> bool:
     s = str(e).lower()
-    return any(w in s for w in ["rate limit", "quota", "exceeded", "429", "402", "too many"])
+    return any(w in s for w in [
+        "rate limit", "quota", "exceeded", "429", "402", "too many",
+        "resource_exhausted", "tokens per minute", "requests per minute",
+        "tpm", "rpm", "throttled", "overloaded"
+    ])
+
+def _is_key_err(e: Exception) -> bool:
+    s = str(e).lower()
+    return _is_rate_err(e) or any(w in s for w in [
+        "401", "403", "unauthorized", "forbidden", "invalid_api_key",
+        "api key not valid", "invalid api key", "credit", "balance", "insufficient"
+    ])
 
 import threading
 import json
@@ -1234,13 +1248,13 @@ def _call_groq(messages, system_prompt, max_tokens):
                 truncated = resp.choices[0].finish_reason == "length"
                 return resp.choices[0].message.content, truncated
             except Exception as e:
+                last_err = e
                 err_s = str(e).lower()
                 if "model" in err_s or "404" in err_s:
                     continue
-                if _is_rate_err(e):
-                    break
-                raise
-    raise Exception("All Groq keys exhausted")
+                print(f"[groq_call] Groq key failure ({type(e).__name__}): {str(e)[:80]}, rotating to next key...")
+                break
+    raise Exception(f"All Groq keys exhausted: {last_err}")
 
 def _stream_groq(messages, system_prompt, max_tokens, model_id=None):
     if not GROQ_API_KEYS:
@@ -1344,7 +1358,11 @@ def _stream_cerebras(messages, system_prompt, max_tokens, model_id=None):
                     return
                 except Exception as me:
                     last_err = me
-                    continue
+                    err_s = str(me).lower()
+                    if "404" in err_s or "not found" in err_s or "model" in err_s:
+                        continue
+                    print(f"[cerebras_stream] Cerebras key failure ({type(me).__name__}): {str(me)[:80]}, rotating to next key...")
+                    break
         except Exception as e:
             last_err = e
             continue
@@ -1403,7 +1421,11 @@ def _stream_openrouter(messages, system_prompt, max_tokens, model_id=None):
                 return
             except Exception as e:
                 last_err = e
-                continue
+                err_s = str(e).lower()
+                if "404" in err_s or "not found" in err_s or "no endpoints" in err_s:
+                    continue
+                print(f"[openrouter_stream] OpenRouter key failure ({type(e).__name__}): {str(e)[:80]}, rotating to next key...")
+                break
     raise Exception(f"All OpenRouter keys/models failed: {last_err}")
 
 def _stream_gemini(messages, system_prompt, max_tokens, model_id=None):
@@ -1453,7 +1475,11 @@ def _stream_gemini(messages, system_prompt, max_tokens, model_id=None):
                     return
                 except Exception as me:
                     last_err = me
-                    continue
+                    err_s = str(me).lower()
+                    if "404" in err_s or "not found" in err_s:
+                        continue
+                    print(f"[gemini_stream] Gemini key failure ({type(me).__name__}): {str(me)[:80]}, rotating to next key...")
+                    break
         except Exception as e:
             last_err = e
             continue
@@ -1626,20 +1652,16 @@ def _call_cerebras(messages, system_prompt, max_tokens):
                     print(f"Cerebras model used: {model}")
                     return message["content"], truncated
                 except Exception as me:
+                    last_err = me
                     if "404" in str(me) or "not found" in str(me).lower() or "model" in str(me).lower():
                         print(f"Cerebras model {model} not found, trying next...")
-                        last_err = me
                         continue
-                    raise me
-            if last_err:
-                raise last_err
+                    print(f"[cerebras_call] Cerebras key failure ({type(me).__name__}): {str(me)[:80]}, rotating to next key...")
+                    break
         except Exception as e:
-            if _is_rate_err(e):
-                print(f"Cerebras key exhausted, rotating...")
-                continue
-            if "404" not in str(e) and "model" not in str(e).lower():
-                raise
-    raise Exception("NO_KEYS: cerebras")
+            last_err = e
+            continue
+    raise Exception(f"All Cerebras keys/models failed: {last_err}")
 
 def _call_mistral(messages, system_prompt, max_tokens):
     """Mistral La Plateforme — free tier (Experiment plan), Mistral Small + Codestral"""
@@ -1724,33 +1746,84 @@ def _call_openrouter(messages, system_prompt, max_tokens):
                 truncated = data["choices"][0].get("finish_reason") == "length"
                 return data["choices"][0]["message"]["content"], truncated
             except Exception as e:
+                last_err = e
                 err_str = str(e).lower()
                 if "404" in err_str or "no longer" in err_str or "not found" in err_str:
                     print(f"OpenRouter model {model} unavailable, trying next free model...")
-                    last_err = e
                     continue
-                if _is_rate_err(e):
-                    last_err = e
-                    continue
-                last_err = e
+                print(f"[openrouter_call] OpenRouter key failure ({type(e).__name__}): {str(e)[:80]}, rotating to next key...")
                 break
-        if last_err and _is_rate_err(last_err):
-            continue
-    raise Exception("NO_KEYS: openrouter")
+    raise Exception(f"All OpenRouter keys/models failed: {last_err}")
 
 
 
-def _call_sambanova(messages, system_prompt, max_tokens):
-    """SambaNova Cloud — free tier, fast Meta Llama models"""
+def _stream_sambanova(messages, system_prompt, max_tokens, model_id=None):
     if not SAMBANOVA_API_KEYS:
         raise Exception("NO_KEYS: sambanova")
     SAMBANOVA_MODELS = [
         "Meta-Llama-3.3-70B-Instruct",
+        "Qwen2.5-72B-Instruct",
         "Meta-Llama-3.1-8B-Instruct",
     ]
+    last_err = None
+    for _ in range(len(SAMBANOVA_API_KEYS)):
+        try:
+            key = _rotate_key("sambanova", SAMBANOVA_API_KEYS)
+            for model in SAMBANOVA_MODELS:
+                try:
+                    payload = {
+                        "model": model,
+                        "max_tokens": max_tokens or 1024,
+                        "messages": [{"role": "system", "content": system_prompt}] + messages,
+                        "stream": True
+                    }
+                    resp = requests.post(
+                        "https://api.sambanova.ai/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                        json=payload,
+                        stream=True,
+                        timeout=25
+                    )
+                    resp.raise_for_status()
+                    for line in resp.iter_lines():
+                        if line:
+                            line_str = line.decode("utf-8")
+                            if line_str.startswith("data: "):
+                                data_str = line_str[6:].strip()
+                                if data_str == "[DONE]":
+                                    break
+                                try:
+                                    chunk_obj = json.loads(data_str)
+                                    delta = chunk_obj["choices"][0]["delta"].get("content")
+                                    if delta:
+                                        yield delta
+                                except Exception:
+                                    continue
+                    return
+                except Exception as me:
+                    last_err = me
+                    err_s = str(me).lower()
+                    if "404" in err_s or "not found" in err_s or "model" in err_s:
+                        continue
+                    print(f"[sambanova_stream] SambaNova key failure ({type(me).__name__}): {str(me)[:80]}, rotating to next key...")
+                    break
+        except Exception as e:
+            last_err = e
+            continue
+    raise Exception(f"All SambaNova keys/models failed: {last_err}")
+
+def _call_sambanova(messages, system_prompt, max_tokens):
+    """SambaNova Cloud — free tier, fast Meta Llama & Qwen models"""
+    if not SAMBANOVA_API_KEYS:
+        raise Exception("NO_KEYS: sambanova")
+    SAMBANOVA_MODELS = [
+        "Meta-Llama-3.3-70B-Instruct",
+        "Qwen2.5-72B-Instruct",
+        "Meta-Llama-3.1-8B-Instruct",
+    ]
+    last_err = None
     for _ in range(len(SAMBANOVA_API_KEYS)):
         key = _rotate_key("sambanova", SAMBANOVA_API_KEYS)
-        last_err = None
         for model in SAMBANOVA_MODELS:
             try:
                 payload = {
@@ -1768,19 +1841,13 @@ def _call_sambanova(messages, system_prompt, max_tokens):
                 truncated = data["choices"][0].get("finish_reason") == "length"
                 return data["choices"][0]["message"]["content"], truncated
             except Exception as e:
+                last_err = e
                 err_str = str(e).lower()
                 if "404" in err_str or "not found" in err_str or "model" in err_str:
-                    last_err = e
                     continue
-                if _is_rate_err(e):
-                    print(f"SambaNova key rate-limited, rotating...")
-                    last_err = e
-                    break
-                last_err = e
+                print(f"[sambanova_call] SambaNova key failure ({type(e).__name__}): {str(e)[:80]}, rotating to next key...")
                 break
-        if last_err and not _is_rate_err(last_err):
-            raise last_err
-    raise Exception("NO_KEYS: sambanova")
+    raise Exception(f"All SambaNova keys/models failed: {last_err}")
 
 
 def _call_together(messages, system_prompt, max_tokens):
@@ -2387,9 +2454,10 @@ def ai_stream(messages, system_prompt=None, max_tokens=None, model_id=None):
         }
         max_tokens = TOKEN_MAP.get(q_type, 600)
 
-    # Streaming provider hierarchy: Groq is fastest (~250-700 tok/s), followed by Cerebras, Gemini, OpenRouter
+    # Streaming provider hierarchy: Groq is fastest (~250-700 tok/s), followed by SambaNova, Cerebras, Gemini, OpenRouter
     streaming_providers = [
         ("Groq", _stream_groq),
+        ("SambaNova", _stream_sambanova),
         ("Cerebras", _stream_cerebras),
         ("Gemini", _stream_gemini),
         ("OpenRouter", _stream_openrouter),
