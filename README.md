@@ -122,8 +122,6 @@ flowchart TD
     BotWorker -->|service_role REST client| Supabase
 ```
 
-For an in-depth breakdown of trust boundaries, sequence diagrams, and authentication lifecycle, see [**docs/ARCHITECTURE.md**](docs/ARCHITECTURE.md).
-
 ---
 
 ## 5. Prerequisites
@@ -256,7 +254,7 @@ Brainy AI stores state across 8 PostgreSQL tables managed with Row Level Securit
 7. `quiz_polls`: Interactive Telegram MCQs and answer keys.
 8. `quiz_scores`: Cumulative quiz scores and leaderboards.
 
-For detailed schema specifications and index documentation, see [**docs/DATABASE.md**](docs/DATABASE.md).
+For the complete schema specifications and SQL scripts, see [`supabase_schema.sql`](supabase_schema.sql).
 
 ---
 
@@ -274,8 +272,6 @@ Brainy AI is architected for deployment across **Cloudflare Workers** and **Rail
   Railway automatically detects the repository's [`Procfile`](Procfile) and starts:
   - `web: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120`
   - `worker: python study_bot.py`
-
-For detailed production configuration, custom domain mapping, and CORS alignment, consult [**docs/DEPLOYMENT.md**](docs/DEPLOYMENT.md).
 
 ---
 
@@ -308,22 +304,7 @@ npm run build
 
 ---
 
-## 12. Documentation Directory
-
-* 📖 [**Architecture & System Design**](docs/ARCHITECTURE.md)
-* 🧰 [**Reliability Contracts & Operations**](docs/RELIABILITY.md)
-* 📡 [**REST API Reference**](docs/API.md)
-* 🗄️ [**Database & Schema Reference**](docs/DATABASE.md)
-* 🚀 [**Production Deployment Guide**](docs/DEPLOYMENT.md)
-* 🤝 [**Contributing Guidelines**](CONTRIBUTING.md)
-* 🛡️ [**Security Policy**](SECURITY.md)
-* 📜 [**Code of Conduct**](CODE_OF_CONDUCT.md)
-* 📋 [**Changelog**](CHANGELOG.md)
-* 💡 [**Support & Community**](SUPPORT.md)
-
----
-
-## 13. License & Disclaimer
+## 12. License & Disclaimer
 
 Brainy AI is distributed under the terms of the **MIT License**. See [`LICENSE`](LICENSE) for details.
 
