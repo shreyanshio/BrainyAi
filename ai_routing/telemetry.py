@@ -130,3 +130,5 @@ class AITelemetry:
 
 # Singleton instance
 global_telemetry = AITelemetry()
+telemetry = global_telemetry
+AITelemetry.get_provider_summary = AITelemetry.get_provider_health_summary

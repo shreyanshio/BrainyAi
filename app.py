@@ -36,7 +36,8 @@ import study_bot
 from security import (
     security_guard, login_required, sanitize_input,
     is_blacklisted, check_rate_limit, rate_limit_retry_after, log_security_event, security_headers,
-    create_auth_token, verify_auth_token, _get_auth_secret_key, RateLimitStoreUnavailable
+    create_auth_token, verify_auth_token, _get_auth_secret_key, RateLimitStoreUnavailable,
+    validate_csrf_origin
 )
 from security import _is_production
 
@@ -45,6 +46,8 @@ app = Flask(__name__)
 DEFAULT_ALLOWED_ORIGINS = [
     "https://brainyai.cenai.workers.dev",
     "https://brainy.cenai.workers.dev",
+    "https://web.telegram.org",
+    "https://telegram.org",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5000",
@@ -124,21 +127,31 @@ def admin_required(f):
     """
     @wraps(f)
     def decorated(*args, **kwargs):
-        # 1. Check Bearer token from Authorization header if session not yet set
-        if "user_id" not in session:
-            auth_header = request.headers.get("Authorization", "")
-            if auth_header.startswith("Bearer "):
+        # 1. Check Bearer token from Authorization header (case-insensitive)
+        auth_header = request.headers.get("Authorization", "").strip()
+        if auth_header:
+            if auth_header.lower().startswith("bearer "):
                 token = auth_header[7:].strip()
                 payload = verify_auth_token(token)
-                if payload and payload.get("sub"):
-                    session["user_id"] = payload["sub"]
-                    session["username"] = payload.get("username", "")
-                    session["first_name"] = payload.get("name", "Admin")
-                    session["email"] = payload.get("email", "")
-                    session["role"] = payload.get("role", "")
-
-        if "user_id" not in session:
+                if not payload or not payload.get("sub"):
+                    return jsonify({"error": "Invalid or expired token"}), 401
+                session["user_id"] = payload["sub"]
+                session["username"] = payload.get("username", "")
+                session["first_name"] = payload.get("name", "Admin")
+                session["email"] = payload.get("email", "")
+                session["role"] = payload.get("role", "")
+                request.authenticated_user_id = payload["sub"]
+            else:
+                return jsonify({"error": "Invalid Authorization header format"}), 401
+        elif "user_id" in session:
+            # Enforce CSRF origin validation on cookie-authenticated state-changing admin requests
+            if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+                if not validate_csrf_origin(request):
+                    log_security_event("csrf_admin_origin_rejected", request.remote_addr or "unknown", session.get("user_id"), f"Origin: {request.headers.get('Origin')}")
+                    return jsonify({"error": "Cross-site request validation failed", "code": "CSRF_ORIGIN_REJECTED"}), 403
+        else:
             return jsonify({"error": "Authentication required"}), 401
+
         if not is_admin_session():
             return jsonify({"error": "Forbidden - Administrator access required"}), 403
         return f(*args, **kwargs)
@@ -508,6 +521,8 @@ MODELS_CATALOG = [
         "recommendedFor": "Exam revision & high-yield practice"
     }
 ]
+
+ALLOWED_MODELS = {m["id"] for m in MODELS_CATALOG}
 
 
 def format_for_web(text: str) -> str:
@@ -2190,6 +2205,8 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
     if len(content) > 12000:
         return None, jsonify({"error": "Message is too long (maximum 12,000 characters).", "code": "MESSAGE_TOO_LONG"}), 413
     model_id = (data.get("model") or "brainy-fast").strip().lower()
+    if model_id not in ALLOWED_MODELS:
+        model_id = "brainy-fast"
     answer_length = (data.get("answer_length") or "short").strip().lower()
 
     if not content:
@@ -2922,7 +2939,7 @@ def admin_ai_health():
         })
     except Exception as e:
         logger.error("Failed to fetch AI health telemetry: %s", e)
-        return jsonify({"error": "Failed to fetch telemetry", "details": str(e)}), 500
+        return jsonify({"error": "Failed to fetch telemetry", "request_id": getattr(g, "request_id", None)}), 500
 
 
 # ── PDF STUDY STUDIO API ENDPOINTS ────────────────────────────────────────
@@ -2950,7 +2967,7 @@ def upload_pdf_document():
         return jsonify({"error": str(se)}), 403
     except Exception as e:
         logger.error("PDF upload error user_id=%s file=%s: %s", user_id, filename, e)
-        return jsonify({"error": "Failed to process PDF document.", "details": str(e)}), 500
+        return jsonify({"error": "Failed to process PDF document.", "request_id": getattr(g, "request_id", None)}), 500
 
 
 @app.route("/api/pdf/documents", methods=["GET"])
@@ -3023,7 +3040,7 @@ def generate_pdf_notes(doc_id):
         return jsonify({"error": str(se)}), 403
     except Exception as e:
         logger.error("Note generation error doc_id=%s: %s", doc_id, e)
-        return jsonify({"error": "Failed to generate notes.", "details": str(e)}), 500
+        return jsonify({"error": "Failed to generate notes.", "request_id": getattr(g, "request_id", None)}), 500
 
 
 @app.route("/api/pdf/documents/<doc_id>/notes", methods=["GET"])
@@ -3069,7 +3086,7 @@ def ask_pdf_document(doc_id):
         return jsonify({"error": str(se)}), 403
     except Exception as e:
         logger.error("Ask document error doc_id=%s: %s", doc_id, e)
-        return jsonify({"error": "Failed to answer document question.", "details": str(e)}), 500
+        return jsonify({"error": "Failed to answer document question.", "request_id": getattr(g, "request_id", None)}), 500
 
 
 @app.route("/api/pdf/documents/<doc_id>/quiz", methods=["POST"])
@@ -3093,7 +3110,7 @@ def generate_pdf_quiz(doc_id):
         return jsonify({"error": str(se)}), 403
     except Exception as e:
         logger.error("Quiz generation error doc_id=%s: %s", doc_id, e)
-        return jsonify({"error": "Failed to generate quiz.", "details": str(e)}), 500
+        return jsonify({"error": "Failed to generate quiz.", "request_id": getattr(g, "request_id", None)}), 500
 
 
 @app.route("/api/pdf/documents/<doc_id>/quiz", methods=["GET"])
@@ -3135,7 +3152,7 @@ def submit_pdf_quiz_attempt(quiz_id):
         return jsonify({"error": str(se)}), 403
     except Exception as e:
         logger.error("Quiz attempt submission error quiz_id=%s: %s", quiz_id, e)
-        return jsonify({"error": "Failed to grade quiz attempt.", "details": str(e)}), 500
+        return jsonify({"error": "Failed to grade quiz attempt.", "request_id": getattr(g, "request_id", None)}), 500
 
 
 @app.route("/api/pdf/documents/<doc_id>/flashcards", methods=["POST"])
@@ -3159,7 +3176,7 @@ def generate_pdf_flashcards(doc_id):
         return jsonify({"error": str(se)}), 403
     except Exception as e:
         logger.error("Flashcards generation error doc_id=%s: %s", doc_id, e)
-        return jsonify({"error": "Failed to generate flashcards.", "details": str(e)}), 500
+        return jsonify({"error": "Failed to generate flashcards.", "request_id": getattr(g, "request_id", None)}), 500
 
 
 @app.route("/api/pdf/documents/<doc_id>/flashcards", methods=["GET"])

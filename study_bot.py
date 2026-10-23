@@ -855,11 +855,7 @@ def web_search(query: str, max_results: int = 5) -> str:
     Use Tavily for full web results when configured, then DuckDuckGo's
     Instant Answer API. DDG is not a full web-search results API.
     """
-    def safe_url(value):
-        if not isinstance(value, str):
-            return ""
-        parsed = urlparse(value)
-        return value if parsed.scheme in ("https", "http") and parsed.netloc else ""
+    from ai_routing.providers.search_provider import is_safe_url as safe_url
 
     # ── PRIMARY: Tavily API ──────────────────────────────────
     if TAVILY_API_KEYS:

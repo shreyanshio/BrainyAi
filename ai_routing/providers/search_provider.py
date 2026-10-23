@@ -3,6 +3,7 @@ Search grounding engine combining Tavily Search API with DuckDuckGo fallback.
 """
 
 import logging
+import ipaddress
 import requests
 from urllib.parse import urlparse
 from typing import Dict, Any, List, Optional
@@ -10,11 +11,70 @@ from ai_routing.registry import registry
 
 logger = logging.getLogger("search_provider")
 
+FORBIDDEN_HOSTNAMES = {
+    "localhost",
+    "127.0.0.1",
+    "::1",
+    "0.0.0.0",
+    "metadata.google.internal",
+    "metadata",
+    "instance-data",
+    "local",
+}
+
 def is_safe_url(url: str) -> str:
+    """
+    Validates that a URL is a well-formed, safe public HTTP/HTTPS URL.
+    Blocks SSRF targets including loopback, link-local, cloud metadata services,
+    and private IP ranges (RFC 1918 / RFC 4193).
+    """
     if not url or not isinstance(url, str):
         return ""
-    parsed = urlparse(url)
-    return url if parsed.scheme in ("https", "http") and parsed.netloc else ""
+    try:
+        parsed = urlparse(url.strip())
+        if parsed.scheme not in ("http", "https"):
+            return ""
+        hostname = parsed.hostname
+        if not hostname:
+            return ""
+        hostname_clean = hostname.strip().lower()
+
+        # Disallow userinfo (e.g. user:pass@host)
+        if parsed.username or parsed.password:
+            return ""
+
+        # Disallow forbidden hostnames
+        if (
+            hostname_clean in FORBIDDEN_HOSTNAMES
+            or hostname_clean.endswith(".local")
+            or hostname_clean.endswith(".internal")
+            or hostname_clean.endswith(".localhost")
+        ):
+            return ""
+
+        # Disallow non-standard ports (e.g. internal admin ports)
+        if parsed.port and parsed.port not in (80, 443, 8080, 8443):
+            return ""
+
+        # Check if hostname is an IP address
+        try:
+            ip = ipaddress.ip_address(hostname_clean)
+            if (
+                ip.is_private
+                or ip.is_loopback
+                or ip.is_link_local
+                or ip.is_reserved
+                or ip.is_multicast
+                or ip.is_unspecified
+            ):
+                return ""
+        except ValueError:
+            # Hostname is a domain name, not an IP literal
+            pass
+
+        return url.strip()
+    except Exception:
+        return ""
 
 def execute_search(query: str, max_results: int = 4) -> Dict[str, Any]:
     """

@@ -14,6 +14,7 @@ import base64
 import json
 import logging
 import uuid
+from urllib.parse import urlparse
 from functools import wraps
 from flask import request, jsonify, session, g
 import requests
@@ -303,13 +304,78 @@ def verify_auth_token(token: str) -> dict | None:
 
 # ── 5. SECURITY DECORATORS ───────────────────────────────
 
+DEFAULT_ALLOWED_ORIGINS = [
+    "https://brainyai.cenai.workers.dev",
+    "https://brainy.cenai.workers.dev",
+    "https://web.telegram.org",
+    "https://telegram.org",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5000",
+    "http://127.0.0.1:5000",
+]
+
+
+def get_allowed_origins() -> list[str]:
+    """Returns the combined set of allowed frontend and platform origins."""
+    origins = list(DEFAULT_ALLOWED_ORIGINS)
+    custom = os.getenv("ALLOWED_ORIGINS", "")
+    if custom:
+        for o in custom.split(","):
+            c = o.strip()
+            if c and c not in origins:
+                origins.append(c)
+    return origins
+
+
+def validate_csrf_origin(req, allowed_origins: list[str] = None) -> bool:
+    """Validates Origin/Referer for state-changing requests using ambient session cookies.
+    Returns True if the origin is trusted or matches request host.
+    Returns False if an untrusted cross-origin request is detected.
+    """
+    if allowed_origins is None:
+        allowed_origins = get_allowed_origins()
+
+    normalized_allowed = {o.rstrip("/").lower() for o in allowed_origins if o}
+    try:
+        if req.host_url:
+            normalized_allowed.add(req.host_url.rstrip("/").lower())
+    except Exception:
+        pass
+
+    origin = req.headers.get("Origin")
+    if origin:
+        origin_clean = origin.strip().rstrip("/").lower()
+        return origin_clean in normalized_allowed
+
+    referer = req.headers.get("Referer")
+    if referer:
+        try:
+            parsed = urlparse(referer.strip())
+            if parsed.scheme and parsed.netloc:
+                ref_origin = f"{parsed.scheme}://{parsed.netloc}".rstrip("/").lower()
+                return ref_origin in normalized_allowed
+        except Exception:
+            return False
+
+    sec_fetch_site = req.headers.get("Sec-Fetch-Site", "").lower()
+    if sec_fetch_site == "cross-site":
+        return False
+
+    sec_fetch_mode = req.headers.get("Sec-Fetch-Mode", "").lower()
+    if sec_fetch_mode in ("cors", "navigate") and not origin and not referer:
+        return False
+
+    return True
+
+
 def login_required(f):
     """Decorator: enforce valid authentication via Authorization Bearer token or session cookie.
 
     Checks in order:
     0. Pass OPTIONS requests (CORS preflight)
     1. Authorization: Bearer <token> (JWT / HMAC signed, case-insensitive)
-    2. Flask session cookie ('user_id' in session)
+    2. Flask session cookie ('user_id' in session) with CSRF Origin validation
 
     Populates session and request context with authenticated user details.
     Returns 401 if not authenticated.
@@ -324,21 +390,36 @@ def login_required(f):
 
         # 1. Check Bearer token from Authorization header (case-insensitive)
         auth_header = request.headers.get("Authorization", "").strip()
-        if auth_header.lower().startswith("bearer "):
-            token = auth_header[7:].strip()
-            payload = verify_auth_token(token)
-            if payload and payload.get("sub"):
-                session["user_id"] = payload["sub"]
-                session["username"] = payload.get("username", "")
-                session["first_name"] = payload.get("name", "Student")
-                session["email"] = payload.get("email", "")
-                session["role"] = payload.get("role", "student")
-                request.authenticated_user_id = payload["sub"]
-                g.auth_validation_ms = round((time.perf_counter() - auth_started) * 1000, 2)
-                return f(*args, **kwargs)
+        if auth_header:
+            if auth_header.lower().startswith("bearer "):
+                token = auth_header[7:].strip()
+                payload = verify_auth_token(token)
+                if payload and payload.get("sub"):
+                    session["user_id"] = payload["sub"]
+                    session["username"] = payload.get("username", "")
+                    session["first_name"] = payload.get("name", "Student")
+                    session["email"] = payload.get("email", "")
+                    session["role"] = payload.get("role", "student")
+                    request.authenticated_user_id = payload["sub"]
+                    g.auth_validation_ms = round((time.perf_counter() - auth_started) * 1000, 2)
+                    return f(*args, **kwargs)
+                response = jsonify({"error": "Invalid or expired token", "request_id": g.request_id})
+                response.headers["X-Request-ID"] = g.request_id
+                return response, 401
+            response = jsonify({"error": "Invalid Authorization header format", "request_id": g.request_id})
+            response.headers["X-Request-ID"] = g.request_id
+            return response, 401
 
         # 2. Check Flask session cookie
         if "user_id" in session:
+            # Enforce CSRF origin validation on state-changing methods authenticated via cookie alone
+            if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+                if not validate_csrf_origin(request):
+                    log_security_event("csrf_origin_rejected", request.remote_addr or "unknown", session.get("user_id"), f"Origin: {request.headers.get('Origin')}")
+                    response = jsonify({"error": "Cross-site request validation failed", "code": "CSRF_ORIGIN_REJECTED", "request_id": g.request_id})
+                    response.headers["X-Request-ID"] = g.request_id
+                    return response, 403
+
             request.authenticated_user_id = session["user_id"]
             g.auth_validation_ms = round((time.perf_counter() - auth_started) * 1000, 2)
             return f(*args, **kwargs)
@@ -449,8 +530,10 @@ def log_security_event(event_type: str, ip: str, user_id: int = None, detail: st
 def security_headers(response):
     """Add security headers to every HTTP response.
 
-    - Content-Security-Policy (CSP)
-    - X-Frame-Options: DENY
+    - Content-Security-Policy (CSP) with frame-ancestors
+    - Strict-Transport-Security (HSTS) on HTTPS / Production
+    - Cache-Control: no-store on sensitive API endpoints
+    - X-Frame-Options: SAMEORIGIN
     - X-Content-Type-Options: nosniff
     - Referrer-Policy: strict-origin-when-cross-origin
     - Permissions-Policy: restrict geolocation, block microphone
@@ -463,10 +546,33 @@ def security_headers(response):
         "font-src 'self' https://fonts.gstatic.com; "
         "img-src 'self' data: https://*.googleusercontent.com https://lh3.googleusercontent.com; "
         "frame-src https://accounts.google.com; "
+        "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org; "
         "connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com"
     )
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
     response.headers['Permissions-Policy'] = 'geolocation=(self), microphone=()'
+
+    # HSTS: Strict-Transport-Security on HTTPS or production
+    try:
+        is_https = (
+            request.is_secure
+            or request.headers.get("X-Forwarded-Proto", "").lower() == "https"
+            or _is_production()
+        )
+        if is_https:
+            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    except Exception:
+        pass
+
+    # Cache-Control: Prevent caching for authenticated JSON API endpoints
+    try:
+        if request.path.startswith("/api/"):
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+    except Exception:
+        pass
+
     return response
