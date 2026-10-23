@@ -157,7 +157,7 @@ ASK5_SYSTEM_PROMPT      = ASK5_SYSTEM_PROMPT + "\n" + FONT_INSTRUCTIONS
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
-def _collect_keys(prefix: str, count: int = 10) -> list:
+def _collect_keys(prefix: str, count: int = 15) -> list:
     keys = []
     # 1. Singular environment variable (e.g. GROQ_API_KEY)
     single = os.getenv(prefix)
@@ -179,19 +179,19 @@ def _collect_keys(prefix: str, count: int = 10) -> list:
     return keys
 
 # ── API Keys (supports singular GROQ_API_KEY and multi-key GROQ_API_KEY_1..N) ──
-GROQ_API_KEYS       = _collect_keys("GROQ_API_KEY", 10)
+GROQ_API_KEYS       = _collect_keys("GROQ_API_KEY", 15)
 GROQ_FAST_MODEL = (os.getenv("GROQ_MODEL_FAST") or "qwen/qwen3.8-27b").strip()
 GROQ_BALANCED_MODEL = (os.getenv("GROQ_MODEL_BALANCED") or "openai/gpt-oss-120b").strip()
-NVIDIA_API_KEYS     = _collect_keys("NVIDIA_API_KEY", 10)
-DEEPSEEK_API_KEYS   = _collect_keys("DEEPSEEK_API_KEY", 10)
-GEMINI_API_KEYS     = _collect_keys("GEMINI_API_KEY", 10)
-TAVILY_API_KEYS     = _collect_keys("TAVILY_API_KEY", 10)
-CEREBRAS_API_KEYS   = _collect_keys("CEREBRAS_API_KEY", 10)
-OPENROUTER_API_KEYS = _collect_keys("OPENROUTER_API_KEY", 10)
-SAMBANOVA_API_KEYS  = _collect_keys("SAMBANOVA_API_KEY", 10)
-TOGETHER_API_KEYS   = _collect_keys("TOGETHER_API_KEY", 10)
-MISTRAL_API_KEYS    = _collect_keys("MISTRAL_API_KEY", 10)
-OPENAI_API_KEYS     = _collect_keys("OPENAI_API_KEY", 10)
+NVIDIA_API_KEYS     = _collect_keys("NVIDIA_API_KEY", 15)
+DEEPSEEK_API_KEYS   = _collect_keys("DEEPSEEK_API_KEY", 15)
+GEMINI_API_KEYS     = _collect_keys("GEMINI_API_KEY", 15)
+TAVILY_API_KEYS     = _collect_keys("TAVILY_API_KEY", 15)
+CEREBRAS_API_KEYS   = _collect_keys("CEREBRAS_API_KEY", 15)
+OPENROUTER_API_KEYS = _collect_keys("OPENROUTER_API_KEY", 15)
+SAMBANOVA_API_KEYS  = _collect_keys("SAMBANOVA_API_KEY", 15)
+TOGETHER_API_KEYS   = _collect_keys("TOGETHER_API_KEY", 15)
+MISTRAL_API_KEYS    = _collect_keys("MISTRAL_API_KEY", 15)
+OPENAI_API_KEYS     = _collect_keys("OPENAI_API_KEY", 15)
 
 # ── Supabase (used for broadcast user list — persists across restarts) ──
 SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").rstrip("/")          # e.g. https://xxxx.supabase.co

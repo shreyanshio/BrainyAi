@@ -230,16 +230,12 @@ Open two terminal windows:
 | `GOOGLE_CLIENT_ID` | Optional | Flask | Google OAuth 2.0 Client ID for Web Sign-In |
 | `TELEGRAM_TOKEN` | Optional | Bot | Telegram bot API token from @BotFather |
 | `OWNER_ID` | Optional | Bot | Telegram user ID of the bot maintainer |
-| `GROQ_API_KEY` | Recommended | Both | Groq API key (supports `GROQ_API_KEY_1..5`) |
-| `GEMINI_API_KEY` | Recommended | Both | Google Gemini API key (supports `GEMINI_API_KEY_1..5`) |
+| `GROQ_API_KEY` | Recommended | Both | Groq API key (supports `GROQ_API_KEY_1..8`) |
+| `GEMINI_API_KEY` | Recommended | Both | Google Gemini API key (supports `GEMINI_API_KEY_1..8`) |
 | `OPENROUTER_API_KEY`| Optional | Both | OpenRouter API key for DeepSeek fallback |
 | `TAVILY_API_KEY` | Optional | Both | Tavily API key for real-time live search grounding |
 | `GLOBAL_MESSAGE_LIMIT`| Optional | Flask | Number of queries per quota window (default: `30`) |
 | `QUOTA_WINDOW_HOURS`| Optional | Flask | Quota reset cycle in hours (default: `5`) |
-
-For a fully annotated template, inspect [`.env.example`](.env.example).
-
----
 
 ## 8. Database Architecture
 

@@ -21,7 +21,7 @@ try:
 except ImportError:
     pass
 
-def collect_keys(prefix, count=10):
+def collect_keys(prefix, count=15):
     keys = []
     single = os.getenv(prefix)
     if single and single.strip():
@@ -186,7 +186,7 @@ def main():
     found_any = False
 
     for name, prefix, test_fn in providers:
-        keys = collect_keys(prefix, 10)
+        keys = collect_keys(prefix, 15)
         total_keys += len(keys)
         print(f"\n[*] Testing {name} ({len(keys)} key(s) detected in environment):")
         if not keys:
