@@ -15,6 +15,13 @@ import {
   UserPreferences,
   StreamEvent,
   StreamChatCallbacks,
+  PdfDocument,
+  DocumentNote,
+  DocumentQuiz,
+  QuizAttempt,
+  DocumentFlashcardDeck,
+  DocumentStudyProgress,
+  AIHealthSummary,
 } from '@/types/api'
 
 export const AUTH_TOKEN_KEY = 'brainy_auth_token'
@@ -519,3 +526,131 @@ export async function deleteUserAccount(
 export async function fetchSystemHealth(): Promise<SystemHealthStatus> {
   return request<SystemHealthStatus>('/api/admin/health')
 }
+
+// ── PDF Study Studio APIs ────────────────────────────────────
+
+export async function uploadPdfDocument(file: File): Promise<PdfDocument> {
+  const base = getApiBase()
+  const url = `${base}/api/pdf/upload`
+  const token = getStoredToken()
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+  }
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: formData,
+  })
+
+  if (!response.ok) {
+    let errData: any = null
+    try {
+      errData = await response.json()
+    } catch {}
+    const msg = errData?.error || errData?.message || `Upload failed (${response.status})`
+    throw new ApiError(msg, response.status, errData)
+  }
+
+  const data = await response.json()
+  return data.document
+}
+
+export async function fetchPdfDocuments(): Promise<PdfDocument[]> {
+  const data = await request<{ documents: PdfDocument[] }>('/api/pdf/documents')
+  return data.documents || []
+}
+
+export async function fetchSinglePdfDocument(docId: string): Promise<PdfDocument> {
+  const data = await request<{ document: PdfDocument }>(`/api/pdf/documents/${docId}`)
+  return data.document
+}
+
+export async function deletePdfDocument(docId: string): Promise<void> {
+  await request<{ success: boolean; deleted_id: string }>(`/api/pdf/documents/${docId}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function generatePdfNotes(docId: string, depth: 'FAST' | 'BALANCED' | 'DEEP' = 'BALANCED'): Promise<DocumentNote> {
+  const data = await request<{ success: boolean; note: DocumentNote }>(`/api/pdf/documents/${docId}/notes`, {
+    method: 'POST',
+    body: JSON.stringify({ depth }),
+  })
+  return data.note
+}
+
+export async function fetchPdfNotes(docId: string): Promise<DocumentNote[]> {
+  const data = await request<{ notes: DocumentNote[] }>(`/api/pdf/documents/${docId}/notes`)
+  return data.notes || []
+}
+
+export async function askPdfDocument(
+  docId: string,
+  question: string,
+  depth: 'FAST' | 'BALANCED' | 'DEEP' = 'BALANCED'
+): Promise<{ answer: string; citations: number[]; model: string }> {
+  return request<{ answer: string; citations: number[]; model: string }>(`/api/pdf/documents/${docId}/ask`, {
+    method: 'POST',
+    body: JSON.stringify({ question, depth }),
+  })
+}
+
+export async function generatePdfQuiz(
+  docId: string,
+  numQuestions: number = 5,
+  depth: 'FAST' | 'BALANCED' | 'DEEP' = 'BALANCED'
+): Promise<DocumentQuiz> {
+  const data = await request<{ success: boolean; quiz: DocumentQuiz }>(`/api/pdf/documents/${docId}/quiz`, {
+    method: 'POST',
+    body: JSON.stringify({ num_questions: numQuestions, depth }),
+  })
+  return data.quiz
+}
+
+export async function fetchPdfQuizzes(docId: string): Promise<DocumentQuiz[]> {
+  const data = await request<{ quizzes: DocumentQuiz[] }>(`/api/pdf/documents/${docId}/quiz`)
+  return data.quizzes || []
+}
+
+export async function submitPdfQuizAttempt(quizId: string, selectedIndices: number[]): Promise<QuizAttempt> {
+  const data = await request<{ success: boolean; attempt: QuizAttempt }>(`/api/pdf/quizzes/${quizId}/attempt`, {
+    method: 'POST',
+    body: JSON.stringify({ selected_indices: selectedIndices }),
+  })
+  return data.attempt
+}
+
+export async function generatePdfFlashcards(
+  docId: string,
+  count: number = 6,
+  depth: 'FAST' | 'BALANCED' | 'DEEP' = 'BALANCED'
+): Promise<DocumentFlashcardDeck> {
+  const data = await request<{ success: boolean; flashcards: DocumentFlashcardDeck }>(`/api/pdf/documents/${docId}/flashcards`, {
+    method: 'POST',
+    body: JSON.stringify({ count, depth }),
+  })
+  return data.flashcards
+}
+
+export async function fetchPdfFlashcards(docId: string): Promise<DocumentFlashcardDeck[]> {
+  const data = await request<{ flashcards: DocumentFlashcardDeck[] }>(`/api/pdf/documents/${docId}/flashcards`)
+  return data.flashcards || []
+}
+
+export async function fetchPdfStudyProgress(docId: string): Promise<DocumentStudyProgress> {
+  const data = await request<{ progress: DocumentStudyProgress }>(`/api/pdf/documents/${docId}/progress`)
+  return data.progress
+}
+
+export async function fetchAIHealthTelemetry(): Promise<AIHealthSummary> {
+  return request<AIHealthSummary>('/api/admin/ai-health')
+}
+

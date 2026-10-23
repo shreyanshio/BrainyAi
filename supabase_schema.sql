@@ -386,3 +386,118 @@ grant select, insert, update, delete
   on public.chat_sessions, public.chat_messages, public.user_memory, public.user_quotas, public.rate_limit_buckets
   to service_role;
 
+
+
+-- ── 15. PDF STUDY STUDIO SCHEMA ─────────────────────────────────────────
+
+-- User documents table
+create table if not exists public.user_documents (
+  id uuid primary key default gen_random_uuid(),
+  user_id bigint not null,
+  filename text not null,
+  file_size bigint not null default 0,
+  page_count integer not null default 0,
+  storage_path text,
+  processing_status text not null default 'ready',
+  error_message text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_user_documents_user_id on public.user_documents (user_id, created_at desc);
+
+-- Document pages table (page-aware text index)
+create table if not exists public.document_pages (
+  id uuid primary key default gen_random_uuid(),
+  document_id uuid not null references public.user_documents(id) on delete cascade,
+  page_number integer not null,
+  text_content text not null default '',
+  token_count integer not null default 0,
+  has_images boolean not null default false,
+  headings jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_document_pages_doc_page on public.document_pages (document_id, page_number);
+
+-- Document notes table
+create table if not exists public.document_notes (
+  id uuid primary key default gen_random_uuid(),
+  document_id uuid not null references public.user_documents(id) on delete cascade,
+  user_id bigint not null,
+  depth text not null default 'BALANCED',
+  content text not null,
+  citations jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_document_notes_doc_user on public.document_notes (document_id, user_id, created_at desc);
+
+-- Document quizzes table
+create table if not exists public.document_quizzes (
+  id uuid primary key default gen_random_uuid(),
+  document_id uuid not null references public.user_documents(id) on delete cascade,
+  user_id bigint not null,
+  title text not null default 'Document Quiz',
+  questions jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_document_quizzes_doc_user on public.document_quizzes (document_id, user_id, created_at desc);
+
+-- Document quiz attempts table
+create table if not exists public.document_quiz_attempts (
+  id uuid primary key default gen_random_uuid(),
+  quiz_id uuid not null references public.document_quizzes(id) on delete cascade,
+  user_id bigint not null,
+  score integer not null default 0,
+  total integer not null default 0,
+  percentage numeric(5,2) not null default 0.00,
+  answers jsonb not null default '[]'::jsonb,
+  feedback jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_quiz_attempts_quiz_user on public.document_quiz_attempts (quiz_id, user_id, created_at desc);
+
+-- Document flashcards table
+create table if not exists public.document_flashcards (
+  id uuid primary key default gen_random_uuid(),
+  document_id uuid not null references public.user_documents(id) on delete cascade,
+  user_id bigint not null,
+  cards jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_document_flashcards_doc_user on public.document_flashcards (document_id, user_id, created_at desc);
+
+-- Document study progress table
+create table if not exists public.document_study_progress (
+  id uuid primary key default gen_random_uuid(),
+  user_id bigint not null,
+  document_id uuid not null references public.user_documents(id) on delete cascade,
+  notes_generated boolean not null default false,
+  quizzes_taken integer not null default 0,
+  best_quiz_score integer not null default 0,
+  cards_reviewed integer not null default 0,
+  last_studied_at timestamptz not null default now(),
+  constraint uq_user_document_progress unique (user_id, document_id)
+);
+
+create index if not exists idx_study_progress_user_doc on public.document_study_progress (user_id, document_id);
+
+-- Enable RLS
+alter table public.user_documents enable row level security;
+alter table public.document_pages enable row level security;
+alter table public.document_notes enable row level security;
+alter table public.document_quizzes enable row level security;
+alter table public.document_quiz_attempts enable row level security;
+alter table public.document_flashcards enable row level security;
+alter table public.document_study_progress enable row level security;
+
+-- Service role permissions
+grant select, insert, update, delete
+  on public.user_documents, public.document_pages, public.document_notes,
+     public.document_quizzes, public.document_quiz_attempts,
+     public.document_flashcards, public.document_study_progress
+  to service_role;

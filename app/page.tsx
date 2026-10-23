@@ -43,14 +43,15 @@ import { Composer } from '@/components/chat/Composer'
 import { UsageModal } from '@/components/modals/UsageModal'
 import { NotesModal } from '@/components/modals/NotesModal'
 import { SettingsModal } from '@/components/settings/SettingsModal'
+import { PdfStudioView } from '@/components/pdf/PdfStudioView'
 
 export default function BrainyApp() {
   // Auth state
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
 
-  // Active View: 'chat' (Study Chat Workspace by default) vs 'overview' (Aptivus Dashboard)
-  const [currentView, setCurrentView] = useState<'overview' | 'chat'>('chat')
+  // Active View: 'chat' (Study Chat Workspace by default) vs 'overview' (Aptivus Dashboard) vs 'pdf' (PDF Studio)
+  const [currentView, setCurrentView] = useState<'overview' | 'chat' | 'pdf'>('chat')
 
   // User Customization & Preferences
   const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES)
@@ -729,6 +730,9 @@ export default function BrainyApp() {
             onOpenUsageModal={() => setUsageModalOpen(true)}
             onOpenNotesModal={() => setNotesModalOpen(true)}
           />
+        ) : currentView === 'pdf' ? (
+          /* View 3: PDF Study Studio */
+          <PdfStudioView onBackToChat={() => setCurrentView('chat')} />
         ) : (
           /* View 2: Focused Chat Workspace */
           <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">

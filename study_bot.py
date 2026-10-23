@@ -2382,6 +2382,24 @@ MAX_CONTINUATION_ROUNDS = 4  # safety cap so one runaway answer can't loop forev
 
 def ai_call(messages, system_prompt=None, max_tokens=None):
     """
+    Intelligent routing with seamless continuation and fallback.
+    """
+    try:
+        from ai_routing.router import router
+        from ai_routing.tasks import classify_task, ResponseDepth
+        depth = ResponseDepth.BALANCED
+        if max_tokens and max_tokens <= 1024:
+            depth = ResponseDepth.FAST
+        elif max_tokens and max_tokens >= 2500:
+            depth = ResponseDepth.DEEP
+        task = classify_task(messages, system_prompt)
+        res = router.generate(messages, task=task, depth=depth, system_prompt=system_prompt, max_tokens=max_tokens)
+        if res and res.text:
+            return res.text
+    except Exception:
+        pass
+
+    """
     No more fixed truncation. max_tokens is just a *starting* budget — if the model's
     answer genuinely needs more space, we detect the cut-off (finish_reason == length /
     MAX_TOKENS) and automatically ask it to continue from where it stopped, stitching the
@@ -2442,6 +2460,19 @@ def ai_stream(messages, system_prompt=None, max_tokens=None, model_id=None):
     it automatically falls back to the next eligible provider without dropping the stream.
     """
     prompt = system_prompt or SYSTEM_PROMPT
+    try:
+        from ai_routing.router import router
+        from ai_routing.tasks import classify_task, ResponseDepth
+        depth = ResponseDepth.BALANCED
+        if max_tokens and max_tokens <= 1024:
+            depth = ResponseDepth.FAST
+        elif max_tokens and max_tokens >= 2500:
+            depth = ResponseDepth.DEEP
+        task = classify_task(messages, prompt)
+        yield from router.stream(messages, task=task, depth=depth, system_prompt=prompt, max_tokens=max_tokens)
+        return
+    except Exception:
+        pass
     q_type = detect_question_type(messages)
 
     if max_tokens is None:

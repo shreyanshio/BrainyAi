@@ -16,13 +16,14 @@ import {
   Sliders,
   LayoutDashboard,
   BookMarked,
+  FileText,
 } from 'lucide-react'
 import { ChatSession, UsageStatus, User } from '@/types/api'
 
 interface SidebarProps {
   user: User
-  currentView: 'overview' | 'chat'
-  onSelectView: (view: 'overview' | 'chat') => void
+  currentView: 'overview' | 'chat' | 'pdf'
+  onSelectView: (view: 'overview' | 'chat' | 'pdf') => void
   sessions: ChatSession[]
   activeSessionId: string | null
   onSelectSession: (sessionId: string) => void
@@ -370,6 +371,21 @@ export function Sidebar({
           >
             <LayoutDashboard size={14} className={currentView === 'overview' ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'} />
             <span>Overview</span>
+          </button>
+
+          <button
+            onClick={() => {
+              onSelectView('pdf')
+              onCloseMobile()
+            }}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition cursor-pointer ${
+              currentView === 'pdf'
+                ? 'bg-[var(--bg-surface-elevated)] text-[var(--text-primary)] font-semibold shadow-xs'
+                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            <FileText size={14} className={currentView === 'pdf' ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'} />
+            <span>PDF Studio</span>
           </button>
 
           <button

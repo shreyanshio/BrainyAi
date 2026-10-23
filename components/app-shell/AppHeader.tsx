@@ -14,14 +14,15 @@ import {
   LayoutDashboard,
   MessageSquare,
   BookMarked,
+  FileText,
 } from 'lucide-react'
 import { AnswerLength, UsageStatus, User } from '@/types/api'
 import { CAPABILITY_MODELS } from '@/lib/constants'
 
 interface AppHeaderProps {
   user: User
-  currentView: 'overview' | 'chat'
-  onSelectView: (view: 'overview' | 'chat') => void
+  currentView: 'overview' | 'chat' | 'pdf'
+  onSelectView: (view: 'overview' | 'chat' | 'pdf') => void
   activeModel: string
   onSelectModel: (modelId: string) => void
   activeLength: AnswerLength
@@ -175,6 +176,18 @@ export function AppHeader({
         >
           <LayoutDashboard size={13} />
           <span>Overview</span>
+        </button>
+
+        <button
+          onClick={() => onSelectView('pdf')}
+          className={`flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs transition cursor-pointer ${
+            currentView === 'pdf'
+              ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] font-semibold shadow-xs'
+              : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+          }`}
+        >
+          <FileText size={13} />
+          <span>PDF Studio</span>
         </button>
 
         {onOpenNotesModal && (

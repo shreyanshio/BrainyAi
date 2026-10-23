@@ -258,3 +258,110 @@ export interface SystemHealthStatus {
     suspended_users_count: number
   }
 }
+
+// ── PDF Study Studio & AI Routing Types ──
+
+export interface PdfDocument {
+  id: string
+  user_id: number
+  filename: string
+  file_size: number
+  page_count: number
+  storage_path?: string
+  processing_status: 'ready' | 'processing' | 'error'
+  error_message?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface DocumentNote {
+  id: string
+  document_id: string
+  user_id: number
+  depth: 'FAST' | 'BALANCED' | 'DEEP'
+  content: string
+  citations: number[]
+  created_at: string
+}
+
+export interface QuizQuestion {
+  question: string
+  options: string[]
+  correct_index: number
+  explanation: string
+  page_ref: string
+}
+
+export interface DocumentQuiz {
+  id: string
+  document_id: string
+  user_id: number
+  title: string
+  questions: QuizQuestion[]
+  created_at: string
+}
+
+export interface QuizAnswerFeedback {
+  question_index: number
+  selected_option: number
+  correct_option: number
+  is_correct: boolean
+  explanation: string
+  page_ref: string
+}
+
+export interface QuizAttempt {
+  id: string
+  quiz_id: string
+  user_id: number
+  score: number
+  total: number
+  percentage: number
+  feedback: QuizAnswerFeedback[]
+  created_at: string
+}
+
+export interface FlashcardItem {
+  front: string
+  back: string
+  page_ref: string
+  difficulty: string
+}
+
+export interface DocumentFlashcardDeck {
+  id: string
+  document_id: string
+  user_id: number
+  cards: FlashcardItem[]
+  created_at: string
+}
+
+export interface DocumentStudyProgress {
+  user_id: number
+  document_id: string
+  notes_generated: boolean
+  quizzes_taken: number
+  best_quiz_score: number
+  cards_reviewed: number
+  last_studied_at: string
+}
+
+export interface AIProviderHealth {
+  total_requests: number
+  total_calls: number
+  success: number
+  success_count: number
+  failure: number
+  error_count: number
+  error_rate_pct: number
+  avg_latency_ms: number
+  healthy: boolean
+}
+
+export interface AIHealthSummary {
+  status: string
+  providers: Record<string, AIProviderHealth>
+  recent_events: any[]
+  timestamp: string
+}
+

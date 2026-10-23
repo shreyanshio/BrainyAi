@@ -2901,6 +2901,303 @@ def update_user_preferences():
     return jsonify({"success": True, "preferences": profile["preferences"]})
 
 
+
+
+# ── AI TELEMETRY & MULTI-PROVIDER HEALTH ──────────────────────────────────
+
+@app.route("/api/admin/ai-health", methods=["GET"])
+@app.route("/api/admin/ai-telemetry", methods=["GET"])
+@login_required
+def admin_ai_health():
+    """Provides real-time health telemetry across all pooled AI providers."""
+    try:
+        from ai_routing.telemetry import telemetry
+        summary = telemetry.get_provider_summary()
+        recent = telemetry.get_recent_events(limit=50)
+        return jsonify({
+            "status": "healthy",
+            "providers": summary,
+            "recent_events": recent,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+    except Exception as e:
+        logger.error("Failed to fetch AI health telemetry: %s", e)
+        return jsonify({"error": "Failed to fetch telemetry", "details": str(e)}), 500
+
+
+# ── PDF STUDY STUDIO API ENDPOINTS ────────────────────────────────────────
+
+@app.route("/api/pdf/upload", methods=["POST"])
+@login_required
+@security_guard
+def upload_pdf_document():
+    """Uploads, validates, and indexes a PDF document into the user's private library."""
+    user_id = session["user_id"]
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded. Please attach a .pdf file under 'file'."}), 400
+
+    file = request.files["file"]
+    filename = file.filename or "document.pdf"
+
+    try:
+        from pdf_studio.service import pdf_service, PDFValidationError, PDFSecurityError
+        file_bytes = file.read()
+        doc = pdf_service.upload_and_process_pdf(user_id=user_id, filename=filename, file_bytes=file_bytes)
+        return jsonify({"success": True, "document": doc, "status": "ready"}), 201
+    except PDFValidationError as ve:
+        return jsonify({"error": str(ve)}), 400
+    except PDFSecurityError as se:
+        return jsonify({"error": str(se)}), 403
+    except Exception as e:
+        logger.error("PDF upload error user_id=%s file=%s: %s", user_id, filename, e)
+        return jsonify({"error": "Failed to process PDF document.", "details": str(e)}), 500
+
+
+@app.route("/api/pdf/documents", methods=["GET"])
+@login_required
+def get_user_pdf_documents():
+    """Lists all active PDF documents belonging to the authenticated user."""
+    user_id = session["user_id"]
+    try:
+        from pdf_studio.service import pdf_service
+        docs = pdf_service.get_user_documents(user_id=user_id)
+        return jsonify({"documents": docs})
+    except Exception as e:
+        logger.error("Error fetching user documents user_id=%s: %s", user_id, e)
+        return jsonify({"error": "Failed to retrieve documents."}), 500
+
+
+@app.route("/api/pdf/documents/<doc_id>", methods=["GET"])
+@login_required
+def get_single_pdf_document(doc_id):
+    """Retrieves metadata and page count for a single user-owned document."""
+    user_id = session["user_id"]
+    try:
+        from pdf_studio.service import pdf_service, PDFValidationError, PDFSecurityError
+        doc = pdf_service.get_document(doc_id=doc_id, user_id=user_id)
+        return jsonify({"document": doc})
+    except PDFValidationError as ve:
+        return jsonify({"error": str(ve)}), 404
+    except PDFSecurityError as se:
+        return jsonify({"error": str(se)}), 403
+    except Exception as e:
+        logger.error("Error fetching document doc_id=%s: %s", doc_id, e)
+        return jsonify({"error": "Failed to retrieve document."}), 500
+
+
+@app.route("/api/pdf/documents/<doc_id>", methods=["DELETE"])
+@login_required
+def delete_pdf_document(doc_id):
+    """Securely deletes a user-owned document and all associated data."""
+    user_id = session["user_id"]
+    try:
+        from pdf_studio.service import pdf_service, PDFValidationError, PDFSecurityError
+        pdf_service.delete_document(doc_id=doc_id, user_id=user_id)
+        return jsonify({"success": True, "deleted_id": doc_id})
+    except PDFValidationError as ve:
+        return jsonify({"error": str(ve)}), 404
+    except PDFSecurityError as se:
+        return jsonify({"error": str(se)}), 403
+    except Exception as e:
+        logger.error("Error deleting document doc_id=%s: %s", doc_id, e)
+        return jsonify({"error": "Failed to delete document."}), 500
+
+
+@app.route("/api/pdf/documents/<doc_id>/notes", methods=["POST"])
+@login_required
+@security_guard
+def generate_pdf_notes(doc_id):
+    """Synthesizes structured revision notes with explicit [Page X] citations."""
+    user_id = session["user_id"]
+    data = request.get_json(silent=True) or {}
+    depth_name = str(data.get("depth") or "BALANCED").upper()
+    try:
+        from ai_routing.tasks import ResponseDepth
+        from pdf_studio.service import pdf_service, PDFValidationError, PDFSecurityError
+        depth = ResponseDepth[depth_name] if depth_name in ResponseDepth.__members__ else ResponseDepth.BALANCED
+        note = pdf_service.generate_notes(doc_id=doc_id, user_id=user_id, depth=depth)
+        return jsonify({"success": True, "note": note}), 201
+    except PDFValidationError as ve:
+        return jsonify({"error": str(ve)}), 404
+    except PDFSecurityError as se:
+        return jsonify({"error": str(se)}), 403
+    except Exception as e:
+        logger.error("Note generation error doc_id=%s: %s", doc_id, e)
+        return jsonify({"error": "Failed to generate notes.", "details": str(e)}), 500
+
+
+@app.route("/api/pdf/documents/<doc_id>/notes", methods=["GET"])
+@login_required
+def get_pdf_notes(doc_id):
+    """Retrieves all generated revision notes for the document."""
+    user_id = session["user_id"]
+    try:
+        from pdf_studio.service import pdf_service, PDFValidationError, PDFSecurityError
+        notes = pdf_service.get_notes(doc_id=doc_id, user_id=user_id)
+        return jsonify({"notes": notes})
+    except PDFValidationError as ve:
+        return jsonify({"error": str(ve)}), 404
+    except PDFSecurityError as se:
+        return jsonify({"error": str(se)}), 403
+    except Exception as e:
+        logger.error("Get notes error doc_id=%s: %s", doc_id, e)
+        return jsonify({"error": "Failed to fetch notes."}), 500
+
+
+@app.route("/api/pdf/documents/<doc_id>/ask", methods=["POST"])
+@login_required
+@security_guard
+def ask_pdf_document(doc_id):
+    """Answers user questions strictly grounded in document text with page citations."""
+    user_id = session["user_id"]
+    data = request.get_json(silent=True) or {}
+    raw_q = str(data.get("question") or data.get("message") or "").strip()
+    if not raw_q:
+        return jsonify({"error": "Question cannot be empty."}), 400
+
+    depth_name = str(data.get("depth") or "BALANCED").upper()
+    try:
+        from ai_routing.tasks import ResponseDepth
+        from pdf_studio.service import pdf_service, PDFValidationError, PDFSecurityError
+        depth = ResponseDepth[depth_name] if depth_name in ResponseDepth.__members__ else ResponseDepth.BALANCED
+        sanitized_q = sanitize_input(raw_q)
+        result = pdf_service.ask_document(doc_id=doc_id, user_id=user_id, question=sanitized_q, depth=depth)
+        return jsonify(result)
+    except PDFValidationError as ve:
+        return jsonify({"error": str(ve)}), 404
+    except PDFSecurityError as se:
+        return jsonify({"error": str(se)}), 403
+    except Exception as e:
+        logger.error("Ask document error doc_id=%s: %s", doc_id, e)
+        return jsonify({"error": "Failed to answer document question.", "details": str(e)}), 500
+
+
+@app.route("/api/pdf/documents/<doc_id>/quiz", methods=["POST"])
+@login_required
+@security_guard
+def generate_pdf_quiz(doc_id):
+    """Generates an interactive multiple-choice quiz with strictly 4 options per question."""
+    user_id = session["user_id"]
+    data = request.get_json(silent=True) or {}
+    num_q = max(1, min(15, int(data.get("num_questions") or 5)))
+    depth_name = str(data.get("depth") or "BALANCED").upper()
+    try:
+        from ai_routing.tasks import ResponseDepth
+        from pdf_studio.service import pdf_service, PDFValidationError, PDFSecurityError
+        depth = ResponseDepth[depth_name] if depth_name in ResponseDepth.__members__ else ResponseDepth.BALANCED
+        quiz = pdf_service.generate_quiz(doc_id=doc_id, user_id=user_id, num_questions=num_q, depth=depth)
+        return jsonify({"success": True, "quiz": quiz}), 201
+    except PDFValidationError as ve:
+        return jsonify({"error": str(ve)}), 404
+    except PDFSecurityError as se:
+        return jsonify({"error": str(se)}), 403
+    except Exception as e:
+        logger.error("Quiz generation error doc_id=%s: %s", doc_id, e)
+        return jsonify({"error": "Failed to generate quiz.", "details": str(e)}), 500
+
+
+@app.route("/api/pdf/documents/<doc_id>/quiz", methods=["GET"])
+@login_required
+def get_pdf_quizzes(doc_id):
+    """Retrieves all generated quizzes for the document."""
+    user_id = session["user_id"]
+    try:
+        from pdf_studio.service import pdf_service, PDFValidationError, PDFSecurityError
+        quizzes = pdf_service.get_quizzes(doc_id=doc_id, user_id=user_id)
+        return jsonify({"quizzes": quizzes})
+    except PDFValidationError as ve:
+        return jsonify({"error": str(ve)}), 404
+    except PDFSecurityError as se:
+        return jsonify({"error": str(se)}), 403
+    except Exception as e:
+        logger.error("Get quizzes error doc_id=%s: %s", doc_id, e)
+        return jsonify({"error": "Failed to fetch quizzes."}), 500
+
+
+@app.route("/api/pdf/quizzes/<quiz_id>/attempt", methods=["POST"])
+@login_required
+@security_guard
+def submit_pdf_quiz_attempt(quiz_id):
+    """Grades a quiz attempt, returns score, accuracy percentage, and detailed feedback."""
+    user_id = session["user_id"]
+    data = request.get_json(silent=True) or {}
+    selected_indices = data.get("selected_indices")
+    if not isinstance(selected_indices, list):
+        return jsonify({"error": "selected_indices must be a list of integer choice indices."}), 400
+
+    try:
+        from pdf_studio.service import pdf_service, PDFValidationError, PDFSecurityError
+        attempt = pdf_service.submit_quiz_attempt(quiz_id=quiz_id, user_id=user_id, selected_indices=selected_indices)
+        return jsonify({"success": True, "attempt": attempt}), 201
+    except PDFValidationError as ve:
+        return jsonify({"error": str(ve)}), 404
+    except PDFSecurityError as se:
+        return jsonify({"error": str(se)}), 403
+    except Exception as e:
+        logger.error("Quiz attempt submission error quiz_id=%s: %s", quiz_id, e)
+        return jsonify({"error": "Failed to grade quiz attempt.", "details": str(e)}), 500
+
+
+@app.route("/api/pdf/documents/<doc_id>/flashcards", methods=["POST"])
+@login_required
+@security_guard
+def generate_pdf_flashcards(doc_id):
+    """Generates study flashcards (front, back, page_ref, difficulty) from document."""
+    user_id = session["user_id"]
+    data = request.get_json(silent=True) or {}
+    count = max(3, min(20, int(data.get("count") or 6)))
+    depth_name = str(data.get("depth") or "BALANCED").upper()
+    try:
+        from ai_routing.tasks import ResponseDepth
+        from pdf_studio.service import pdf_service, PDFValidationError, PDFSecurityError
+        depth = ResponseDepth[depth_name] if depth_name in ResponseDepth.__members__ else ResponseDepth.BALANCED
+        flashcards = pdf_service.generate_flashcards(doc_id=doc_id, user_id=user_id, count=count, depth=depth)
+        return jsonify({"success": True, "flashcards": flashcards}), 201
+    except PDFValidationError as ve:
+        return jsonify({"error": str(ve)}), 404
+    except PDFSecurityError as se:
+        return jsonify({"error": str(se)}), 403
+    except Exception as e:
+        logger.error("Flashcards generation error doc_id=%s: %s", doc_id, e)
+        return jsonify({"error": "Failed to generate flashcards.", "details": str(e)}), 500
+
+
+@app.route("/api/pdf/documents/<doc_id>/flashcards", methods=["GET"])
+@login_required
+def get_pdf_flashcards(doc_id):
+    """Retrieves all flashcard decks generated for the document."""
+    user_id = session["user_id"]
+    try:
+        from pdf_studio.service import pdf_service, PDFValidationError, PDFSecurityError
+        flashcards = pdf_service.get_flashcards(doc_id=doc_id, user_id=user_id)
+        return jsonify({"flashcards": flashcards})
+    except PDFValidationError as ve:
+        return jsonify({"error": str(ve)}), 404
+    except PDFSecurityError as se:
+        return jsonify({"error": str(se)}), 403
+    except Exception as e:
+        logger.error("Get flashcards error doc_id=%s: %s", doc_id, e)
+        return jsonify({"error": "Failed to fetch flashcards."}), 500
+
+
+@app.route("/api/pdf/documents/<doc_id>/progress", methods=["GET"])
+@login_required
+def get_pdf_study_progress(doc_id):
+    """Retrieves user progress metrics for the document (notes, quiz attempts, best score)."""
+    user_id = session["user_id"]
+    try:
+        from pdf_studio.service import pdf_service, PDFValidationError, PDFSecurityError
+        progress = pdf_service.get_study_progress(doc_id=doc_id, user_id=user_id)
+        return jsonify({"progress": progress})
+    except PDFValidationError as ve:
+        return jsonify({"error": str(ve)}), 404
+    except PDFSecurityError as se:
+        return jsonify({"error": str(se)}), 403
+    except Exception as e:
+        logger.error("Get progress error doc_id=%s: %s", doc_id, e)
+        return jsonify({"error": "Failed to fetch study progress."}), 500
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
