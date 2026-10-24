@@ -754,9 +754,6 @@ export default function BrainyApp() {
               ) : messages.length === 0 ? (
                 <EmptyState
                   userName={user?.first_name}
-                  usage={usage}
-                  onOpenUsageModal={() => setUsageModalOpen(true)}
-                  onSelectPrompt={(prompt) => handleSendMessage(prompt)}
                 />
               ) : (
                 <MessageList
