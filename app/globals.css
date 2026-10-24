@@ -674,6 +674,56 @@ body {
 
 .login-footer span:first-child { color: #536555; font-family: 'Source Serif 4', Georgia, serif !important; font-weight: 650; }
 
+/* Let the two-column desktop login use the detected viewport height. On short
+   displays, trim decorative content before reducing the space for the controls. */
+@media (min-width: 981px) {
+  .login-page-frame {
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+  }
+
+  .login-header { min-height: clamp(58px, 9vh, 82px); }
+  .login-layout {
+    min-height: 0;
+    padding-block: clamp(14px, 3.5vh, 48px);
+    gap: clamp(36px, 6vw, 96px);
+  }
+  .login-display { font-size: clamp(2.75rem, min(5.5vw, 8vh), 5.4rem); }
+  .login-study-preview { margin-top: clamp(16px, 3vh, 35px); }
+  .login-preview-content { padding-block: clamp(12px, 2vh, 19px); }
+  .login-preview-question { padding-block: clamp(10px, 1.8vh, 15px); }
+  .login-auth { padding: clamp(20px, 3vh, 36px); }
+  .login-auth-footnote { margin-top: clamp(14px, 2.5vh, 25px); padding-top: clamp(10px, 1.8vh, 17px); }
+  .login-footer { min-height: clamp(40px, 6vh, 55px); }
+}
+
+@media (min-width: 981px) and (max-height: 760px) {
+  .login-study-preview { display: none; }
+  .login-eyebrow { margin-bottom: 14px; }
+  .login-intro { margin-top: 14px; font-size: .9rem; line-height: 1.55; }
+  .login-display { font-size: clamp(2.6rem, min(5vw, 7vh), 4.5rem); }
+  .login-auth-heading { margin-bottom: 10px; }
+  .login-auth-kicker { margin-bottom: 8px; }
+  .login-auth-heading > p:last-child { margin-top: 7px; }
+  .login-error-slot { min-height: 42px; }
+  .login-providers { gap: 8px; }
+  .login-provider-button { min-height: 46px; }
+  .login-auth-footnote { margin-top: 13px; }
+}
+
+@media (min-width: 981px) and (max-height: 600px) {
+  .login-header { min-height: 50px; }
+  .login-footer { min-height: 34px; }
+  .login-layout { padding-block: 8px; gap: 32px; }
+  .login-eyebrow { margin-bottom: 9px; }
+  .login-display { font-size: clamp(2.3rem, 5vw, 3.6rem); }
+  .login-intro { margin-top: 9px; font-size: .82rem; }
+  .login-auth { padding: 15px 22px; }
+  .login-error-slot { min-height: 30px; }
+  .login-auth-footnote { margin-top: 9px; padding-top: 8px; }
+}
+
 @media (max-width: 980px) {
   .login-page-frame { width: min(100% - 48px, 760px); }
   .login-layout { grid-template-columns: minmax(0, 1fr); gap: 36px; padding: 44px 0 38px; }
