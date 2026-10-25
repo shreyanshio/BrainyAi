@@ -22,6 +22,7 @@ from ai_routing.providers.cerebras_provider import CerebrasProvider
 from ai_routing.providers.openrouter_provider import OpenRouterProvider
 from ai_routing.providers.search_provider import execute_search
 from ai_routing.budget import OutputBudgetManager
+from ai_routing.prompts import prompt_registry, Platform
 from ai_routing.continuation import (
     is_length_truncated,
     stitch_continuation,
@@ -126,7 +127,8 @@ class AIRouter:
         json_output: bool = False,
         document_context: Optional[Dict[str, Any]] = None,
         request_id: Optional[str] = None,
-        candidate_chain: Optional[List[Tuple[str, str]]] = None
+        candidate_chain: Optional[List[Tuple[str, str]]] = None,
+        platform: Optional[Platform | str] = None
     ) -> RouterResponse:
         """
         Unified non-streaming AI generation with automatic task inference and failover.
@@ -137,7 +139,12 @@ class AIRouter:
         req_id = request_id or str(uuid.uuid4())
         resolved_depth = ResponseDepth.from_str(str(depth)) if depth else ResponseDepth.BALANCED
         resolved_task = classify_task(prompt, messages, document_context, explicit_task=task, depth=resolved_depth)
-        sys_prompt = system_prompt or "You are Brainy, an intelligent, empathetic, academic AI study companion."
+        resolved_plat = Platform.from_str(str(platform)) if platform else Platform.WEB
+        sys_prompt = prompt_registry.compose_prompt(
+            task=resolved_task,
+            platform=resolved_plat,
+            system_prompt_override=system_prompt
+        )
 
         # Prepare messages
         call_messages = list(messages) if messages else []
@@ -283,7 +290,8 @@ class AIRouter:
         system_prompt: Optional[str] = None,
         document_context: Optional[Dict[str, Any]] = None,
         request_id: Optional[str] = None,
-        candidate_chain: Optional[List[Tuple[str, str]]] = None
+        candidate_chain: Optional[List[Tuple[str, str]]] = None,
+        platform: Optional[Platform | str] = None
     ) -> Iterator[str]:
         """
         Unified real-time streaming with pre-output fallback guarantee.
@@ -293,7 +301,12 @@ class AIRouter:
         req_id = request_id or str(uuid.uuid4())
         resolved_depth = ResponseDepth.from_str(str(depth)) if depth else ResponseDepth.BALANCED
         resolved_task = classify_task(prompt, messages, document_context, explicit_task=task, depth=resolved_depth)
-        sys_prompt = system_prompt or "You are Brainy, an intelligent, empathetic, academic AI study companion."
+        resolved_plat = Platform.from_str(str(platform)) if platform else Platform.WEB
+        sys_prompt = prompt_registry.compose_prompt(
+            task=resolved_task,
+            platform=resolved_plat,
+            system_prompt_override=system_prompt
+        )
 
         call_messages = list(messages) if messages else []
         if prompt and (not call_messages or call_messages[-1].get("content") != prompt):

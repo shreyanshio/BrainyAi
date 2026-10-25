@@ -14,6 +14,7 @@ from typing import Dict, Any, List, Optional, Tuple
 
 from ai_routing.router import router
 from ai_routing.tasks import TaskType, ResponseDepth
+from ai_routing.prompts import prompt_registry, Platform
 from pdf_studio.extractor import extract_pdf_pages, PageExtraction
 from pdf_studio.gemini_doc import ocr_scanned_page
 
@@ -202,18 +203,7 @@ class PDFStudyService:
         if not combined_text:
             raise ValueError("Document has no extractable text to generate notes from.")
 
-        sys_prompt = (
-            "You are BrainyAi Study Studio. Generate comprehensive, highly structured academic revision notes "
-            "strictly grounded in the provided document. Cite exact page numbers (e.g. [Page 2], [Pages 4-5]) for important facts.\n"
-            "Format your notes using the following exact markdown sections:\n"
-            "## 📌 Executive Overview\n"
-            "## 📖 Chapter & Topic Breakdown\n"
-            "## 💡 Key Definitions & Core Terminology\n"
-            "## 🧮 Important Formulas & Mathematical Rules (use LaTeX $...$ or $$...$$)\n"
-            "## ⚖️ Critical Comparisons & Contrasts\n"
-            "## 🎯 High-Yield Revision Takeaways\n\n"
-            "Ground all claims in the text. If a section has no relevant content in the document, state 'None in this document'."
-        )
+        sys_prompt = prompt_registry.get_template("pdf_notes_prompt.txt")
 
         prompt = f"Document Title: {doc['filename']}\n\nDocument Contents:\n{combined_text[:35000]}"
 
@@ -284,12 +274,7 @@ class PDFStudyService:
             excerpts.append(f"[PAGE {p['page_number']}]\n{p.get('text_content', '')[:1200]}")
 
         context_block = "\n\n".join(excerpts)
-        sys_prompt = (
-            "You are BrainyAi Document Assistant. Answer the student's question based strictly on the provided document excerpts. "
-            "Always include citations to the source page (e.g., [Page 3]). "
-            "If the document excerpts do not contain the answer, explicitly state: "
-            "'This document does not contain information to answer this question.'"
-        )
+        sys_prompt = prompt_registry.get_template("pdf_qa_prompt.txt")
 
         user_prompt = f"Document: {doc['filename']}\n\nDocument Context:\n{context_block}\n\nQuestion: {q_clean}"
 
@@ -317,26 +302,7 @@ class PDFStudyService:
 
         sample_text = "\n\n".join(f"[Page {p['page_number']}] {p.get('text_content','')[:800]}" for p in pages[:25])
 
-        sys_prompt = (
-            "You are BrainyAi Quiz Engine. Generate an academic multiple-choice quiz based on the document.\n"
-            "CRITICAL CONSTRAINTS:\n"
-            "1. Every question MUST have exactly FOUR distinct, non-empty options in the options array.\n"
-            "2. 'correct_index' MUST be an integer between 0 and 3.\n"
-            "3. Provide a clear educational explanation and source page_ref.\n"
-            "4. Output MUST be strictly valid JSON in the following schema:\n"
-            "{\n"
-            '  "title": "Quiz Title",\n'
-            '  "questions": [\n'
-            '    {\n'
-            '      "question": "Clear question text?",\n'
-            '      "options": ["Option A", "Option B", "Option C", "Option D"],\n'
-            '      "correct_index": 0,\n'
-            '      "explanation": "Why Option A is correct.",\n'
-            '      "page_ref": "Page 2"\n'
-            '    }\n'
-            '  ]\n'
-            "}"
-        )
+        sys_prompt = prompt_registry.get_template("pdf_quiz_prompt.txt")
 
         prompt = f"Document: {doc['filename']}\nGenerate a {num_questions}-question quiz from:\n{sample_text[:20000]}"
 
@@ -486,20 +452,7 @@ class PDFStudyService:
 
         sample_text = "\n\n".join(f"[Page {p['page_number']}] {p.get('text_content','')[:800]}" for p in pages[:20])
 
-        sys_prompt = (
-            "You are BrainyAi Flashcard Studio. Extract the key academic concepts, formulas, and definitions from the text.\n"
-            "Output MUST be strictly valid JSON in this schema:\n"
-            "{\n"
-            '  "cards": [\n'
-            '    {\n'
-            '      "front": "Concept or Question?",\n'
-            '      "back": "Concise answer or explanation.",\n'
-            '      "page_ref": "Page 1",\n'
-            '      "difficulty": "Easy"|"Medium"|"Hard"\n'
-            '    }\n'
-            '  ]\n'
-            "}"
-        )
+        sys_prompt = prompt_registry.get_template("pdf_flashcards_prompt.txt")
 
         prompt = f"Document: {doc['filename']}\nCreate {count} flashcards from:\n{sample_text[:18000]}"
 

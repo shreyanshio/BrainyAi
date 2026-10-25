@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 # Import AI + Supabase helpers from study_bot (same Supabase project the Telegram bot uses)
 import study_bot
+from ai_routing.prompts import prompt_registry, Platform
 
 # Security module — input sanitization, rate limiting, blacklist, headers, token auth
 from security import (
@@ -2353,7 +2354,11 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
         refund_user_quota(user_id)
         return None, jsonify({"error": "Your study profile is temporarily unavailable. Please retry.", "code": "MEMORY_LOAD_FAILED", "retryable": True}), 503
 
-    system_prompt = study_bot.SYSTEM_PROMPT
+    system_prompt = prompt_registry.compose_prompt(
+        task=intent,
+        platform=Platform.WEB,
+        include_completeness=False
+    )
     max_tok = None
 
     # Model capability overrides
@@ -2470,7 +2475,7 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
                 f"In results ke basis pe ek clear, accurate, engaging answer do Hinglish mein. "
                 f"Agar results mein kafi info nahi hai, toh honestly batao. "
                 f"Cite only exact HTTP(S) source URLs present in the results; never invent citations or links. "
-                f"NEVER use **asterisks** markdown. Use emojis and → for formatting."
+                f"Use standard markdown formatting, bolding, and bullet points. Format citations as [Source Name](url)."
             )
             if search_results.startswith("DuckDuckGo Instant Answer"):
                 ai_prompt += (
