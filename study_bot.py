@@ -2388,20 +2388,28 @@ PROVIDER_MAX_TOKENS = {
 
 MAX_CONTINUATION_ROUNDS = 4  # safety cap so one runaway answer can't loop forever / burn quota
 
-def ai_call(messages, system_prompt=None, max_tokens=None):
+def ai_call(messages, system_prompt=None, max_tokens=None, platform=None):
     """
     Intelligent routing with seamless continuation and fallback.
     """
     try:
         from ai_routing.router import router
         from ai_routing.tasks import classify_task, ResponseDepth
+        from ai_routing.prompts import Platform
         depth = ResponseDepth.BALANCED
         if max_tokens and max_tokens <= 1024:
             depth = ResponseDepth.FAST
         elif max_tokens and max_tokens >= 2500:
             depth = ResponseDepth.DEEP
         task = classify_task(messages, system_prompt)
-        res = router.generate(messages, task=task, depth=depth, system_prompt=system_prompt, max_tokens=max_tokens)
+        res = router.generate(
+            messages,
+            task=task,
+            depth=depth,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            platform=platform or Platform.TELEGRAM_DM
+        )
         if res and res.text:
             return res.text
     except Exception:
@@ -2460,7 +2468,7 @@ def ai_call(messages, system_prompt=None, max_tokens=None):
                 continue
     raise Exception(f"All providers failed: {last_err}")
 
-def ai_stream(messages, system_prompt=None, max_tokens=None, model_id=None):
+def ai_stream(messages, system_prompt=None, max_tokens=None, model_id=None, platform=None):
     """
     Real-time streaming token generator with zero mock delay and pre-output provider failover.
     Yields string text chunks as they arrive from the upstream model.
@@ -2471,13 +2479,21 @@ def ai_stream(messages, system_prompt=None, max_tokens=None, model_id=None):
     try:
         from ai_routing.router import router
         from ai_routing.tasks import classify_task, ResponseDepth
+        from ai_routing.prompts import Platform
         depth = ResponseDepth.BALANCED
         if max_tokens and max_tokens <= 1024:
             depth = ResponseDepth.FAST
         elif max_tokens and max_tokens >= 2500:
             depth = ResponseDepth.DEEP
         task = classify_task(messages, prompt)
-        yield from router.stream(messages, task=task, depth=depth, system_prompt=prompt, max_tokens=max_tokens)
+        yield from router.stream(
+            messages,
+            task=task,
+            depth=depth,
+            system_prompt=prompt,
+            max_tokens=max_tokens,
+            platform=platform or Platform.WEB
+        )
         return
     except Exception:
         pass
@@ -2791,7 +2807,8 @@ async def _run_ai(update: Update, messages: list, system_prompt: str, max_tok: i
     # Send loading message immediately — user sees response in <100ms
     loading_msg = await update.message.reply_text(THINKING_DOTS[0])
     loop = asyncio.get_event_loop()
-    ai_task = loop.run_in_executor(None, lambda: ai_call(messages, system_prompt, max_tok))
+    plat = "telegram_group" if is_group(update) else "telegram_dm"
+    ai_task = loop.run_in_executor(None, lambda: ai_call(messages, system_prompt, max_tok, platform=plat))
     try:
         dot = 1
         while not ai_task.done():

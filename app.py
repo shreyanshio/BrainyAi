@@ -2354,8 +2354,12 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
         refund_user_quota(user_id)
         return None, jsonify({"error": "Your study profile is temporarily unavailable. Please retry.", "code": "MEMORY_LOAD_FAILED", "retryable": True}), 503
 
+    active_intent = intent
+    if active_intent in ("chat", None, "") and study_bot.is_offtopic_chat(content):
+        active_intent = "banter"
+
     system_prompt = prompt_registry.compose_prompt(
-        task=intent,
+        task=active_intent,
         platform=Platform.WEB,
         include_completeness=False
     )
@@ -2423,30 +2427,11 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
 
     user_profile = study_bot.get_user_data(user_id)
 
-    if intent == "joke":
-        system_prompt = study_bot.JOKE_SYSTEM_PROMPT
-        max_tok = None
-    elif intent == "fact":
-        system_prompt = study_bot.FACT_SYSTEM_PROMPT
-        max_tok = None
+    if intent == "fact":
         categories = ["science", "space", "human body", "history", "technology and AI", "mathematics", "psychology"]
         category = random.choice(categories)
-        system_prompt += f"\nFor this turn, choose one mind-blowing lesser-known fact about {category}."
-    elif intent == "tip":
-        system_prompt = study_bot.TIP_SYSTEM_PROMPT
-        max_tok = None
-    elif intent == "define":
-        system_prompt = study_bot.DEFINE_SYSTEM_PROMPT
-        max_tok = None
-    elif intent == "summarize":
-        system_prompt = study_bot.SUMMARIZE_SYSTEM_PROMPT
-        max_tok = None
-    elif intent == "translate":
-        system_prompt = study_bot.TRANSLATE_SYSTEM_PROMPT
-        max_tok = None
+        system_prompt += f"\n\nFor this turn, choose one mind-blowing lesser-known fact about {category}."
     elif intent == "motivate":
-        system_prompt = study_bot.MOTIVATE_SYSTEM_PROMPT
-        max_tok = None
         total = user_profile.get("total", 0)
         score = user_profile.get("score", 0)
         context_hint = ""
@@ -2463,7 +2448,7 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
             f"{context_hint}\n"
             "Make it punchy, real, personal — not generic quotes. Mix English + Hinglish."
         )
-        system_prompt += "\nFor this turn, follow these instructions while answering the user's latest message:\n" + prompt
+        system_prompt += "\n\nFor this turn, follow these instructions while answering the user's latest message:\n" + prompt
     elif intent == "search":
         query = payload or content
         try:
@@ -2490,15 +2475,8 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
                     "role": "user",
                     "content": f"{content}\n\n{ai_prompt}",
                 }
-            system_prompt = study_bot.SEARCH_SYSTEM_PROMPT
-            max_tok = None
         except Exception as e:
             print(f"Web search failed: {e}")
-    elif intent == "brainy":
-        system_prompt = study_bot.BRAINY_SYSTEM_PROMPT
-        max_tok = None
-    elif study_bot.is_offtopic_chat(content):
-        system_prompt = study_bot.BANTER_SYSTEM_PROMPT or study_bot.SYSTEM_PROMPT
 
     # Phase 7 Completeness Directive
     system_prompt += (
@@ -2588,8 +2566,7 @@ def send_message():
         request_key = None
 
     try:
-        response_text = study_bot.ai_call(prep["messages_context"], prep["system_prompt"], prep["max_tok"])
-        response_text = study_bot.clean_response(response_text)
+        response_text = study_bot.ai_call(prep["messages_context"], prep["system_prompt"], prep["max_tok"], platform=Platform.WEB)
         if not response_text.strip():
             raise RuntimeError("provider returned an empty answer")
     except Exception as e:
@@ -2728,8 +2705,7 @@ def stream_message():
             model_ttft_ms = round((first_token_time - model_started) * 1000, 2) if first_token_time else round((t_generation_done - model_started) * 1000, 2)
 
             full_text = "".join(tokens)
-            clean_text = study_bot.clean_response(full_text)
-            if not clean_text.strip():
+            if not full_text.strip():
                 raise RuntimeError("provider returned an empty answer")
 
             yield json.dumps({"type": "status", "stage": "persisting"}) + "\n"
@@ -2739,7 +2715,7 @@ def stream_message():
             if session_id:
                 try:
                     assistant_key = f"{request_key}:assistant" if request_key else None
-                    sb_insert_message(session_id, "assistant", clean_text,
+                    sb_insert_message(session_id, "assistant", full_text,
                         idempotency_key=assistant_key, user_id=user_id)
                     assistant_saved = True
                 except SupabaseOperationError as exc:
