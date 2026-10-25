@@ -2935,6 +2935,10 @@ def admin_ai_health():
 
 # ── PDF STUDY STUDIO API ENDPOINTS ────────────────────────────────────────
 
+from pdf_studio.service import pdf_service
+if _supabase_configured():
+    pdf_service.set_supabase_requester(_sb_request, url=SUPABASE_URL, key=SUPABASE_KEY)
+
 @app.route("/api/pdf/upload", methods=["POST"])
 @login_required
 @security_guard

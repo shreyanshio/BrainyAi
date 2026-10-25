@@ -21,12 +21,10 @@ import {
   FileSpreadsheet,
   Clock,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Search
 } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import remarkMath from 'remark-math'
-import rehypeKatex from 'rehype-katex'
+import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import 'katex/dist/katex.min.css'
 
 import {
@@ -65,6 +63,7 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
   const [loadingDocs, setLoadingDocs] = useState<boolean>(true)
   const [uploading, setUploading] = useState<boolean>(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState<string>('')
 
   // Active studio tab
   const [activeTab, setActiveTab] = useState<StudioTab>('notes')
@@ -342,6 +341,20 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
               </>
             )}
           </button>
+
+          {/* Search Library */}
+          {documents.length > 0 && (
+            <div className="relative">
+              <Search size={13} className="absolute left-3 top-2.5 text-[var(--text-muted)]" />
+              <input
+                type="text"
+                placeholder="Search library..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 rounded-xl text-xs bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] focus:outline-none focus:border-blue-500 text-[var(--text-primary)]"
+              />
+            </div>
+          )}
         </div>
 
         {/* Documents List */}
@@ -360,7 +373,9 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
               </p>
             </div>
           ) : (
-            documents.map((doc) => {
+            documents
+              .filter((d) => d.filename.toLowerCase().includes(searchQuery.toLowerCase()))
+              .map((doc) => {
               const isSelected = doc.id === selectedDocId
               return (
                 <div
@@ -592,10 +607,8 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
                           </button>
                         </div>
 
-                        <div className="prose dark:prose-invert max-w-none text-xs sm:text-sm leading-relaxed">
-                          <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
-                            {note.content}
-                          </ReactMarkdown>
+                        <div className="max-w-none text-xs sm:text-sm leading-relaxed">
+                          <MarkdownRenderer content={note.content} />
                         </div>
                       </div>
                     ))
@@ -650,9 +663,7 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
                           </div>
 
                           <div className="text-xs sm:text-sm text-[var(--text-primary)] leading-relaxed">
-                            <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
-                              {item.a}
-                            </ReactMarkdown>
+                            <MarkdownRenderer content={item.a} />
                           </div>
 
                           {item.citations && item.citations.length > 0 && (
