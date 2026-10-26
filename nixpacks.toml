@@ -1,0 +1,12 @@
+# Nixpacks configuration — force Python-only build for Railway.
+# The Next.js frontend is deployed separately to Cloudflare Workers.
+# Railway must only build and run the Python Flask/Gunicorn backend.
+
+[phases.setup]
+nixPkgs = ["python312", "gcc", "libffi", "openssl"]
+
+[phases.install]
+cmds = ["pip install --no-cache-dir -r requirements.txt"]
+
+[start]
+cmd = "gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120"
