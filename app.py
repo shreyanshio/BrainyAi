@@ -100,10 +100,11 @@ def _parse_admin_allowlist():
         if part:
             names.add(part)
     emails = set(DEFAULT_ADMIN_EMAILS)
-    for part in os.environ.get("ADMIN_EMAILS", "").split(","):
-        part = part.strip().lower()
-        if part:
-            emails.add(part)
+    for env_var in ("BRAINYAI_ADMIN_EMAILS", "ADMIN_EMAILS"):
+        for part in os.environ.get(env_var, "").split(","):
+            part = part.strip().lower()
+            if part:
+                emails.add(part)
     return ids, names, emails
 
 ADMIN_USER_IDS, ADMIN_USERNAMES, ADMIN_EMAILS = _parse_admin_allowlist()
@@ -113,13 +114,14 @@ def is_admin_session() -> bool:
     uid = session.get("user_id")
     uname = (session.get("username") or "").lstrip("@").lower()
     email = (session.get("email") or "").strip().lower()
-    if uid is not None and uid in ADMIN_USER_IDS:
+    if uid is not None and (uid in ADMIN_USER_IDS or uid in getattr(app, "ADMIN_USER_IDS", set())):
         return True
-    if uname and uname in ADMIN_USERNAMES:
+    if uname and (uname in ADMIN_USERNAMES or uname in getattr(app, "ADMIN_USERNAMES", set())):
         return True
-    if email and email in ADMIN_EMAILS:
+    if email and (email in ADMIN_EMAILS or email in getattr(app, "ADMIN_EMAILS", set())):
         return True
-    return False
+    from admin_service import admin_service
+    return admin_service.access.is_admin(user_id=uid, email=email, username=uname)
 
 
 def admin_required(f):
@@ -1958,6 +1960,20 @@ def admin_toggle_suspend(target_user_id: int):
         _save_suspended_users()
 
     logger.info("Admin %s toggled suspension for user %s -> %s", current_admin_id, target_user_id, state)
+    try:
+        from admin_service import admin_service
+        admin_service.audit.log(
+            actor_id=current_admin_id,
+            actor_email=session.get("email"),
+            action="toggle_user_suspend",
+            target_type="user",
+            target_id=str(target_user_id),
+            details={"is_suspended": state},
+            ip_address=request.remote_addr
+        )
+    except Exception as ae:
+        logger.debug("Non-fatal audit logging error: %s", ae)
+
     return jsonify({
         "status": "ok",
         "user_id": target_user_id,
@@ -1986,6 +2002,20 @@ def admin_delete_user(target_user_id: int):
         logger.warning("Supabase cleanup on delete user %s error: %s", target_user_id, e)
 
     logger.info("Admin %s deleted user %s", current_admin_id, target_user_id)
+    try:
+        from admin_service import admin_service
+        admin_service.audit.log(
+            actor_id=current_admin_id,
+            actor_email=session.get("email"),
+            action="delete_user",
+            target_type="user",
+            target_id=str(target_user_id),
+            details={"deleted_user_id": target_user_id},
+            ip_address=request.remote_addr
+        )
+    except Exception as ae:
+        logger.debug("Non-fatal audit logging error: %s", ae)
+
     return jsonify({"status": "ok", "deleted_user_id": target_user_id})
 
 
@@ -2566,7 +2596,7 @@ def send_message():
         request_key = None
 
     try:
-        response_text = study_bot.ai_call(prep["messages_context"], prep["system_prompt"], prep["max_tok"], platform=Platform.WEB)
+        response_text = study_bot.ai_call(prep["messages_context"], prep["system_prompt"], prep["max_tok"], platform=Platform.WEB, user_id=user_id)
         if not response_text.strip():
             raise RuntimeError("provider returned an empty answer")
     except Exception as e:
@@ -2687,7 +2717,8 @@ def stream_message():
                 prep["messages_context"],
                 system_prompt=prep["system_prompt"],
                 max_tokens=prep["max_tok"],
-                model_id=model_id
+                model_id=model_id,
+                user_id=user_id
             ):
                 if not chunk:
                     continue
@@ -2931,6 +2962,225 @@ def admin_ai_health():
     except Exception as e:
         logger.error("Failed to fetch AI health telemetry: %s", e)
         return jsonify({"error": "Failed to fetch telemetry", "request_id": getattr(g, "request_id", None)}), 500
+
+
+# ── ENTERPRISE ADMIN CONTROL CENTER ENDPOINTS ──
+from admin_service import admin_service, SafeCSVExporter
+if _supabase_configured():
+    admin_service.set_supabase_requester(_sb_request)
+
+@app.route("/api/admin/kpis", methods=["GET"])
+@admin_required
+def admin_kpis():
+    """Aggregated KPIs for the admin dashboard overview."""
+    try:
+        window = float(request.args.get("window", 86400))
+    except (ValueError, TypeError):
+        window = 86400.0
+    user_report = build_usage_report()
+    return jsonify(admin_service.get_kpis(window_sec=window, user_report=user_report))
+
+
+@app.route("/api/admin/timeseries", methods=["GET"])
+@admin_required
+def admin_timeseries():
+    """Time-series buckets for interactive chart telemetry."""
+    try:
+        window = float(request.args.get("window", 86400))
+    except (ValueError, TypeError):
+        window = 86400.0
+    try:
+        buckets = int(request.args.get("buckets", 24))
+    except (ValueError, TypeError):
+        buckets = 24
+    return jsonify(admin_service.telemetry.get_time_series(window_sec=window, num_buckets=buckets))
+
+
+@app.route("/api/admin/requests", methods=["GET"])
+@admin_required
+def admin_requests():
+    """Paginated, filterable raw request logs for admin observability."""
+    try:
+        limit = min(200, max(1, int(request.args.get("limit", 50))))
+    except (ValueError, TypeError):
+        limit = 50
+    try:
+        offset = max(0, int(request.args.get("offset", 0)))
+    except (ValueError, TypeError):
+        offset = 0
+
+    provider = request.args.get("provider")
+    model = request.args.get("model")
+    status = request.args.get("status")
+    uid = request.args.get("user_id")
+
+    return jsonify(admin_service.telemetry.get_request_logs(
+        limit=limit,
+        offset=offset,
+        provider=provider,
+        model=model,
+        status=status,
+        user_id=uid
+    ))
+
+
+@app.route("/api/admin/providers", methods=["GET"])
+@admin_required
+def admin_providers():
+    """Live provider statuses, configuration keys, models, and latency metrics."""
+    return jsonify(admin_service.get_providers_status())
+
+
+@app.route("/api/admin/providers/<provider_id>/probe", methods=["POST"])
+@admin_required
+def admin_probe_provider(provider_id: str):
+    """Executes a real ping health check against a designated provider."""
+    result = admin_service.probe_provider(provider_id)
+    admin_service.audit.log(
+        actor_id=session.get("user_id"),
+        actor_email=session.get("email"),
+        action="probe_provider",
+        target_type="provider",
+        target_id=provider_id,
+        details=result,
+        ip_address=request.remote_addr
+    )
+    return jsonify(result)
+
+
+@app.route("/api/admin/quotas", methods=["GET"])
+@admin_required
+def admin_quotas():
+    """Rate-limit observations parsed from actual provider response headers."""
+    return jsonify(admin_service.telemetry.get_quota_observations())
+
+
+@app.route("/api/admin/costs", methods=["GET"])
+@admin_required
+def admin_costs():
+    """Token cost breakdown by provider, model, and official pricing registry."""
+    return jsonify(admin_service.get_costs_summary())
+
+
+@app.route("/api/admin/pdf-analytics", methods=["GET"])
+@admin_required
+def admin_pdf_analytics():
+    """Document extraction stats, native vs OCR page counts, and storage metrics."""
+    return jsonify(admin_service.get_pdf_analytics())
+
+
+@app.route("/api/admin/audit-logs", methods=["GET"])
+@admin_required
+def admin_audit_logs():
+    """Security audit logs of administrator actions."""
+    try:
+        limit = min(200, max(1, int(request.args.get("limit", 50))))
+    except (ValueError, TypeError):
+        limit = 50
+    try:
+        offset = max(0, int(request.args.get("offset", 0)))
+    except (ValueError, TypeError):
+        offset = 0
+    action = request.args.get("action")
+    return jsonify(admin_service.audit.get_logs(limit=limit, offset=offset, action=action))
+
+
+@app.route("/api/admin/alerts", methods=["GET"])
+@admin_required
+def admin_alerts():
+    """Active system and provider alerts requiring operational attention."""
+    return jsonify(admin_service.alerts.get_active_alerts())
+
+
+@app.route("/api/admin/alerts/<alert_id>/resolve", methods=["POST"])
+@admin_required
+def admin_resolve_alert(alert_id: str):
+    """Marks an active system alert as resolved."""
+    admin_email = session.get("email") or "admin"
+    admin_service.alerts.resolve_alert(alert_id, admin_email)
+    admin_service.audit.log(
+        actor_id=session.get("user_id"),
+        actor_email=admin_email,
+        action="resolve_alert",
+        target_type="alert",
+        target_id=alert_id,
+        ip_address=request.remote_addr
+    )
+    return jsonify({"status": "ok", "alert_id": alert_id})
+
+
+@app.route("/api/admin/config", methods=["GET"])
+@admin_required
+def admin_get_config():
+    """Operational settings, maintenance flags, and routing configurations."""
+    return jsonify(admin_service.config.get_config())
+
+
+@app.route("/api/admin/config", methods=["POST"])
+@admin_required
+def admin_update_config():
+    """Updates operational settings."""
+    data = request.get_json(silent=True) or {}
+    key = data.get("key")
+    value = data.get("value")
+    if not key:
+        return jsonify({"error": "Missing config key"}), 400
+    admin_email = session.get("email") or "admin"
+    cfg = admin_service.config.update_config(key, value, admin_email)
+    admin_service.audit.log(
+        actor_id=session.get("user_id"),
+        actor_email=admin_email,
+        action="update_config",
+        target_type="config",
+        target_id=key,
+        details={"value": value},
+        ip_address=request.remote_addr
+    )
+    return jsonify(cfg)
+
+
+@app.route("/api/admin/export/<export_type>", methods=["GET"])
+@admin_required
+def admin_export_csv(export_type: str):
+    """Generates sanitized, injection-safe CSV data exports."""
+    valid_types = ["requests", "users", "audit_logs", "costs"]
+    if export_type not in valid_types:
+        return jsonify({"error": f"Invalid export type. Must be one of {valid_types}"}), 400
+
+    from flask import Response
+    now_ts = int(time.time())
+
+    if export_type == "requests":
+        logs = admin_service.telemetry.get_request_logs(limit=2000).get("logs", [])
+        csv_data = SafeCSVExporter.export_requests_csv(logs)
+    elif export_type == "users":
+        user_report = build_usage_report()
+        users = user_report.get("users", [])
+        csv_data = SafeCSVExporter.export_users_csv(users)
+    elif export_type == "audit_logs":
+        logs = admin_service.audit.get_logs(limit=1000).get("logs", [])
+        csv_data = SafeCSVExporter.export_audit_logs_csv(logs)
+    elif export_type == "costs":
+        summary = admin_service.get_costs_summary()
+        csv_data = SafeCSVExporter.export_costs_csv(summary)
+
+    admin_service.audit.log(
+        actor_id=session.get("user_id"),
+        actor_email=session.get("email"),
+        action=f"export_{export_type}",
+        target_type="export",
+        target_id=export_type,
+        ip_address=request.remote_addr
+    )
+
+    return Response(
+        csv_data,
+        mimetype="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename=brainyai_{export_type}_{now_ts}.csv",
+            "Cache-Control": "no-cache, no-store, must-revalidate"
+        }
+    )
 
 
 # ── PDF STUDY STUDIO API ENDPOINTS ────────────────────────────────────────

@@ -2388,7 +2388,7 @@ PROVIDER_MAX_TOKENS = {
 
 MAX_CONTINUATION_ROUNDS = 4  # safety cap so one runaway answer can't loop forever / burn quota
 
-def ai_call(messages, system_prompt=None, max_tokens=None, platform=None):
+def ai_call(messages, system_prompt=None, max_tokens=None, platform=None, user_id=None):
     """
     Intelligent routing with seamless continuation and fallback.
     """
@@ -2408,7 +2408,8 @@ def ai_call(messages, system_prompt=None, max_tokens=None, platform=None):
             depth=depth,
             system_prompt=system_prompt,
             max_tokens=max_tokens,
-            platform=platform or Platform.TELEGRAM_DM
+            platform=platform or Platform.TELEGRAM_DM,
+            user_id=user_id
         )
         if res and res.text:
             return res.text
@@ -2468,7 +2469,7 @@ def ai_call(messages, system_prompt=None, max_tokens=None, platform=None):
                 continue
     raise Exception(f"All providers failed: {last_err}")
 
-def ai_stream(messages, system_prompt=None, max_tokens=None, model_id=None, platform=None):
+def ai_stream(messages, system_prompt=None, max_tokens=None, model_id=None, platform=None, user_id=None):
     """
     Real-time streaming token generator with zero mock delay and pre-output provider failover.
     Yields string text chunks as they arrive from the upstream model.
@@ -2492,7 +2493,8 @@ def ai_stream(messages, system_prompt=None, max_tokens=None, model_id=None, plat
             depth=depth,
             system_prompt=prompt,
             max_tokens=max_tokens,
-            platform=platform or Platform.WEB
+            platform=platform or Platform.WEB,
+            user_id=user_id
         )
         return
     except Exception:

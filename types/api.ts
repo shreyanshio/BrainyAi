@@ -208,8 +208,10 @@ export interface AdminUserRecord {
   login_types: string[]
   login_count: number
   message_count: number
+  session_count?: number
   first_seen: string | null
   last_seen: string | null
+  last_login_at?: string | null
   is_suspended?: boolean
   is_admin?: boolean
 }
@@ -363,5 +365,146 @@ export interface AIHealthSummary {
   providers: Record<string, AIProviderHealth>
   recent_events: any[]
   timestamp: string
+}
+
+// ── ADMIN CONTROL CENTER DATA TYPES ──
+export interface AdminKPIs {
+  total_requests: number
+  successful_requests: number
+  failed_requests: number
+  fallback_requests: number
+  success_rate_pct: number
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  avg_tokens_per_request: number
+  estimated_cost_usd: number
+  avg_latency_ms: number
+  p95_latency_ms: number
+  active_users_in_window: number
+  total_users: number
+  active_users_today: number
+  active_users_week: number
+  suspended_users: number
+  total_pdf_documents: number
+  total_pdf_pages: number
+  active_alerts_count: number
+  server_timestamp: number
+  server_time_iso: string
+}
+
+export interface TimeSeriesBucket {
+  time_label: string
+  timestamp: number
+  requests: number
+  successful: number
+  failed: number
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  cost_usd: number
+  avg_latency_ms: number
+}
+
+export interface AIRequestLog {
+  request_id: string
+  user_id?: number | string | null
+  task: string
+  depth: string
+  provider: string
+  model: string
+  latency_ms: number
+  ttft_ms?: number | null
+  input_tokens?: number | null
+  output_tokens?: number | null
+  total_tokens?: number | null
+  cost_usd: number
+  is_estimated: boolean
+  status: string
+  fallback_used: boolean
+  fallback_from?: string | null
+  error_category?: string | null
+  continuation_used?: boolean
+  continuation_rounds?: number
+  timestamp: number
+}
+
+export interface ProviderDetail {
+  id: string
+  name: string
+  configured: boolean
+  masked_key: string
+  models: string[]
+  health: AIProviderHealth & {
+    p95_latency_ms?: number
+    total_cost_usd?: number
+    last_success_at?: number | null
+    last_failure_at?: number | null
+  }
+}
+
+export interface QuotaObservation {
+  provider: string
+  model?: string | null
+  limit_requests?: number | null
+  remaining_requests?: number | null
+  limit_tokens?: number | null
+  remaining_tokens?: number | null
+  observed_at: number
+  observed_iso: string
+  source: string
+}
+
+export interface PDFAnalytics {
+  total_documents: number
+  total_pages: number
+  total_size_bytes: number
+  native_pages: number
+  ocr_pages: number
+  avg_extraction_time_ms: number
+  failed_documents: number
+  recent_documents: any[]
+}
+
+export interface AdminAuditLog {
+  id: string
+  actor_id?: string | null
+  actor_email: string
+  action: string
+  target_type?: string | null
+  target_id?: string | null
+  ip_address?: string | null
+  details: Record<string, any>
+  created_at: string
+  timestamp: number
+}
+
+export interface SystemAlert {
+  id: string
+  severity: 'info' | 'warning' | 'error' | 'critical'
+  title: string
+  message: string
+  component: string
+  created_at: string
+  is_resolved: boolean
+  resolved_at?: string | null
+  resolved_by?: string | null
+}
+
+export interface SystemConfig {
+  maintenance_mode: boolean
+  default_response_depth: string
+  global_rate_limit_per_min: number
+  pdf_max_file_size_mb: number
+  enable_web_grounding: boolean
+  enable_ocr_fallback: boolean
+  [key: string]: any
+}
+
+export interface CostsSummary {
+  total_estimated_cost_usd: number
+  pricing_registry: Record<string, { input: number; output: number }>
+  fallback_rates: { input: number; output: number }
+  cost_by_provider: Record<string, { tokens_in: number; tokens_out: number; cost_usd: number }>
 }
 

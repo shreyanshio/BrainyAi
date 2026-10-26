@@ -654,3 +654,110 @@ export async function fetchAIHealthTelemetry(): Promise<AIHealthSummary> {
   return request<AIHealthSummary>('/api/admin/ai-health')
 }
 
+// ── ENTERPRISE ADMIN API CLIENTS ──
+import type {
+  AdminKPIs,
+  TimeSeriesBucket,
+  AIRequestLog,
+  ProviderDetail,
+  QuotaObservation,
+  PDFAnalytics,
+  AdminAuditLog,
+  SystemAlert,
+  SystemConfig,
+  CostsSummary
+} from '@/types/api'
+
+export async function fetchAdminKPIs(windowSec: number = 86400): Promise<AdminKPIs> {
+  return request<AdminKPIs>(`/api/admin/kpis?window=${windowSec}`)
+}
+
+export async function fetchAdminTimeSeries(windowSec: number = 86400, buckets: number = 24): Promise<TimeSeriesBucket[]> {
+  return request<TimeSeriesBucket[]>(`/api/admin/timeseries?window=${windowSec}&buckets=${buckets}`)
+}
+
+export async function fetchAdminRequests(params: {
+  limit?: number
+  offset?: number
+  provider?: string
+  model?: string
+  status?: string
+  user_id?: string | number
+} = {}): Promise<{ total: number; limit: number; offset: number; logs: AIRequestLog[] }> {
+  const query = new URLSearchParams()
+  if (params.limit !== undefined) query.set('limit', String(params.limit))
+  if (params.offset !== undefined) query.set('offset', String(params.offset))
+  if (params.provider) query.set('provider', params.provider)
+  if (params.model) query.set('model', params.model)
+  if (params.status) query.set('status', params.status)
+  if (params.user_id !== undefined && params.user_id !== '') query.set('user_id', String(params.user_id))
+  return request<{ total: number; limit: number; offset: number; logs: AIRequestLog[] }>(`/api/admin/requests?${query.toString()}`)
+}
+
+export async function fetchAdminProviders(): Promise<Record<string, ProviderDetail>> {
+  return request<Record<string, ProviderDetail>>('/api/admin/providers')
+}
+
+export async function probeAdminProvider(providerId: string): Promise<{
+  provider: string
+  success: boolean
+  latency_ms: number
+  model?: string
+  error?: string
+}> {
+  return request<{ provider: string; success: boolean; latency_ms: number; model?: string; error?: string }>(
+    `/api/admin/providers/${providerId}/probe`,
+    { method: 'POST' }
+  )
+}
+
+export async function fetchAdminQuotas(): Promise<Record<string, QuotaObservation>> {
+  return request<Record<string, QuotaObservation>>('/api/admin/quotas')
+}
+
+export async function fetchAdminCosts(): Promise<CostsSummary> {
+  return request<CostsSummary>('/api/admin/costs')
+}
+
+export async function fetchAdminPdfAnalytics(): Promise<PDFAnalytics> {
+  return request<PDFAnalytics>('/api/admin/pdf-analytics')
+}
+
+export async function fetchAdminAuditLogs(params: {
+  limit?: number
+  offset?: number
+  action?: string
+} = {}): Promise<{ total: number; limit: number; offset: number; logs: AdminAuditLog[] }> {
+  const query = new URLSearchParams()
+  if (params.limit !== undefined) query.set('limit', String(params.limit))
+  if (params.offset !== undefined) query.set('offset', String(params.offset))
+  if (params.action) query.set('action', params.action)
+  return request<{ total: number; limit: number; offset: number; logs: AdminAuditLog[] }>(`/api/admin/audit-logs?${query.toString()}`)
+}
+
+export async function fetchAdminAlerts(): Promise<SystemAlert[]> {
+  return request<SystemAlert[]>('/api/admin/alerts')
+}
+
+export async function resolveAdminAlert(alertId: string): Promise<{ status: string; alert_id: string }> {
+  return request<{ status: string; alert_id: string }>(`/api/admin/alerts/${alertId}/resolve`, {
+    method: 'POST'
+  })
+}
+
+export async function fetchAdminConfig(): Promise<SystemConfig> {
+  return request<SystemConfig>('/api/admin/config')
+}
+
+export async function updateAdminConfig(key: string, value: any): Promise<SystemConfig> {
+  return request<SystemConfig>('/api/admin/config', {
+    method: 'POST',
+    body: JSON.stringify({ key, value })
+  })
+}
+
+export function getAdminExportUrl(exportType: 'requests' | 'users' | 'audit_logs' | 'costs'): string {
+  const base = getApiBase()
+  return `${base}/api/admin/export/${exportType}`
+}
+

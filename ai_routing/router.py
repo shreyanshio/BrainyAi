@@ -128,7 +128,8 @@ class AIRouter:
         document_context: Optional[Dict[str, Any]] = None,
         request_id: Optional[str] = None,
         candidate_chain: Optional[List[Tuple[str, str]]] = None,
-        platform: Optional[Platform | str] = None
+        platform: Optional[Platform | str] = None,
+        user_id: Optional[int | str] = None
     ) -> RouterResponse:
         """
         Unified non-streaming AI generation with automatic task inference and failover.
@@ -225,6 +226,7 @@ class AIRouter:
                 # Record successful telemetry
                 global_telemetry.record(TelemetryRecord(
                     request_id=req_id,
+                    user_id=user_id,
                     task=resolved_task.value,
                     depth=resolved_depth.value,
                     provider=provider_name,
@@ -268,6 +270,7 @@ class AIRouter:
         # Record failure telemetry if all candidates failed
         global_telemetry.record(TelemetryRecord(
             request_id=req_id,
+            user_id=user_id,
             task=resolved_task.value,
             depth=resolved_depth.value,
             provider="none",
@@ -291,7 +294,8 @@ class AIRouter:
         document_context: Optional[Dict[str, Any]] = None,
         request_id: Optional[str] = None,
         candidate_chain: Optional[List[Tuple[str, str]]] = None,
-        platform: Optional[Platform | str] = None
+        platform: Optional[Platform | str] = None,
+        user_id: Optional[int | str] = None
     ) -> Iterator[str]:
         """
         Unified real-time streaming with pre-output fallback guarantee.
@@ -403,12 +407,15 @@ class AIRouter:
                     total_lat = (time.perf_counter() - start_t) * 1000.0
                     global_telemetry.record(TelemetryRecord(
                         request_id=req_id,
+                        user_id=user_id,
                         task=resolved_task.value,
                         depth=resolved_depth.value,
                         provider=provider_name,
                         model=model_id,
                         latency_ms=total_lat,
                         ttft_ms=first_token_t,
+                        input_tokens=est_in_tokens or None,
+                        output_tokens=max(1, len(accumulated_text) // 4) if accumulated_text else None,
                         fallback_used=fallback_used,
                         fallback_from=fallback_from,
                         status="success" if not fallback_used else "fallback_recovered",
@@ -430,6 +437,19 @@ class AIRouter:
                     logger.warning("Streaming candidate %s failed before first token: %s, rotating...", provider_name, e)
                     continue
 
+        global_telemetry.record(TelemetryRecord(
+            request_id=req_id,
+            user_id=user_id,
+            task=resolved_task.value,
+            depth=resolved_depth.value,
+            provider="none",
+            model="none",
+            latency_ms=(time.perf_counter() - start_t) * 1000.0,
+            fallback_used=fallback_used,
+            fallback_from=fallback_from,
+            error_category=type(last_exc).__name__ if last_exc else "Exhausted",
+            status="error"
+        ))
         raise RuntimeError(f"All streaming candidates exhausted: {last_exc}")
 
     def generate_structured(
@@ -439,7 +459,8 @@ class AIRouter:
         task: TaskType,
         max_tokens: int = 2500,
         retries: int = 2,
-        request_id: Optional[str] = None
+        request_id: Optional[str] = None,
+        user_id: Optional[int | str] = None
     ) -> Dict[str, Any]:
         """
         Generates and parses guaranteed JSON output. If JSON decode fails, retries once.
@@ -452,7 +473,8 @@ class AIRouter:
                 max_tokens=max_tokens,
                 system_prompt=system_prompt,
                 json_output=True,
-                request_id=request_id
+                request_id=request_id,
+                user_id=user_id
             )
             raw = resp.text.strip()
             # Strip markdown json code fences if present
