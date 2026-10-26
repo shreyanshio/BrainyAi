@@ -6,6 +6,7 @@
 .env.production
 .env.development
 *.env
+!.env.example
 .auth_secret
 
 # Local state & runtime cache files
