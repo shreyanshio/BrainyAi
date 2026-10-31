@@ -94,8 +94,8 @@ export function SettingsModal({
     FONT_OPTIONS.find((f) => f.id === 'lora') || FONT_OPTIONS[0]
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-sm animate-fade-in">
-      <div className="w-full max-w-3xl rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-[var(--card-shadow)] overflow-hidden flex flex-col max-h-[85vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-6 bg-black/60 backdrop-blur-sm animate-fade-in">
+      <div className="w-full max-w-3xl rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-[var(--card-shadow)] overflow-hidden flex flex-col max-h-[90vh] max-h-[90dvh]">
         
         {/* Modal Top Bar */}
         <div className="p-4 sm:p-5 border-b border-[var(--border-subtle)] flex items-center justify-between">

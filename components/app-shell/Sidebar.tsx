@@ -209,47 +209,51 @@ export function Sidebar({
                   </p>
                 </div>
 
-                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 pt-0.5">
+                <div className="flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity flex-shrink-0 pt-0.5">
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
                       onUpdateSessionWorkspace(sess.id, { is_saved: !sess.is_saved })
                     }}
-                    className={`p-1 rounded cursor-pointer ${
+                    className={`p-1.5 min-w-[26px] min-h-[26px] flex items-center justify-center rounded cursor-pointer ${
                       sess.is_saved ? 'text-amber-500' : 'text-[var(--text-muted)] hover:text-amber-500'
                     }`}
                     title={sess.is_saved ? 'Remove from Saved' : 'Save chat'}
+                    aria-label={sess.is_saved ? 'Remove from Saved' : 'Save chat'}
                   >
-                    <Bookmark size={11} fill={sess.is_saved ? 'currentColor' : 'none'} />
+                    <Bookmark size={12} fill={sess.is_saved ? 'currentColor' : 'none'} />
                   </button>
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
                       onUpdateSessionWorkspace(sess.id, { is_pinned: !sess.is_pinned })
                     }}
-                    className={`p-1 rounded cursor-pointer ${
+                    className={`p-1.5 min-w-[26px] min-h-[26px] flex items-center justify-center rounded cursor-pointer ${
                       sess.is_pinned ? 'text-sky-500' : 'text-[var(--text-muted)] hover:text-sky-500'
                     }`}
                     title={sess.is_pinned ? 'Unpin chat' : 'Pin chat'}
+                    aria-label={sess.is_pinned ? 'Unpin chat' : 'Pin chat'}
                   >
-                    <Pin size={11} />
+                    <Pin size={12} />
                   </button>
                   <button
                     onClick={(e) => startEditing(sess, e)}
-                    className="p-1 hover:text-[var(--text-primary)] text-[var(--text-muted)] rounded cursor-pointer"
+                    className="p-1.5 min-w-[26px] min-h-[26px] flex items-center justify-center hover:text-[var(--text-primary)] text-[var(--text-muted)] rounded cursor-pointer"
                     title="Rename session"
+                    aria-label="Rename session"
                   >
-                    <Edit2 size={11} />
+                    <Edit2 size={12} />
                   </button>
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
                       onDeleteSession(sess.id)
                     }}
-                    className="p-1 hover:text-rose-500 text-[var(--text-muted)] rounded cursor-pointer"
+                    className="p-1.5 min-w-[26px] min-h-[26px] flex items-center justify-center hover:text-rose-500 text-[var(--text-muted)] rounded cursor-pointer"
                     title="Delete session"
+                    aria-label="Delete session"
                   >
-                    <Trash2 size={11} />
+                    <Trash2 size={12} />
                   </button>
                 </div>
               </div>
@@ -276,12 +280,26 @@ export function Sidebar({
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed top-0 bottom-0 left-0 z-40 w-64 border-r border-[var(--border-subtle)] bg-[var(--bg-surface)]/90 backdrop-blur-xl flex flex-col transition-transform duration-200 lg:translate-x-0 ${
+        className={`fixed top-0 bottom-0 left-0 z-40 w-64 max-w-[85vw] border-r border-[var(--border-subtle)] bg-[var(--bg-surface)]/95 backdrop-blur-xl flex flex-col transition-transform duration-200 lg:translate-x-0 ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         {/* Top Header & Core Actions (Matching reference image) */}
         <div className="p-3.5 space-y-2 border-b border-[var(--border-subtle)]">
+          {/* Mobile drawer header with close button */}
+          <div className="flex items-center justify-between lg:hidden pb-1">
+            <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+              Navigation
+            </span>
+            <button
+              onClick={onCloseMobile}
+              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] cursor-pointer"
+              aria-label="Close navigation drawer"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
           {/* + New Chat Button */}
           <button
             onClick={() => {
@@ -476,21 +494,23 @@ export function Sidebar({
               </div>
             </div>
 
-            <div className="flex items-center gap-0.5">
+            <div className="flex items-center gap-1">
               <button
                 onClick={onOpenSettingsModal}
-                className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition rounded-lg hover:bg-[var(--bg-surface-elevated)] cursor-pointer"
+                className="p-2 min-h-[36px] min-w-[36px] flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)] transition rounded-lg hover:bg-[var(--bg-surface-elevated)] cursor-pointer"
                 title="Workspace settings"
+                aria-label="Workspace settings"
               >
-                <Sliders size={13} />
+                <Sliders size={14} />
               </button>
 
               <button
                 onClick={onLogout}
-                className="p-1.5 text-[var(--text-muted)] hover:text-rose-500 transition rounded-lg hover:bg-[var(--bg-surface-elevated)] cursor-pointer"
+                className="p-2 min-h-[36px] min-w-[36px] flex items-center justify-center text-[var(--text-muted)] hover:text-rose-500 transition rounded-lg hover:bg-[var(--bg-surface-elevated)] cursor-pointer"
                 title="Sign Out"
+                aria-label="Sign Out"
               >
-                <LogOut size={13} />
+                <LogOut size={14} />
               </button>
             </div>
           </div>

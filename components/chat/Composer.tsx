@@ -58,12 +58,16 @@ export function Composer({
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`
+      const maxHeight = typeof window !== 'undefined' && window.innerWidth < 640 ? 140 : 200
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, maxHeight)}px`
     }
   }, [inputMessage])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    const isTouch = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches
+    // On physical keyboards, Enter sends and Shift+Enter makes newline.
+    // On mobile touchscreens, Enter preserves newline editing so users don't accidentally send incomplete text.
+    if (e.key === 'Enter' && !e.shiftKey && !isTouch) {
       e.preventDefault()
       if (inputMessage.trim() && !isThinking && !isExhausted && !disabled) {
         onSendMessage()
@@ -126,7 +130,7 @@ export function Composer({
   const maxWidthClass = chatWidth === 'wide' ? 'max-w-4xl' : 'max-w-2xl'
 
   return (
-    <div className={`w-full ${maxWidthClass} mx-auto px-4 pb-5 pt-2 relative z-10`}>
+    <div className={`w-full ${maxWidthClass} mx-auto px-2.5 sm:px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 relative z-10`}>
       {/* Quota Exhausted Warning */}
       {isExhausted && (
         <div className="mb-3 p-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs flex items-center justify-between backdrop-blur-md">
@@ -147,7 +151,7 @@ export function Composer({
       )}
 
       {/* Floating Glassmorphism Composer Card */}
-      <div className="relative rounded-3xl glass-panel p-3 sm:p-4 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.08)] transition-all focus-within:border-[var(--border-strong)] focus-within:shadow-[0_16px_48px_-10px_rgba(0,0,0,0.12)]">
+      <div className="relative rounded-3xl glass-panel p-2.5 sm:p-4 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.08)] transition-all focus-within:border-[var(--border-strong)] focus-within:shadow-[0_16px_48px_-10px_rgba(0,0,0,0.12)]">
         <textarea
           ref={textareaRef}
           value={inputMessage}
@@ -166,16 +170,17 @@ export function Composer({
         />
 
         {/* Composer Action Toolbar */}
-        <div className="flex items-center justify-between pt-2.5 border-t border-[var(--border-subtle)] mt-1 px-1">
+        <div className="flex items-center justify-between pt-2 border-t border-[var(--border-subtle)] mt-1 px-0.5 sm:px-1 gap-1">
           {/* Left: Interactive Tools (+ Menu, Attach, Academic search, Voice) */}
-          <div className="flex items-center gap-1 sm:gap-1.5 text-[var(--text-muted)]">
+          <div className="flex items-center gap-0.5 sm:gap-1.5 text-[var(--text-muted)]">
             {/* Quick Prompt Templates Menu */}
             <div className="relative">
               <button
                 type="button"
                 onClick={() => setPromptMenuOpen(!promptMenuOpen)}
                 title="Study prompt templates"
-                className="p-1.5 sm:p-2 rounded-xl hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition cursor-pointer"
+                aria-label="Study prompt templates"
+                className="p-2 min-h-[38px] min-w-[38px] flex items-center justify-center rounded-xl hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition cursor-pointer"
               >
                 <Plus size={16} />
               </button>
@@ -220,7 +225,8 @@ export function Composer({
                 textareaRef.current?.focus()
               }}
               title="Add study context"
-              className="p-1.5 sm:p-2 rounded-xl hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition cursor-pointer"
+              aria-label="Add study context note"
+              className="p-2 min-h-[38px] min-w-[38px] flex items-center justify-center rounded-xl hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition cursor-pointer"
             >
               <Paperclip size={15} />
             </button>
@@ -235,7 +241,8 @@ export function Composer({
                 textareaRef.current?.focus()
               }}
               title="Academic search mode"
-              className="p-1.5 sm:p-2 rounded-xl hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition cursor-pointer"
+              aria-label="Search and explain"
+              className="p-2 min-h-[38px] min-w-[38px] flex items-center justify-center rounded-xl hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition cursor-pointer"
             >
               <Globe size={15} />
             </button>
@@ -246,7 +253,8 @@ export function Composer({
               onClick={toggleVoice}
               disabled={isThinking || isExhausted || disabled}
               title={isListening ? 'Stop listening' : 'Voice input'}
-              className={`p-1.5 sm:p-2 rounded-xl transition cursor-pointer ${
+              aria-label={isListening ? 'Stop voice listening' : 'Start voice input'}
+              className={`p-2 min-h-[38px] min-w-[38px] flex items-center justify-center rounded-xl transition cursor-pointer ${
                 isListening
                   ? 'bg-rose-500/20 text-rose-500 animate-pulse'
                   : 'hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)]'
@@ -257,16 +265,17 @@ export function Composer({
           </div>
 
           {/* Right: Model Selector & Send Arrow Button */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
             {/* Capability Model Selector Dropdown */}
             <div className="relative">
               <button
                 type="button"
                 onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] transition cursor-pointer"
+                className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-full bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] transition cursor-pointer min-h-[38px]"
+                aria-label="Select AI capability model"
               >
-                <Sparkles size={13} className="text-emerald-600 dark:text-emerald-400" />
-                <span className="font-medium text-xs max-w-[110px] truncate sm:max-w-none">
+                <Sparkles size={13} className="text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                <span className="font-medium text-xs max-w-[80px] sm:max-w-[120px] truncate hidden sm:inline">
                   {currentModel.name}
                 </span>
                 <ChevronDown size={11} className="text-[var(--text-muted)]" />
@@ -320,7 +329,7 @@ export function Composer({
             </div>
 
             {/* Answer Length Options (Hidden on narrow screens) */}
-            <div className="hidden md:flex items-center gap-0.5 bg-[var(--bg-surface-elevated)] rounded-full p-0.5 border border-[var(--border-subtle)] text-[10px]">
+            <div className="hidden lg:flex items-center gap-0.5 bg-[var(--bg-surface-elevated)] rounded-full p-0.5 border border-[var(--border-subtle)] text-[10px]">
               {ANSWER_LENGTH_OPTIONS.map((opt) => (
                 <button
                   key={opt.id}
@@ -344,7 +353,7 @@ export function Composer({
                 onClick={onStop}
                 aria-label="Stop generation"
                 title="Stop generation"
-                className="w-9 h-9 rounded-full bg-[var(--text-primary)] text-[var(--bg-app)] hover:opacity-90 transition shadow-xs cursor-pointer flex items-center justify-center flex-shrink-0"
+                className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[var(--text-primary)] text-[var(--bg-app)] hover:opacity-90 transition shadow-xs cursor-pointer flex items-center justify-center flex-shrink-0"
               >
                 <Square size={13} className="fill-current" />
               </button>
@@ -354,7 +363,7 @@ export function Composer({
                 onClick={onSendMessage}
                 disabled={!inputMessage.trim() || isExhausted || disabled}
                 aria-label="Send message"
-                className="w-9 h-9 rounded-full bg-[var(--text-primary)] text-[var(--bg-app)] hover:opacity-90 disabled:opacity-25 transition shadow-xs cursor-pointer flex items-center justify-center flex-shrink-0"
+                className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[var(--text-primary)] text-[var(--bg-app)] hover:opacity-90 disabled:opacity-25 transition shadow-xs cursor-pointer flex items-center justify-center flex-shrink-0"
               >
                 <ArrowUp size={16} />
               </button>

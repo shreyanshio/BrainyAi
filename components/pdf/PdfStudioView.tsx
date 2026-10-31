@@ -64,6 +64,7 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
   const [uploading, setUploading] = useState<boolean>(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState<string>('')
+  const [mobilePanel, setMobilePanel] = useState<'library' | 'studio'>('studio')
 
   // Active studio tab
   const [activeTab, setActiveTab] = useState<StudioTab>('notes')
@@ -184,6 +185,7 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
       const newDoc = await uploadPdfDocument(file)
       setDocuments((prev) => [newDoc, ...prev])
       setSelectedDocId(newDoc.id)
+      setMobilePanel('studio')
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to upload and process PDF.')
     } finally {
@@ -300,10 +302,40 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
 
   return (
     <div className="flex-1 flex flex-col md:flex-row h-full overflow-hidden bg-[var(--bg-app)]">
+      {/* ── MOBILE VIEW SWITCHER (Visible only on < md screens) ── */}
+      <div className="flex md:hidden items-center justify-between p-2.5 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)] flex-shrink-0">
+        <div className="flex items-center p-0.5 rounded-xl bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] text-xs w-full">
+          <button
+            onClick={() => setMobilePanel('library')}
+            className={`flex-1 py-1.5 px-3 rounded-lg font-semibold text-xs transition cursor-pointer flex items-center justify-center gap-1.5 min-h-[36px] ${
+              mobilePanel === 'library'
+                ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-xs'
+                : 'text-[var(--text-muted)]'
+            }`}
+          >
+            <FileSpreadsheet size={14} className="text-blue-500" />
+            <span>Library ({documents.length})</span>
+          </button>
+          <button
+            onClick={() => setMobilePanel('studio')}
+            className={`flex-1 py-1.5 px-3 rounded-lg font-semibold text-xs transition cursor-pointer flex items-center justify-center gap-1.5 min-h-[36px] ${
+              mobilePanel === 'studio'
+                ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-xs'
+                : 'text-[var(--text-muted)]'
+            }`}
+          >
+            <BookOpen size={14} className="text-emerald-500" />
+            <span className="truncate max-w-[140px]">{selectedDoc ? selectedDoc.filename : 'Studio'}</span>
+          </button>
+        </div>
+      </div>
+
       {/* ── LEFT SIDEBAR: DOCUMENT LIBRARY & UPLOAD ── */}
-      <aside className="w-full md:w-80 lg:w-88 border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] flex flex-col flex-shrink-0">
+      <aside className={`w-full md:w-80 lg:w-88 border-r border-[var(--border-subtle)] bg-[var(--bg-surface)] flex-col flex-shrink-0 ${
+        mobilePanel === 'library' ? 'flex flex-1 h-full' : 'hidden md:flex'
+      }`}>
         {/* Upload Button Header */}
-        <div className="p-4 border-b border-[var(--border-subtle)] flex flex-col gap-3">
+        <div className="p-3 sm:p-4 border-b border-[var(--border-subtle)] flex flex-col gap-2.5 sm:gap-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <FileSpreadsheet className="w-5 h-5 text-blue-500" />
@@ -327,7 +359,7 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
-            className="w-full py-2.5 px-4 rounded-xl font-semibold text-xs text-white bg-blue-600 hover:bg-blue-500 transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-50"
+            className="w-full py-2.5 px-4 rounded-xl font-semibold text-xs text-white bg-blue-600 hover:bg-blue-500 transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-50 min-h-[42px]"
           >
             {uploading ? (
               <>
@@ -345,20 +377,20 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
           {/* Search Library */}
           {documents.length > 0 && (
             <div className="relative">
-              <Search size={13} className="absolute left-3 top-2.5 text-[var(--text-muted)]" />
+              <Search size={13} className="absolute left-3 top-3 text-[var(--text-muted)]" />
               <input
                 type="text"
                 placeholder="Search library..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 rounded-xl text-xs bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] focus:outline-none focus:border-blue-500 text-[var(--text-primary)]"
+                className="w-full pl-8 pr-3 py-2 rounded-xl text-xs bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] focus:outline-none focus:border-blue-500 text-[var(--text-primary)] min-h-[38px]"
               />
             </div>
           )}
         </div>
 
         {/* Documents List */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        <div className="flex-1 overflow-y-auto p-2.5 sm:p-3 space-y-2">
           {loadingDocs ? (
             <div className="flex items-center justify-center p-8 text-[var(--text-muted)] text-xs gap-2">
               <Loader2 size={16} className="animate-spin text-blue-500" />
@@ -380,7 +412,10 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
               return (
                 <div
                   key={doc.id}
-                  onClick={() => setSelectedDocId(doc.id)}
+                  onClick={() => {
+                    setSelectedDocId(doc.id)
+                    setMobilePanel('studio')
+                  }}
                   className={`group relative p-3 rounded-xl border transition-all cursor-pointer ${
                     isSelected
                       ? 'bg-blue-500/10 border-blue-500/30 text-[var(--text-primary)]'
@@ -389,7 +424,7 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2.5 overflow-hidden">
-                      <div className={`p-2 rounded-lg ${isSelected ? 'bg-blue-500 text-white' : 'bg-[var(--bg-surface)] text-[var(--text-muted)]'}`}>
+                      <div className={`p-2 rounded-lg flex-shrink-0 ${isSelected ? 'bg-blue-500 text-white' : 'bg-[var(--bg-surface)] text-[var(--text-muted)]'}`}>
                         <FileText size={16} />
                       </div>
                       <div className="overflow-hidden">
@@ -407,7 +442,8 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
                     <button
                       onClick={(e) => handleDeleteDoc(doc.id, e)}
                       title="Delete document"
-                      className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-[var(--text-muted)] hover:text-red-500 hover:bg-red-500/10 transition"
+                      aria-label="Delete document"
+                      className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2 min-h-[32px] min-w-[32px] flex items-center justify-center rounded-lg text-[var(--text-muted)] hover:text-red-500 hover:bg-red-500/10 transition"
                     >
                       <Trash2 size={13} />
                     </button>
@@ -420,7 +456,9 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
       </aside>
 
       {/* ── MAIN STAGE ── */}
-      <main className="flex-1 flex flex-col h-full overflow-hidden">
+      <main className={`flex-1 flex flex-col h-full overflow-hidden ${
+        mobilePanel === 'studio' ? 'flex' : 'hidden md:flex'
+      }`}>
         {errorMsg && (
           <div className="m-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -436,27 +474,27 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
         {selectedDoc ? (
           <>
             {/* Document Header & Studio Tabs */}
-            <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] px-6 py-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 sm:px-6 py-2.5 sm:py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 flex-shrink-0">
               <div>
-                <h1 className="font-bold text-base text-[var(--text-primary)] flex items-center gap-2">
-                  <span>{selectedDoc.filename}</span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 font-semibold">
+                <h1 className="font-bold text-sm sm:text-base text-[var(--text-primary)] flex items-center gap-2">
+                  <span className="truncate max-w-[200px] sm:max-w-none">{selectedDoc.filename}</span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-500 font-semibold flex-shrink-0">
                     {selectedDoc.page_count} Pages
                   </span>
                 </h1>
-                <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                <p className="text-[11px] text-[var(--text-muted)] mt-0.5 hidden sm:block">
                   AI Multi-Provider Academic Studio grounded in verified document text.
                 </p>
               </div>
 
               {/* Depth Selector & Tabs */}
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="flex items-center bg-[var(--bg-surface-elevated)] p-1 rounded-xl text-xs border border-[var(--border-subtle)]">
+              <div className="flex items-center gap-2 overflow-x-auto scrollbar-none max-w-full pb-0.5">
+                <div className="flex items-center bg-[var(--bg-surface-elevated)] p-1 rounded-xl text-xs border border-[var(--border-subtle)] flex-shrink-0">
                   {(['FAST', 'BALANCED', 'DEEP'] as const).map((d) => (
                     <button
                       key={d}
                       onClick={() => setDepth(d)}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition cursor-pointer ${
+                      className={`px-2 py-1 rounded-lg text-[10px] sm:text-[11px] font-semibold transition cursor-pointer ${
                         depth === d
                           ? 'bg-blue-600 text-white shadow-2xs'
                           : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
@@ -468,10 +506,10 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
                 </div>
 
                 {/* Studio Tab Pills */}
-                <div className="flex items-center bg-[var(--bg-surface-elevated)] p-1 rounded-xl text-xs border border-[var(--border-subtle)]">
+                <div className="flex items-center bg-[var(--bg-surface-elevated)] p-1 rounded-xl text-xs border border-[var(--border-subtle)] overflow-x-auto scrollbar-none flex-nowrap flex-shrink-0">
                   <button
                     onClick={() => setActiveTab('notes')}
-                    className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer whitespace-nowrap flex-shrink-0 ${
                       activeTab === 'notes'
                         ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] font-semibold shadow-xs'
                         : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
@@ -483,7 +521,7 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
 
                   <button
                     onClick={() => setActiveTab('ask')}
-                    className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer whitespace-nowrap flex-shrink-0 ${
                       activeTab === 'ask'
                         ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] font-semibold shadow-xs'
                         : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
@@ -495,19 +533,19 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
 
                   <button
                     onClick={() => setActiveTab('quiz')}
-                    className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer whitespace-nowrap flex-shrink-0 ${
                       activeTab === 'quiz'
                         ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] font-semibold shadow-xs'
                         : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                     }`}
                   >
                     <Award size={13} />
-                    <span>Quiz (4-Option)</span>
+                    <span>Quiz</span>
                   </button>
 
                   <button
                     onClick={() => setActiveTab('flashcards')}
-                    className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer whitespace-nowrap flex-shrink-0 ${
                       activeTab === 'flashcards'
                         ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] font-semibold shadow-xs'
                         : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
@@ -519,7 +557,7 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
 
                   <button
                     onClick={() => setActiveTab('progress')}
-                    className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer whitespace-nowrap flex-shrink-0 ${
                       activeTab === 'progress'
                         ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] font-semibold shadow-xs'
                         : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
@@ -533,7 +571,7 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
             </div>
 
             {/* Tab Body */}
-            <div className="flex-1 overflow-y-auto p-6">
+            <div className="flex-1 overflow-y-auto p-3 sm:p-6">
               {/* ── TAB: NOTES ── */}
               {activeTab === 'notes' && (
                 <div className="max-w-4xl mx-auto space-y-6">

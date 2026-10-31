@@ -350,33 +350,50 @@ export default function AdminPage() {
       )}
 
       {/* TOP COMMAND BAR */}
-      <header className="sticky top-0 z-40 bg-slate-900/80 backdrop-blur-md border-b border-slate-800 px-4 lg:px-8 py-3.5 flex items-center justify-between">
-        <div className="flex items-center space-x-3">
+      <header className="sticky top-0 z-40 bg-slate-900/80 backdrop-blur-md border-b border-slate-800 px-3 lg:px-8 py-3 flex items-center justify-between">
+        <div className="flex items-center space-x-2 sm:space-x-3">
           <Link
             href="/"
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition"
+            className="p-2 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition min-h-[38px] min-w-[38px] flex items-center justify-center"
             title="Return to Application"
+            aria-label="Return to chat"
           >
             <ArrowLeft className="w-5 h-5" />
           </Link>
-          <div className="flex items-center space-x-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-purple-900/30">
-              <ShieldCheck className="w-5 h-5 text-white" />
+          <div className="flex items-center space-x-2">
+            <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-purple-900/30 flex-shrink-0">
+              <ShieldCheck className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
             </div>
             <div>
-              <div className="flex items-center space-x-2">
-                <span className="font-bold text-base tracking-tight text-white">BrainyAi</span>
-                <span className="text-[11px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                  Control Center
+              <div className="flex items-center space-x-1.5 sm:space-x-2">
+                <span className="font-bold text-sm sm:text-base tracking-tight text-white">BrainyAi</span>
+                <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider px-1.5 sm:px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                  Admin
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">Enterprise AI Operations & Token Accounting</p>
+              <p className="text-[10px] sm:text-[11px] text-slate-400 hidden xs:block">AI Operations & Token Accounting</p>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center space-x-3">
-          {/* Time Window Selector */}
+        <div className="flex items-center space-x-2 sm:space-x-3">
+          {/* Time Window Selector (Dropdown on mobile, pills on sm+) */}
+          <select
+            value={windowSec}
+            onChange={(e) => {
+              const val = Number(e.target.value)
+              setWindowSec(val)
+              refreshAllData(val)
+            }}
+            className="sm:hidden bg-slate-800 text-slate-200 border border-slate-700 text-xs rounded-lg px-2 py-1.5 focus:outline-none min-h-[36px]"
+            aria-label="Select time window"
+          >
+            <option value={3600}>1H</option>
+            <option value={86400}>24H</option>
+            <option value={604800}>7D</option>
+            <option value={2592000}>30D</option>
+          </select>
+
           <div className="hidden sm:flex items-center bg-slate-800/80 rounded-lg p-0.5 border border-slate-700 text-xs">
             {[
               { label: '1H', val: 3600 },
@@ -402,9 +419,9 @@ export default function AdminPage() {
           </div>
 
           {/* Live Polling Status */}
-          <div className="flex items-center space-x-2 px-2.5 py-1 rounded-lg bg-slate-800/60 border border-slate-700/60 text-xs text-slate-300">
+          <div className="flex items-center space-x-1.5 sm:space-x-2 px-2 sm:px-2.5 py-1.5 rounded-lg bg-slate-800/60 border border-slate-700/60 text-xs text-slate-300 min-h-[36px]">
             <span
-              className={`w-2 h-2 rounded-full ${
+              className={`w-2 h-2 rounded-full flex-shrink-0 ${
                 refreshing
                   ? 'bg-amber-400 animate-ping'
                   : autoRefresh
@@ -417,7 +434,7 @@ export default function AdminPage() {
             </span>
             <button
               onClick={() => setAutoRefresh(!autoRefresh)}
-              className="text-[10px] text-purple-400 hover:underline ml-1"
+              className="text-[10px] sm:text-xs text-purple-400 hover:underline ml-0.5"
             >
               {autoRefresh ? 'Pause' : 'Stream'}
             </button>
@@ -427,8 +444,9 @@ export default function AdminPage() {
           <button
             onClick={() => refreshAllData(windowSec)}
             disabled={refreshing}
-            className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition disabled:opacity-50"
+            className="p-2 min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white transition disabled:opacity-50"
             title="Refresh Metrics"
+            aria-label="Refresh metrics"
           >
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
           </button>
@@ -436,7 +454,7 @@ export default function AdminPage() {
       </header>
 
       {/* NAVIGATION TABS */}
-      <nav className="bg-slate-900 border-b border-slate-800 px-4 lg:px-8 overflow-x-auto flex space-x-1 py-1.5 scrollbar-thin">
+      <nav className="bg-slate-900 border-b border-slate-800 px-3 lg:px-8 overflow-x-auto flex space-x-1 py-1.5 scrollbar-none flex-nowrap">
         {[
           { id: 'overview', label: 'Overview', icon: BarChart2 },
           { id: 'users', label: 'Users', icon: Users, badge: kpis?.total_users },
@@ -454,13 +472,13 @@ export default function AdminPage() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as AdminTab)}
-              className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition ${
+              className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition cursor-pointer flex-shrink-0 min-h-[36px] ${
                 isActive
                   ? 'bg-purple-600/20 text-purple-300 border border-purple-500/30'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent'
               }`}
             >
-              <Icon className="w-4 h-4" />
+              <Icon className="w-3.5 h-3.5" />
               <span>{tab.label}</span>
               {tab.badge !== undefined && (
                 <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-800 text-slate-300 border border-slate-700">

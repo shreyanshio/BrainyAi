@@ -89,6 +89,32 @@ export default function BrainyApp() {
   const [notesModalOpen, setNotesModalOpen] = useState(false)
   const [settingsModalOpen, setSettingsModalOpen] = useState(false)
 
+  // Lock background scroll on mobile when sidebar drawer is open and handle Escape key
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (sidebarMobileOpen) setSidebarMobileOpen(false)
+        if (usageModalOpen) setUsageModalOpen(false)
+        if (notesModalOpen) setNotesModalOpen(false)
+        if (settingsModalOpen) setSettingsModalOpen(false)
+      }
+    }
+
+    if (sidebarMobileOpen) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.body.style.overflow = ''
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [sidebarMobileOpen, usageModalOpen, notesModalOpen, settingsModalOpen])
+
   // ── Apply Preferences to Document Root ────────────────────
   useEffect(() => {
     if (typeof document === 'undefined') return

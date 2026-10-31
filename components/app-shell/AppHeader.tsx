@@ -74,13 +74,13 @@ export function AppHeader({
   const isExhausted = remaining === 0
 
   return (
-    <header className="h-14 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)]/80 backdrop-blur-xl px-4 sm:px-6 flex items-center justify-between z-20 flex-shrink-0 transition-colors">
+    <header className="h-14 border-b border-[var(--border-subtle)] bg-[var(--bg-surface)]/80 backdrop-blur-xl px-2.5 sm:px-6 flex items-center justify-between z-20 flex-shrink-0 transition-colors">
       {/* Left: Mobile menu toggle, Logo & Model */}
-      <div className="flex items-center gap-2.5 sm:gap-3">
+      <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
         <button
           onClick={onToggleSidebar}
-          className="p-1.5 rounded-xl text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition lg:hidden cursor-pointer"
-          aria-label="Toggle sidebar"
+          className="p-2 min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] transition lg:hidden cursor-pointer"
+          aria-label="Toggle navigation menu"
         >
           <Menu size={18} />
         </button>
@@ -89,17 +89,18 @@ export function AppHeader({
           <div className="w-6 h-6 rounded-lg bg-[var(--text-primary)] text-[var(--bg-app)] flex items-center justify-center font-bold text-xs shadow-xs">
             B
           </div>
-          <span className="font-bold text-sm tracking-tight text-[var(--text-primary)] hidden sm:inline">
+          <span className="font-bold text-sm tracking-tight text-[var(--text-primary)] hidden md:inline">
             Brainy
           </span>
         </div>
 
-        {/* Capability Model Selector Dropdown */}
+        {/* Capability Model Selector Dropdown (Hidden on mobile < 640px where composer selector is used) */}
         {currentView === 'chat' && (
-          <div className="relative ml-1 sm:ml-2">
+          <div className="relative ml-0.5 sm:ml-2 hidden sm:block">
             <button
               onClick={() => setModelDropdownOpen(!modelDropdownOpen)}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] transition cursor-pointer shadow-2xs"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] border border-[var(--border-subtle)] text-xs text-[var(--text-primary)] transition cursor-pointer shadow-2xs"
+              aria-label="Select AI capability model"
             >
               {getModelIcon(currentModel.id)}
               <span className="font-medium hidden md:inline">{currentModel.name}</span>
@@ -152,61 +153,66 @@ export function AppHeader({
         )}
       </div>
 
-      {/* Center: Segmented Floating Capsule Toggle (Inspired by reference image) */}
-      <div className="flex items-center p-0.5 rounded-full bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] text-xs shadow-2xs">
+      {/* Center: Segmented Floating Capsule Toggle (Adaptive labels for mobile, tablet, desktop) */}
+      <nav aria-label="Main view selector" className="flex items-center p-0.5 rounded-full bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] text-xs shadow-2xs">
         <button
           onClick={() => onSelectView('chat')}
-          className={`flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs transition cursor-pointer ${
+          aria-label="Chat view"
+          className={`flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-full text-xs transition cursor-pointer ${
             currentView === 'chat'
               ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] font-semibold shadow-xs'
               : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
           }`}
         >
           <MessageSquare size={13} />
-          <span>Chats</span>
+          <span className="hidden sm:inline">Chats</span>
         </button>
 
         <button
           onClick={() => onSelectView('overview')}
-          className={`flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs transition cursor-pointer ${
+          aria-label="Overview dashboard"
+          className={`flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-full text-xs transition cursor-pointer ${
             currentView === 'overview'
               ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] font-semibold shadow-xs'
               : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
           }`}
         >
           <LayoutDashboard size={13} />
-          <span>Overview</span>
+          <span className="hidden sm:inline">Overview</span>
         </button>
 
         <button
           onClick={() => onSelectView('pdf')}
-          className={`flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs transition cursor-pointer ${
+          aria-label="PDF Study Studio"
+          className={`flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-full text-xs transition cursor-pointer ${
             currentView === 'pdf'
               ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] font-semibold shadow-xs'
               : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
           }`}
         >
           <FileText size={13} />
-          <span>PDF Studio</span>
+          <span className="hidden sm:inline">PDF Studio</span>
+          <span className="inline sm:hidden">PDF</span>
         </button>
 
         {onOpenNotesModal && (
           <button
             onClick={onOpenNotesModal}
-            className="hidden sm:flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition cursor-pointer"
+            aria-label="Saved study notes"
+            className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)] transition cursor-pointer"
           >
             <BookMarked size={13} />
             <span>Notes</span>
           </button>
         )}
-      </div>
+      </nav>
 
       {/* Right: 5h Quota Capsule, Settings Button, and User Avatar */}
-      <div className="flex items-center gap-1.5 sm:gap-2">
+      <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
         {/* Quota Indicator Button */}
         <button
           onClick={onOpenUsageModal}
-          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition cursor-pointer ${
+          className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-full text-xs font-medium border transition cursor-pointer min-h-[36px] ${
             isExhausted
               ? 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400'
               : isNearLimit
@@ -214,18 +220,20 @@ export function AppHeader({
               : 'bg-[var(--bg-surface-elevated)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
           }`}
           title={usage ? `Quota: ${usage.remaining} of ${usage.limit} left` : 'Quota info'}
+          aria-label="Study message quota"
         >
           <Clock size={12} className={isExhausted ? 'text-rose-500' : isNearLimit ? 'text-amber-500' : 'text-emerald-500'} />
-          <span>
-            {usage ? `${remaining}/${usage.limit}` : '30/30'}
+          <span className="font-mono text-[11px] sm:text-xs">
+            {usage ? `${remaining}` : '30'}
+            <span className="text-[var(--text-muted)]">/{usage ? `${usage.limit}` : '30'}</span>
           </span>
-          <span className="hidden lg:inline text-[var(--text-muted)] font-normal">left</span>
+          <span className="hidden lg:inline text-[var(--text-muted)] font-normal text-[11px]">left</span>
         </button>
 
         {/* Settings Button */}
         <button
           onClick={onOpenSettingsModal}
-          className="p-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition cursor-pointer"
+          className="p-2 min-h-[36px] min-w-[36px] flex items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface-elevated)] hover:bg-[var(--bg-surface-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition cursor-pointer"
           title="Customize Workspace"
           aria-label="Open settings"
         >
@@ -236,7 +244,7 @@ export function AppHeader({
         <div className="relative">
           <button
             onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-            className="flex items-center gap-1 p-0.5 rounded-full hover:bg-[var(--bg-surface-elevated)] transition cursor-pointer"
+            className="flex items-center gap-1 p-1 min-h-[36px] min-w-[36px] rounded-full hover:bg-[var(--bg-surface-elevated)] transition cursor-pointer"
             aria-label="User account menu"
           >
             <div className="w-7 h-7 rounded-full bg-[var(--text-primary)] text-[var(--bg-app)] flex items-center justify-center text-xs font-bold shadow-xs">

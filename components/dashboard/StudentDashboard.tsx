@@ -197,18 +197,18 @@ export function StudentDashboard({
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 max-w-7xl mx-auto w-full">
+    <div className="flex-1 overflow-y-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-5 sm:space-y-6 max-w-7xl mx-auto w-full">
       {/* ── Top Hero Greeting Banner (Inspired by Aptivus Image 2) ── */}
-      <div className="relative rounded-3xl p-6 sm:p-8 bg-gradient-to-r from-[var(--bg-surface-elevated)] to-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-[var(--card-shadow)] overflow-hidden">
+      <div className="relative rounded-3xl p-5 sm:p-8 bg-gradient-to-r from-[var(--bg-surface-elevated)] to-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-[var(--card-shadow)] overflow-hidden">
         {/* Subtle decorative gold/emerald glow in top right */}
         <div className="absolute top-0 right-0 w-80 h-80 bg-[var(--accent-subtle)] rounded-full blur-3xl pointer-events-none" />
 
-        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-5 sm:gap-6">
           <div className="space-y-2">
             <div className="text-xs uppercase font-bold tracking-wider text-[var(--text-muted)]">
               Study Overview
             </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[var(--text-primary)]">
+            <h1 className="text-xl sm:text-3xl font-extrabold tracking-tight text-[var(--text-primary)]">
               {greeting}, {user.first_name || 'Scholar'}!
             </h1>
             <p className="text-xs sm:text-sm text-[var(--text-secondary)] max-w-xl">
@@ -216,13 +216,13 @@ export function StudentDashboard({
             </p>
 
             {/* Badges / Chips */}
-            <div className="flex flex-wrap items-center gap-2 pt-2">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+            <div className="flex flex-wrap items-center gap-2 pt-1 sm:pt-2">
+              <span className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                 <Award size={13} />
                 <span>{questionsRemaining === null ? 'Usage unavailable' : `${questionsRemaining} Questions Left`}</span>
               </span>
 
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-[var(--bg-surface-elevated)] text-[var(--text-secondary)] border border-[var(--border-subtle)]">
+              <span className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-xs font-medium bg-[var(--bg-surface-elevated)] text-[var(--text-secondary)] border border-[var(--border-subtle)]">
                 <Clock size={13} />
                 <span>{usage ? `${usage.window_hours}h quota window` : 'Quota window unavailable'}</span>
               </span>
@@ -232,7 +232,7 @@ export function StudentDashboard({
           {/* Quick Jump Input */}
           <form
             onSubmit={handleJumpSubmit}
-            className="w-full lg:max-w-md flex items-center gap-2 p-1.5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-strong)] shadow-sm"
+            className="w-full lg:max-w-md flex items-center gap-2 p-1.5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-strong)] shadow-sm min-h-[44px]"
           >
             <input
               type="text"
@@ -243,7 +243,7 @@ export function StudentDashboard({
             />
             <button
               type="submit"
-              className="px-4 py-2 rounded-xl bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 text-xs font-semibold hover:opacity-90 transition flex items-center gap-1.5 flex-shrink-0 cursor-pointer"
+              className="px-4 py-2 rounded-xl bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 text-xs font-semibold hover:opacity-90 transition flex items-center gap-1.5 flex-shrink-0 cursor-pointer min-h-[36px]"
             >
               <span>Ask</span>
               <ArrowRight size={13} />
@@ -285,8 +285,8 @@ export function StudentDashboard({
             </div>
 
             {/* Circular Progress Display */}
-            <div className="flex flex-col items-center justify-center my-4 relative">
-              <div className="relative w-48 h-48 flex items-center justify-center">
+            <div className="flex flex-col items-center justify-center my-3 sm:my-4 relative">
+              <div className="relative w-40 h-40 sm:w-48 sm:h-48 flex items-center justify-center">
                 <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
                   {/* Background Track */}
                   <circle
@@ -559,7 +559,7 @@ export function StudentDashboard({
                 </div>
                 <div className="text-center">
                   <span
-                    className={`text-[11px] font-medium block ${
+                    className={`text-[9px] sm:text-[11px] font-medium block truncate ${
                       isToday ? 'text-[var(--text-primary)] font-bold' : 'text-[var(--text-muted)]'
                     }`}
                   >

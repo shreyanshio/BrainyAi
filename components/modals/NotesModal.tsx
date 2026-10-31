@@ -24,9 +24,9 @@ export function NotesModal({ isOpen, onClose, memoryData }: NotesModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
       <div
-        className="w-full max-w-lg rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] p-6 shadow-[var(--card-shadow)] text-[var(--text-primary)] flex flex-col max-h-[80vh]"
+        className="w-full max-w-lg rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] p-4 sm:p-6 shadow-[var(--card-shadow)] text-[var(--text-primary)] flex flex-col max-h-[85vh] max-h-[90dvh]"
         role="dialog"
       >
         {/* Header */}

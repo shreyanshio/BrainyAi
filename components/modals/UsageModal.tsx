@@ -49,9 +49,9 @@ export function UsageModal({ isOpen, onClose, usage }: UsageModalProps) {
   const percentage = Math.min(100, Math.round((used / limit) * 100))
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
       <div
-        className="w-full max-w-md rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] p-6 shadow-[var(--card-shadow)] text-[var(--text-primary)]"
+        className="w-full max-w-md rounded-3xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] p-4 sm:p-6 shadow-[var(--card-shadow)] text-[var(--text-primary)] max-h-[90dvh] overflow-y-auto"
         role="dialog"
       >
         {/* Header */}
