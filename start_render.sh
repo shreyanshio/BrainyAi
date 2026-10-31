@@ -6,14 +6,17 @@ set -e
 
 echo "[Render Startup] Starting BrainyAi combined services..."
 
-# Start Telegram Bot in background if TELEGRAM_BOT_TOKEN is provided
-if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
+# Start Telegram Bot in background if TELEGRAM_TOKEN or TELEGRAM_BOT_TOKEN is provided
+TG_TOKEN="${TELEGRAM_TOKEN:-$TELEGRAM_BOT_TOKEN}"
+if [ -n "$TG_TOKEN" ]; then
+    export TELEGRAM_TOKEN="$TG_TOKEN"
+    export TELEGRAM_BOT_TOKEN="$TG_TOKEN"
     echo "[Render Startup] Launching Telegram Bot (study_bot.py) in background..."
     python study_bot.py &
     BOT_PID=$!
     echo "[Render Startup] Telegram Bot PID: $BOT_PID"
 else
-    echo "[Render Startup] TELEGRAM_BOT_TOKEN not set, skipping Telegram Bot."
+    echo "[Render Startup] Neither TELEGRAM_TOKEN nor TELEGRAM_BOT_TOKEN set, skipping Telegram Bot."
 fi
 
 # Run Gunicorn in foreground binding to $PORT (Render passes PORT dynamically, default 10000)
