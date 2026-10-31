@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: brainyai-backend
+    env: python
+    region: singapore # Closest to India for lowest latency, or use frankfurt / oregon
+    plan: free
+    buildCommand: "pip install --no-cache-dir -r requirements.txt"
+    startCommand: "chmod +x start_render.sh && ./start_render.sh"
+    healthCheckPath: "/ping"
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: FLASK_ENV
+        value: production
+      - key: PORT
+        value: 10000

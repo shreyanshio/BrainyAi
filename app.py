@@ -236,6 +236,21 @@ def api_health():
     }), 200
 
 
+@app.route("/ping", methods=["GET"])
+@app.route("/api/ping", methods=["GET"])
+def api_ping():
+    """Ultra-lightweight heartbeat endpoint for keep-alive monitoring (e.g. UptimeRobot, cron-job.org).
+    Does not query databases or external AI APIs, responding in < 1ms to keep the worker warm.
+    """
+    return jsonify({
+        "status": "ok",
+        "pong": True,
+        "service": "brainy-backend",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }), 200
+
+
+
 def _memory_storage_error(exc: Exception):
     """Return a safe retryable response when per-user memory persistence fails."""
     logger.error("User memory operation failed request_id=%s category=%s",
