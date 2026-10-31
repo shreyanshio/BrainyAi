@@ -3214,8 +3214,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if context.user_data is not None:
             context.user_data["pending_session_id"] = session_id
         
-        api_base = os.getenv("API_BASE_URL") or os.getenv("WEB_APP_URL", "https://brainyai.up.railway.app")
-        api_base = api_base.rstrip("/")
+        api_base = (
+            os.getenv("API_BASE_URL")
+            or os.getenv("RENDER_EXTERNAL_URL")
+            or os.getenv("WEB_APP_URL")
+            or "https://brainyai-backend.onrender.com"
+        ).rstrip("/")
         verify_url = f"{api_base}/api/auth/verify?session_id={session_id}&user_id={user_id}&username={username}&first_name={first_name}"
         
         keyboard = InlineKeyboardMarkup([
@@ -3248,8 +3252,13 @@ async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif context.user_data and context.user_data.get("pending_session_id"):
         session_id = context.user_data.get("pending_session_id")
 
-    api_base = (os.getenv("API_BASE_URL") or os.getenv("WEB_APP_URL", "https://brainyai.up.railway.app")).rstrip("/")
-    frontend_url = (os.getenv("FRONTEND_URL", "https://brainyai.cenai.workers.dev")).rstrip("/")
+    api_base = (
+        os.getenv("API_BASE_URL")
+        or os.getenv("RENDER_EXTERNAL_URL")
+        or os.getenv("WEB_APP_URL")
+        or "https://brainyai-backend.onrender.com"
+    ).rstrip("/")
+    frontend_url = (os.getenv("FRONTEND_URL") or "https://brainyai.cenai.workers.dev").rstrip("/")
 
     if session_id:
         verify_url = f"{api_base}/api/auth/verify?session_id={session_id}&user_id={user_id}&username={username}&first_name={first_name}"
@@ -3301,7 +3310,7 @@ async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     get_user_data(user_id)
     supabase_register_user(user_id, "private", update.effective_user.username or "", user_name or "")
 
-    web_url = os.getenv("WEB_APP_URL", "https://brainyai.up.railway.app")
+    web_url = os.getenv("FRONTEND_URL") or os.getenv("WEB_APP_URL") or "https://brainyai.cenai.workers.dev"
     launch_keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🚀 Try the BRAINY Mini App", web_app=WebAppInfo(url=web_url))]
     ])
@@ -4791,7 +4800,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # If user explicitly asked for the web link/site/mini app, send it as an
     # inline button — in addition to (not instead of) the normal answer above.
     if wants_web_link:
-        web_url = os.getenv("WEB_APP_URL", "https://brainyai.up.railway.app/")
+        web_url = os.getenv("FRONTEND_URL") or os.getenv("WEB_APP_URL") or "https://brainyai.cenai.workers.dev"
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🌐 Open BRAINY Web App", web_app=WebAppInfo(url=web_url))],
             [InlineKeyboardButton("🔗 Copy Link", url=web_url)]
@@ -4804,7 +4813,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
     elif is_brand_new_user:
-        web_url = os.getenv("WEB_APP_URL", "https://brainyai.up.railway.app")
+        web_url = os.getenv("FRONTEND_URL") or os.getenv("WEB_APP_URL") or "https://brainyai.cenai.workers.dev"
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("🌐 Also try the Web App", web_app=WebAppInfo(url=web_url))]
         ])

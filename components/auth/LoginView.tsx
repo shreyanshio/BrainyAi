@@ -224,11 +224,12 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
     setError('')
     setIsSubmitting(true)
     const activeClientId = googleClientId || DEFAULT_GOOGLE_CLIENT_ID
+    const redirectOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://brainyai.cenai.workers.dev'
     const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(
       activeClientId
     )}&response_type=token&scope=${encodeURIComponent(
       'openid email profile'
-    )}&redirect_uri=${encodeURIComponent('https://brainyai.up.railway.app')}&prompt=select_account`
+    )}&redirect_uri=${encodeURIComponent(redirectOrigin)}&prompt=select_account`
 
     window.location.href = authUrl
   }
