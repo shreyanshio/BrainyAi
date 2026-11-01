@@ -96,21 +96,18 @@ export function AppHeader({
           aria-label="Brainy home"
         >
           {/* Desktop & Tablet: Official Horizontal Wordmark */}
-          <div className="hidden sm:flex items-center bg-white/95 dark:bg-white px-2.5 py-1 rounded-xl shadow-2xs border border-zinc-200/50">
-            <BrainyLogo
-              variant="wordmark"
-              className="h-6 w-auto"
-              priority
-            />
-          </div>
-          {/* Mobile (<640px): Compact Official Symbol */}
-          <div className="sm:hidden flex items-center justify-center w-8 h-8 rounded-xl bg-white p-1 shadow-2xs border border-zinc-200/50">
-            <BrainyLogo
-              variant="symbol"
-              className="w-full h-full object-contain"
-              priority
-            />
-          </div>
+          <BrainyLogo
+            variant="wordmark"
+            className="hidden sm:block h-7 w-auto"
+            priority
+          />
+          {/* Compact mark on narrow screens; no badge or tile behind it. */}
+          <BrainyLogo
+            variant="symbol"
+            className="sm:hidden h-8 w-8"
+            priority
+            alt="Brainy"
+          />
         </a>
 
         {/* Capability Model Selector Dropdown (Hidden on mobile < 640px where composer selector is used) */}
