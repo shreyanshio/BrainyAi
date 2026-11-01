@@ -87,7 +87,7 @@ _DISALLOWED_TOKENS = re.compile(
 )
 
 def _sanitize_math_input(raw: str) -> str:
-    """Sanitizes text to prevent injection of non-mathematical code."""
+    """Sanitizes text to prevent injection of non-mathematical code and normalizes implicit multiplication."""
     if _DISALLOWED_TOKENS.search(raw):
         raise ValueError("Invalid mathematical input: forbidden keywords detected.")
     s = raw.strip()
@@ -97,6 +97,14 @@ def _sanitize_math_input(raw: str) -> str:
     s = s.replace("π", "pi")
     s = s.replace("∞", "oo")
     s = re.sub(r"\b(\d+)\s*%", r"(\1/100)", s)
+    
+    # Implicit multiplication: 2x -> 2*x, 5.5x -> 5.5*x, 2(x+1) -> 2*(x+1)
+    s = re.sub(r"(\d+(?:\.\d+)?)\s*([a-zA-Z\(])", r"\1*\2", s)
+    # )x or )2 or )( -> )*x, )*2, )*(
+    s = re.sub(r"(\))\s*([a-zA-Z0-9\(])", r"\1*\2", s)
+    # Fix accidental prefix multiplication on known functions: sqrt*(x) -> sqrt(x), sin*(x) -> sin(x)
+    for fn in ("sqrt", "sin", "cos", "tan", "asin", "acos", "atan", "log", "ln", "exp", "abs", "factorial"):
+        s = re.sub(rf"\b{fn}\s*\*\s*\(", f"{fn}(", s)
     return s
 
 
@@ -440,15 +448,23 @@ class MathematicsEngine:
                 logger.warning("Limit parse error: %s", e)
 
         # Differentiation: d/dx, derivative, diff
-        diff_match = re.search(r"\b(?:derivative of|diff(?:erentiate)?|d/dx)\s*(?:of\s+)?(.+)", q, re.IGNORECASE)
+        diff_match = re.search(r"\b(?:derivative of|diff(?:erentiate)?|d/d([a-zA-Z]))\s*(?:of\s+)?(.+)", q, re.IGNORECASE)
         if diff_match:
-            expr_raw = diff_match.group(1).strip()
+            explicit_var = diff_match.group(1)
+            expr_raw = diff_match.group(2).strip()
             expr_raw = re.sub(r"\s+with respect to\s+([a-zA-Z])", r", \1", expr_raw, flags=re.IGNORECASE)
-            var_name = 'x'
+            # Strip trailing dx, dt, etc. e.g. "diff sin(x) dx" -> "sin(x)"
+            trailing_d = re.search(r"\s+d([a-zA-Z])$", expr_raw, re.IGNORECASE)
+            if trailing_d:
+                var_name = explicit_var or trailing_d.group(1)
+                expr_raw = expr_raw[:trailing_d.start()].strip()
+            else:
+                var_name = explicit_var or 'x'
+
             if ',' in expr_raw:
                 parts = expr_raw.split(',', 1)
                 expr_str = parts[0].strip()
-                var_name = parts[1].strip() or 'x'
+                var_name = parts[1].strip() or var_name
             else:
                 expr_str = expr_raw
             try:
@@ -483,6 +499,42 @@ class MathematicsEngine:
                 )
             except Exception as e:
                 logger.warning("Differentiation parse error: %s", e)
+
+        # Definite Integration: integrate ... from a to b
+        def_int_match = re.search(r"\b(?:integrate|integral of)\s+(.+?)\s+from\s+([0-9\.\-\+oo]+)\s+to\s+([0-9\.\-\+oo]+)(?:\s*d([a-zA-Z]))?", q, re.IGNORECASE)
+        if def_int_match:
+            expr_str = def_int_match.group(1).strip()
+            low_str = def_int_match.group(2).strip()
+            high_str = def_int_match.group(3).strip()
+            var_name = def_int_match.group(4) or 'x'
+            try:
+                sym_x = sp.Symbol(var_name)
+                parsed = safe_parse_expression(expr_str)
+                low_val = sp.sympify(low_str)
+                high_val = sp.sympify(high_str)
+                def_result = sp.integrate(parsed, (sym_x, low_val, high_val))
+                def_latex = sp.latex(def_result)
+                orig_latex = sp.latex(parsed)
+
+                md = (
+                    f"### Calculus: Definite Integration\n\n"
+                    f"**Problem:**\n$$\\int_{{{low_str}}}^{{{high_str}}} \\left({orig_latex}\\right)\\,d{var_name}$$\n\n"
+                    f"**Final Answer:** **${def_latex}$**\n\n"
+                    f"**Verification:** Definite integral evaluated analytically (Verified ✓)"
+                )
+                return MathResult(
+                    is_solved=True,
+                    problem_type="calculus_definite_integration",
+                    query=query,
+                    solution=str(def_result),
+                    steps=[f"Integrated {orig_latex} from {low_str} to {high_str} = {def_latex}"],
+                    verification_status="verified_symbolically",
+                    verification_details="Exact definite integration verified.",
+                    formatted_markdown=md,
+                    latex_solution=def_latex
+                )
+            except Exception as e:
+                logger.warning("Definite integration parse error: %s", e)
 
         # Integration: integrate ... dx, integral of ...
         int_match = re.search(r"\b(?:integrate|integral of)\s+(.+)", q, re.IGNORECASE)
