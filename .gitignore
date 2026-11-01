@@ -48,6 +48,9 @@ __v0_runtime_loader.js
 __v0_devtools.tsx
 __v0_jsx-dev-runtime.ts
 .snowflake/
+
+# Local tests only (not tracked on GitHub)
+tests/
 .v0-trash/
 
 # Private user data & uploaded documents
