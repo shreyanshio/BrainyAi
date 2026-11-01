@@ -5,6 +5,31 @@
 --              exam questions, 4-option quizzes, study flashcards, and progress tracking.
 -- ==============================================================================
 
+-- 0. SUPABASE STORAGE BUCKET (study-pdfs)
+-- Creates the private bucket for raw user PDF storage if it doesn't already exist
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+    'study-pdfs',
+    'study-pdfs',
+    false,
+    10485760, -- 10 MB limit
+    ARRAY['application/pdf']::text[]
+)
+ON CONFLICT (id) DO UPDATE SET
+    file_size_limit = 10485760,
+    allowed_mime_types = ARRAY['application/pdf']::text[];
+
+-- Allow service role full access to the study-pdfs bucket
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies WHERE policyname = 'service_role_storage_study_pdfs'
+    ) THEN
+        CREATE POLICY service_role_storage_study_pdfs ON storage.objects
+        FOR ALL TO service_role USING (bucket_id = 'study-pdfs') WITH CHECK (bucket_id = 'study-pdfs');
+    END IF;
+END $$;
+
 -- 1. USER DOCUMENTS TABLE
 CREATE TABLE IF NOT EXISTS public.user_documents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
