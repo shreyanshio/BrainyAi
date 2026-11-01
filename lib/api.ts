@@ -218,102 +218,86 @@ export class ApiError extends Error {
 
 
 
-async function request<T>(path: string, options: RequestInit = {}, timeoutMs = 15000): Promise<T> {
-
+async function request<T>(path: string, options: RequestInit = {}, timeoutMs = 45000): Promise<T> {
   const base = getApiBase()
-
   const url = `${base}${path}`
-
   const token = getStoredToken()
 
-
-
   const headers: Record<string, string> = {
-
     'Content-Type': 'application/json',
-
     Accept: 'application/json',
-
     ...(options.headers as Record<string, string>),
-
   }
-
-
 
   if (token && !headers['Authorization']) {
-
     headers['Authorization'] = `Bearer ${token}`
-
   }
-
-
 
   const controller = new AbortController()
-
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-
-
+  const timer = setTimeout(() => {
+    try {
+      controller.abort(new Error(`Request timed out after ${Math.round(timeoutMs / 1000)} seconds. Please try again.`))
+    } catch {
+      controller.abort()
+    }
+  }, timeoutMs)
 
   if (options.signal) {
-
-    options.signal.addEventListener('abort', () => controller.abort())
-
+    if (options.signal.aborted) {
+      try {
+        controller.abort(options.signal.reason || new Error('Request cancelled by user'))
+      } catch {
+        controller.abort()
+      }
+    } else {
+      options.signal.addEventListener('abort', () => {
+        try {
+          controller.abort(options.signal?.reason || new Error('Request cancelled by user'))
+        } catch {
+          controller.abort()
+        }
+      })
+    }
   }
-
-
 
   try {
-
     const response = await fetch(url, {
-
       ...options,
-
       credentials: 'include',
-
       headers,
-
       signal: controller.signal,
-
     })
 
-
-
     if (!response.ok) {
-
       if (response.status === 401 && path !== '/api/auth/me') {
-
         clearStoredToken()
-
       }
-
       let errorData: any = null
-
       try {
-
         errorData = await response.json()
-
       } catch {
-
         // ignore json parse error
-
       }
-
       const message = errorData?.error || errorData?.message || `Request failed with status ${response.status}`
-
       throw new ApiError(message, response.status, errorData)
-
     }
 
-
-
     return response.json() as Promise<T>
-
+  } catch (err: any) {
+    if (err?.name === 'AbortError' || controller.signal.aborted) {
+      if (options.signal?.aborted) {
+        throw new ApiError('Request was cancelled.', 499)
+      }
+      const reasonMsg = controller.signal.reason?.message || (typeof controller.signal.reason === 'string' ? controller.signal.reason : null)
+      throw new ApiError(
+        reasonMsg || `Request timed out after ${Math.round(timeoutMs / 1000)}s. Please try again.`,
+        408
+      )
+    }
+    throw err
   } finally {
-
     clearTimeout(timer)
-
   }
-
 }
 
 
@@ -1223,23 +1207,18 @@ export async function deletePdfDocument(docId: string): Promise<void> {
 
 
 export async function generatePdfNotes(
-
   docId: string,
-
   depth: 'QUICK' | 'STANDARD' | 'DETAILED' | 'FAST' | 'BALANCED' | 'DEEP' | string = 'STANDARD'
-
 ): Promise<DocumentNote> {
-
-  const data = await request<{ success: boolean; note: DocumentNote }>(`/api/pdf/documents/${docId}/notes`, {
-
-    method: 'POST',
-
-    body: JSON.stringify({ depth }),
-
-  })
-
+  const data = await request<{ success: boolean; note: DocumentNote }>(
+    `/api/pdf/documents/${encodeURIComponent(docId)}/notes`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ depth }),
+    },
+    120000
+  )
   return data.note
-
 }
 
 
@@ -1255,82 +1234,59 @@ export async function fetchPdfNotes(docId: string): Promise<DocumentNote[]> {
 
 
 export async function askPdfDocument(
-
   docId: string,
-
   question: string,
-
   depth: 'FAST' | 'BALANCED' | 'DEEP' | string = 'BALANCED',
-
   history?: Array<{ role: 'user' | 'assistant'; content: string }>
-
 ): Promise<{ answer: string; citations: number[]; model: string; context_count?: number }> {
-
-  return request<{ answer: string; citations: number[]; model: string; context_count?: number }>(`/api/pdf/documents/${docId}/ask`, {
-
-    method: 'POST',
-
-    body: JSON.stringify({ question, depth, history }),
-
-  })
-
+  return request<{ answer: string; citations: number[]; model: string; context_count?: number }>(
+    `/api/pdf/documents/${encodeURIComponent(docId)}/ask`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ question, depth, history }),
+    },
+    120000
+  )
 }
 
 
 
 export async function generatePdfQuiz(
-
   docId: string,
-
   numQuestions: number = 5,
-
   depth: 'FAST' | 'BALANCED' | 'DEEP' | string = 'BALANCED',
-
   difficulty: string = 'MEDIUM'
-
 ): Promise<DocumentQuiz> {
-
-  const data = await request<{ success: boolean; quiz: DocumentQuiz }>(`/api/pdf/documents/${docId}/quiz`, {
-
-    method: 'POST',
-
-    body: JSON.stringify({ num_questions: numQuestions, depth, difficulty }),
-
-  })
-
+  const data = await request<{ success: boolean; quiz: DocumentQuiz }>(
+    `/api/pdf/documents/${encodeURIComponent(docId)}/quiz`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ num_questions: numQuestions, depth, difficulty }),
+    },
+    120000
+  )
   return data.quiz
-
 }
 
 
 
 export async function generatePdfImportantQuestions(
-
   docId: string,
-
   count: number = 10,
-
   category?: string
-
 ): Promise<DocumentImportantQuestions> {
-
   const data = await request<{ success: boolean; questions: DocumentImportantQuestions }>(
-
-    `/api/pdf/documents/${docId}/questions`,
-
+    `/api/pdf/documents/${encodeURIComponent(docId)}/questions`,
     {
-
       method: 'POST',
-
       body: JSON.stringify({ count, category }),
-
-    }
-
+    },
+    120000
   )
-
   return data.questions
-
 }
+
+
 
 export function streamPdfImportantQuestions(
   docId: string,
@@ -1344,16 +1300,32 @@ export function streamPdfImportantQuestions(
 ): () => void {
   const controller = new AbortController()
   const payload = { count, category }
+  const base = getApiBase()
+  const token = getStoredToken()
 
-  fetch(`/api/pdf/documents/${encodeURIComponent(docId)}/questions/stream`, {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'text/event-stream',
+  }
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
+  fetch(`${base}/api/pdf/documents/${encodeURIComponent(docId)}/questions/stream`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
+    credentials: 'include',
     body: JSON.stringify(payload),
     signal: controller.signal,
   })
     .then(async (response) => {
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status} failed to stream questions`)
+        let errDetail = `HTTP ${response.status}`
+        try {
+          const errJson = await response.json()
+          if (errJson?.error) errDetail = errJson.error
+        } catch {}
+        throw new Error(`Failed to stream questions: ${errDetail}`)
       }
       const reader = response.body?.getReader()
       if (!reader) return
@@ -1373,11 +1345,14 @@ export function streamPdfImportantQuestions(
           try {
             const data = JSON.parse(jsonStr)
             if (data.event === 'question' && callbacks?.onQuestion) {
-              callbacks.onQuestion(data.question)
-            } else if (data.event === 'done' && callbacks?.onDone) {
-              callbacks.onDone(data)
+              const questionObj = data.data || data.question
+              if (questionObj) {
+                callbacks.onQuestion(questionObj)
+              }
+            } else if ((data.event === 'done' || data.event === 'complete') && callbacks?.onDone) {
+              callbacks.onDone(data.data || data)
             } else if (data.event === 'error' && callbacks?.onError) {
-              callbacks.onError(new Error(data.error || 'Streaming error'))
+              callbacks.onError(new Error(data.error || data.data?.error || 'Streaming error'))
             }
           } catch {
             // Ignore parse errors
@@ -1386,12 +1361,18 @@ export function streamPdfImportantQuestions(
       }
     })
     .catch((err) => {
-      if (err.name !== 'AbortError' && callbacks?.onError) {
+      if (err?.name !== 'AbortError' && !controller.signal.aborted && callbacks?.onError) {
         callbacks.onError(err)
       }
     })
 
-  return () => controller.abort()
+  return () => {
+    try {
+      controller.abort(new Error('User cancelled question stream'))
+    } catch {
+      controller.abort()
+    }
+  }
 }
 
 
@@ -1433,25 +1414,19 @@ export async function submitPdfQuizAttempt(quizId: string, selectedIndices: numb
 
 
 export async function generatePdfFlashcards(
-
   docId: string,
-
   count: number = 6,
-
   depth: 'FAST' | 'BALANCED' | 'DEEP' = 'BALANCED'
-
 ): Promise<DocumentFlashcardDeck> {
-
-  const data = await request<{ success: boolean; flashcards: DocumentFlashcardDeck }>(`/api/pdf/documents/${docId}/flashcards`, {
-
-    method: 'POST',
-
-    body: JSON.stringify({ count, depth }),
-
-  })
-
+  const data = await request<{ success: boolean; flashcards: DocumentFlashcardDeck }>(
+    `/api/pdf/documents/${encodeURIComponent(docId)}/flashcards`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ count, depth }),
+    },
+    120000
+  )
   return data.flashcards
-
 }
 
 
