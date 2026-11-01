@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 180" width="760" height="180">
+
+<g transform="translate(32, 25) scale(0.254)">
+    <g stroke="#ffffff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- CENTRAL SPINAL & SYNAPTIC CONNECTOR AXIS -->
+    <path d="M 256 90 L 256 128 M 256 156 L 256 356 M 256 384 L 256 422" stroke-width="17.6" stroke-dasharray="1 1" opacity="0.3"/>
+    
+    <!-- LEFT HALF: ARTIFICIAL INTELLIGENCE (CIRCUITS & GEOMETRY) -->
+    <!-- Outer Circuit Profile -->
+    <path d="M 246 88 L 190 88 L 136 142 L 98 214 L 98 298 L 134 370 L 190 424 L 246 424" />
+             
+    <!-- Circuit Subsystem 1: Upper / Frontal -->
+    <path d="M 246 140 L 195 140 L 186 128" />
+    <path d="M 246 178 L 170 178 L 136 156" />
+    
+    <!-- Circuit Subsystem 2: Core / Temporal -->
+    <path d="M 246 226 L 190 226 L 178 228" />
+    <path d="M 246 256 L 160 256 L 120 256" />
+    <path d="M 246 286 L 180 286 L 155 315 L 144 338" />
+    
+    <!-- Circuit Subsystem 3: Lower / Occipital -->
+    <path d="M 246 336 L 205 336 L 175 366" />
+    <path d="M 246 372 L 210 372 L 198 384" />
+
+    <!-- RIGHT HALF: HUMAN INTELLIGENCE (ORGANIC CEREBRAL PATHWAYS) -->
+    <!-- Outer Organic Brain Contour -->
+    <path d="M 266 88 C 330 86, 384 116, 404 164 C 418 196, 418 228, 406 256 C 422 284, 420 324, 400 356 C 380 392, 336 426, 266 424" />
+             
+    <!-- Upper Cerebral Lobe Convolution -->
+    <path d="M 266 140 C 310 138, 346 156, 350 188 C 354 214, 326 226, 296 216 C 278 210, 268 196, 268 184" />
+             
+    <!-- Mid Cerebral Lobe Convolution -->
+    <path d="M 266 256 C 316 254, 362 268, 366 300 C 370 330, 332 344, 298 334 C 278 328, 268 316, 268 304" />
+             
+    <!-- Lower Cerebellar Convolution -->
+    <path d="M 266 372 C 310 374, 340 382, 342 400 C 344 414, 320 422, 288 416" />
+             
+    <!-- Inter-hemispheric bridging elements -->
+    <path d="M 246 140 C 256 140, 256 140, 266 140" stroke-width="16.5"/>
+    <path d="M 246 256 C 256 256, 256 256, 266 256" stroke-width="16.5"/>
+    <path d="M 246 372 C 256 372, 256 372, 266 372" stroke-width="16.5"/>
+</g>
+<!-- TERMINAL NODES -->
+<circle cx="134" cy="154" r="14" fill="#ffffff" />
+<circle cx="134" cy="154" r="5.6" fill="#000000" />
+<circle cx="186" cy="126" r="12" fill="#ffffff" />
+<circle cx="186" cy="126" r="4.8" fill="#000000" />
+<circle cx="116" cy="256" r="15" fill="#ffffff" />
+<circle cx="116" cy="256" r="6.0" fill="#000000" />
+<circle cx="176" cy="226" r="12" fill="#ffffff" />
+<circle cx="176" cy="226" r="4.8" fill="#000000" />
+<circle cx="142" cy="342" r="14" fill="#ffffff" />
+<circle cx="142" cy="342" r="5.6" fill="#000000" />
+<circle cx="196" cy="386" r="12" fill="#ffffff" />
+<circle cx="196" cy="386" r="4.8" fill="#000000" />
+
+
+</g>
+<g transform="translate(195, 30) scale(1.18)">
+    <g fill="#ffffff">
+    <!-- 'b' -->
+    <path d="M 24 16 L 38 16 L 38 44 C 44 38, 52 35, 62 35 C 78 35, 91 48, 91 68 C 91 88, 78 101, 62 101 C 52 101, 44 98, 38 92 L 38 100 L 24 100 Z M 38 68 C 38 80, 46 88, 57 88 C 68 88, 77 79, 77 68 C 77 57, 68 48, 57 48 C 46 48, 38 56, 38 68 Z"/>
+
+    <!-- 'r' -->
+    <path d="M 106 37 L 120 37 L 120 49 C 125 41, 134 36, 145 36 C 149 36, 153 37, 156 39 L 151 52 C 148 50, 144 50, 141 50 C 131 50, 120 57, 120 70 L 120 100 L 106 100 Z"/>
+
+    <!-- 'a' -->
+    <path d="M 218 37 L 232 37 L 232 94 C 232 98, 234 100, 238 100 C 240 100, 243 99, 245 98 L 247 109 C 243 111, 238 112, 233 112 C 223 112, 218 106, 218 97 L 218 89 C 212 96, 203 101, 191 101 C 176 101, 165 90, 165 74 C 165 58, 178 48, 200 48 L 218 48 L 218 46 C 218 39, 212 34, 203 34 C 195 34, 188 37, 184 43 L 174 35 C 181 26, 192 22, 204 22 C 213 22, 218 24, 218 37 Z M 218 59 L 202 59 C 188 59, 179 65, 179 74 C 179 83, 186 89, 195 89 C 206 89, 218 81, 218 70 Z"/>
+
+    <!-- 'i' -->
+    <path d="M 264 37 L 278 37 L 278 100 L 264 100 Z M 264 21 C 264 16, 268 12, 271 12 C 275 12, 278 16, 278 21 C 278 25, 275 29, 271 29 C 268 29, 264 25, 264 21 Z"/>
+
+    <!-- 'n' -->
+    <path d="M 298 37 L 312 37 L 312 47 C 318 40, 328 35, 340 35 C 356 35, 366 45, 366 63 L 366 100 L 352 100 L 352 66 C 352 54, 345 47, 334 47 C 324 47, 312 55, 312 68 L 312 100 L 298 100 Z"/>
+
+    <!-- 'y' -->
+    <path d="M 378 37 L 393 37 L 406 74 L 419 37 L 434 37 L 414 88 L 410 99 C 404 114, 396 122, 381 122 C 376 122, 372 121, 368 119 L 372 108 C 375 109, 378 110, 381 110 C 389 110, 394 105, 398 96 L 378 37 Z"/>
+</g>
+
+</g>
+</svg>
