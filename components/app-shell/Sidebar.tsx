@@ -19,6 +19,7 @@ import {
   FileText,
 } from 'lucide-react'
 import { ChatSession, UsageStatus, User } from '@/types/api'
+import { BrainyLogo } from '@/components/brand/BrainyLogo'
 
 interface SidebarProps {
   user: User
@@ -284,16 +285,18 @@ export function Sidebar({
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        {/* Top Header & Core Actions (Matching reference image) */}
-        <div className="p-3.5 space-y-2 border-b border-[var(--border-subtle)]">
-          {/* Mobile drawer header with close button */}
-          <div className="flex items-center justify-between lg:hidden pb-1">
-            <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
-              Navigation
-            </span>
+        {/* Top Header & Core Actions */}
+        <div className="p-3.5 space-y-3 border-b border-[var(--border-subtle)]">
+          {/* Brand Row */}
+          <div className="flex items-center justify-between px-1 pt-0.5">
+            <div className="bg-white/95 dark:bg-white px-2 py-1 rounded-lg shadow-2xs border border-zinc-200/50 flex items-center">
+              <BrainyLogo variant="wordmark" className="h-5 sm:h-6 w-auto" />
+            </div>
+
+            {/* Mobile drawer close button */}
             <button
               onClick={onCloseMobile}
-              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] cursor-pointer"
+              className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-elevated)] cursor-pointer lg:hidden"
               aria-label="Close navigation drawer"
             >
               <X size={16} />

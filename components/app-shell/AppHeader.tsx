@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { AnswerLength, UsageStatus, User } from '@/types/api'
 import { CAPABILITY_MODELS } from '@/lib/constants'
+import { BrainyLogo } from '@/components/brand/BrainyLogo'
 
 interface AppHeaderProps {
   user: User
@@ -85,14 +86,32 @@ export function AppHeader({
           <Menu size={18} />
         </button>
 
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-lg bg-[var(--text-primary)] text-[var(--bg-app)] flex items-center justify-center font-bold text-xs shadow-xs">
-            B
+        <a
+          href="/"
+          onClick={(e) => {
+            e.preventDefault()
+            onSelectView('chat')
+          }}
+          className="flex items-center rounded-xl transition hover:opacity-90 focus:outline-none"
+          aria-label="Brainy home"
+        >
+          {/* Desktop & Tablet: Official Horizontal Wordmark */}
+          <div className="hidden sm:flex items-center bg-white/95 dark:bg-white px-2.5 py-1 rounded-xl shadow-2xs border border-zinc-200/50">
+            <BrainyLogo
+              variant="wordmark"
+              className="h-6 w-auto"
+              priority
+            />
           </div>
-          <span className="font-bold text-sm tracking-tight text-[var(--text-primary)] hidden md:inline">
-            Brainy
-          </span>
-        </div>
+          {/* Mobile (<640px): Compact Official Symbol */}
+          <div className="sm:hidden flex items-center justify-center w-8 h-8 rounded-xl bg-white p-1 shadow-2xs border border-zinc-200/50">
+            <BrainyLogo
+              variant="symbol"
+              className="w-full h-full object-contain"
+              priority
+            />
+          </div>
+        </a>
 
         {/* Capability Model Selector Dropdown (Hidden on mobile < 640px where composer selector is used) */}
         {currentView === 'chat' && (

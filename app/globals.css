@@ -366,30 +366,12 @@ body {
 .login-brand {
   display: inline-flex;
   align-items: center;
-  gap: 11px;
-  color: var(--login-ink);
-  font-family: 'Source Serif 4', Georgia, serif !important;
-  font-size: 1.25rem;
-  font-weight: 650;
-  letter-spacing: -.035em;
   text-decoration: none;
+  transition: opacity 0.2s ease;
 }
 
-.login-brand > span:last-child { font-family: 'Source Serif 4', Georgia, serif !important; }
-.login-brand-period { color: var(--login-green); }
-
-.login-brand-mark {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border: 1px solid #b8c7b8;
-  border-radius: 9px;
-  background: #e8eee6;
-  color: var(--login-green-dark);
-  font-family: 'Source Serif 4', Georgia, serif !important;
-  font-size: 1.08rem;
-  font-weight: 700;
+.login-brand:hover {
+  opacity: 0.85;
 }
 
 .login-header-note {
@@ -793,7 +775,6 @@ body {
   .login-auth { padding: 18px 12px; }
   .login-auth-heading h2 { font-size: 1.5rem; }
   .login-brand { font-size: 1.05rem; }
-  .login-brand-mark { width: 30px; height: 30px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { Copy, Check, Bookmark, BookmarkCheck, ArrowDown } from 'lucide-react'
 import { ChatMessage, ChatWidthOption, User } from '@/types/api'
 import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
+import { BrainyLogo } from '@/components/brand/BrainyLogo'
 
 interface MessageListProps {
   messages: ChatMessage[]
@@ -102,8 +103,8 @@ export function MessageList({
 
         return (
           <div key={messageKey} className="flex items-start gap-2 sm:gap-3.5">
-            <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-xl bg-[var(--text-primary)] text-[var(--bg-app)] flex items-center justify-center font-bold text-xs flex-shrink-0 mt-1 shadow-xs">
-              B
+            <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-xl bg-white p-1 flex-shrink-0 mt-1 shadow-xs border border-zinc-200 dark:border-zinc-700/60 overflow-hidden flex items-center justify-center">
+              <BrainyLogo variant="symbol" className="w-full h-full object-contain" alt="Brainy Assistant" />
             </div>
 
             <div className="flex-1 min-w-0">
@@ -176,8 +177,8 @@ export function MessageList({
       {/* Thinking Indicator */}
       {isThinking && !messages.some((m) => m.isStreaming) && (
         <div className="flex items-start gap-2 sm:gap-3.5">
-          <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-xl bg-[var(--text-primary)] text-[var(--bg-app)] flex items-center justify-center font-bold text-xs flex-shrink-0 mt-1 shadow-xs">
-            B
+          <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-xl bg-white p-1 flex-shrink-0 mt-1 shadow-xs border border-zinc-200 dark:border-zinc-700/60 overflow-hidden flex items-center justify-center">
+            <BrainyLogo variant="symbol" className="w-full h-full object-contain" alt="Brainy Assistant" />
           </div>
           <div className="rounded-3xl rounded-tl-sm glass-panel px-4 sm:px-5 py-3 sm:py-3.5 text-xs text-[var(--text-muted)] flex items-center gap-2.5 shadow-xs">
             <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />

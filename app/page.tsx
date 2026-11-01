@@ -48,6 +48,7 @@ import { UsageModal } from '@/components/modals/UsageModal'
 import { NotesModal } from '@/components/modals/NotesModal'
 import { SettingsModal } from '@/components/settings/SettingsModal'
 import { PdfStudioView } from '@/components/pdf/PdfStudioView'
+import { BrainyLogo } from '@/components/brand/BrainyLogo'
 
 export default function BrainyApp() {
   // Auth state — initialize synchronously from client-side cache for instant first paint
@@ -721,8 +722,8 @@ export default function BrainyApp() {
   if (authLoading) {
     return (
       <div className="min-h-screen bg-[#0e1017] flex flex-col items-center justify-center gap-3 text-zinc-400">
-        <div className="w-8 h-8 rounded-xl bg-zinc-800 border border-zinc-700 flex items-center justify-center font-bold text-white text-sm animate-pulse">
-          B
+        <div className="w-10 h-10 rounded-xl bg-white p-1.5 border border-zinc-700 flex items-center justify-center shadow-md">
+          <BrainyLogo variant="symbol" className="w-full h-full object-contain" alt="Brainy" priority />
         </div>
         <p className="text-xs text-zinc-500 font-medium">Loading Brainy...</p>
       </div>

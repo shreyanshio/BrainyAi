@@ -9,6 +9,7 @@ import {
   pollTelegramLogin,
 } from '@/lib/api'
 import { User } from '@/types/api'
+import { BrainyLogo } from '@/components/brand/BrainyLogo'
 
 interface LoginViewProps {
   onLoginSuccess: (user: User) => void
@@ -275,8 +276,7 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
       <div className="login-page-frame">
         <header className="login-header">
           <a href="/" aria-label="Brainy home" className="login-brand">
-            <span className="login-brand-mark" aria-hidden="true">B</span>
-            <span>Brainy<span className="login-brand-period">.</span></span>
+            <BrainyLogo variant="wordmark" className="h-8 sm:h-9 w-auto" priority />
           </a>
           <span className="login-header-note">A study space, in good order</span>
         </header>
