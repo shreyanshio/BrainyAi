@@ -110,19 +110,27 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
         let renderedWidth = 0
         const renderButton = () => {
           const width = Math.max(200, Math.min(400, Math.floor(target.clientWidth || 320)))
-          if (width === renderedWidth) return
+          if (width === renderedWidth && target.childElementCount > 0) {
+            setGoogleBtnRendered(true)
+            return
+          }
           renderedWidth = width
           target.innerHTML = ''
-          google.accounts.id.renderButton(target, {
-            type: 'standard',
-            theme: 'outline',
-            size: 'large',
-            text: 'continue_with',
-            shape: 'rectangular',
-            width,
-            logo_alignment: 'left',
-          })
-          setGoogleBtnRendered(true)
+          try {
+            google.accounts.id.renderButton(target, {
+              type: 'standard',
+              theme: 'outline',
+              size: 'large',
+              text: 'continue_with',
+              shape: 'rectangular',
+              width,
+              logo_alignment: 'left',
+            })
+            setGoogleBtnRendered(target.childElementCount > 0)
+          } catch (renderErr) {
+            console.error('Google button render error:', renderErr)
+            setGoogleBtnRendered(false)
+          }
         }
 
         renderButton()
@@ -188,6 +196,17 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
     // Google Identity Services is initialized once on mount; a config response can replace its client ID.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Ensure Google button is rendered when returning from Telegram waiting state
+  useEffect(() => {
+    if (!telegramWaiting) {
+      const activeClientId = googleClientId || DEFAULT_GOOGLE_CLIENT_ID
+      const t = window.setTimeout(() => {
+        setupGoogleButton(activeClientId)
+      }, 50)
+      return () => window.clearTimeout(t)
+    }
+  }, [telegramWaiting, googleClientId])
 
   // Preserve the current Telegram session handshake and polling contract.
   useEffect(() => {
@@ -315,7 +334,7 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
               {error && <p role="alert" className="login-error">{error}</p>}
             </div>
 
-            {telegramWaiting ? (
+            {telegramWaiting && (
               <div className="login-telegram-wait" aria-live="polite">
                 <div className="login-telegram-wait-title">
                   <TelegramIcon className="h-5 w-5" />
@@ -338,51 +357,56 @@ export function LoginView({ onLoginSuccess }: LoginViewProps) {
                   onClick={() => {
                     setTelegramWaiting(false)
                     setTelegramSessionId(null)
+                    const activeClientId = googleClientId || DEFAULT_GOOGLE_CLIENT_ID
+                    window.setTimeout(() => setupGoogleButton(activeClientId), 50)
                   }}
                   className="login-cancel"
                 >
                   Cancel sign-in
                 </button>
               </div>
-            ) : (
-              <div className="login-providers">
+            )}
+
+            <div
+              className="login-providers"
+              style={{ display: telegramWaiting ? 'none' : 'grid' }}
+            >
+              <button
+                type="button"
+                onClick={handleStartTelegram}
+                disabled={isSubmitting}
+                className="login-provider-button login-provider-secondary"
+                aria-label="Continue with Telegram"
+              >
+                {isSubmitting ? <LoaderCircle className="h-5 w-5 animate-spin" aria-hidden="true" /> : <TelegramIcon className="h-5 w-5 text-sky-600" />}
+                <span>{isSubmitting ? 'Connecting to Telegram…' : 'Continue with Telegram'}</span>
+                {!isSubmitting && <ArrowRight size={15} className="login-provider-arrow" aria-hidden="true" />}
+              </button>
+
+              <div className="login-divider" aria-hidden="true"><span>or</span></div>
+
+              <div
+                id="google-signin-btn-target"
+                className={`login-google-target${googleBtnRendered ? ' is-rendered' : ''}`}
+                aria-label="Google sign-in"
+                aria-busy={!googleBtnRendered}
+              />
+
+              {!googleBtnRendered && (
                 <button
                   type="button"
-                  onClick={handleStartTelegram}
                   disabled={isSubmitting}
-                  className="login-provider-button login-provider-secondary"
-                  aria-label="Continue with Telegram"
+                  onClick={handleGoogleFallback}
+                  className="login-provider-button login-provider-google"
                 >
-                  {isSubmitting ? <LoaderCircle className="h-5 w-5 animate-spin" aria-hidden="true" /> : <TelegramIcon className="h-5 w-5 text-sky-600" />}
-                  <span>{isSubmitting ? 'Connecting to Telegram…' : 'Continue with Telegram'}</span>
+                  {isSubmitting ? <LoaderCircle className="h-5 w-5 animate-spin" aria-hidden="true" /> : <GoogleIcon />}
+                  <span>{isSubmitting ? 'Connecting to Google…' : 'Continue with Google'}</span>
                   {!isSubmitting && <ArrowRight size={15} className="login-provider-arrow" aria-hidden="true" />}
                 </button>
+              )}
 
-                <div className="login-divider" aria-hidden="true"><span>or</span></div>
-
-                <div
-                  id="google-signin-btn-target"
-                  className={`login-google-target${googleBtnRendered ? ' is-rendered' : ''}`}
-                  aria-label="Google sign-in"
-                  aria-busy={!googleBtnRendered}
-                />
-
-                {!googleBtnRendered && (
-                  <button
-                    type="button"
-                    disabled={isSubmitting}
-                    onClick={handleGoogleFallback}
-                    className="login-provider-button login-provider-google"
-                  >
-                    {isSubmitting ? <LoaderCircle className="h-5 w-5 animate-spin" aria-hidden="true" /> : <GoogleIcon />}
-                    <span>{isSubmitting ? 'Connecting to Google…' : 'Continue with Google'}</span>
-                    {!isSubmitting && <ArrowRight size={15} className="login-provider-arrow" aria-hidden="true" />}
-                  </button>
-                )}
-
-                <p className="login-auth-note">Use your existing Google or Telegram account.</p>
-              </div>
-            )}
+              <p className="login-auth-note">Use your existing Google or Telegram account.</p>
+            </div>
 
             <div className="login-auth-footnote">
               <span className="login-footnote-rule" />

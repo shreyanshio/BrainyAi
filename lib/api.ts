@@ -27,6 +27,7 @@ import {
 } from '@/types/api'
 
 export const AUTH_TOKEN_KEY = 'brainy_auth_token'
+export const AUTH_USER_KEY = 'brainy_cached_user'
 
 export function getStoredToken(): string | null {
   if (typeof window === 'undefined') return null
@@ -50,10 +51,39 @@ export function setStoredToken(token: string): void {
   }
 }
 
+export function getCachedUser(): User | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = localStorage.getItem(AUTH_USER_KEY)
+    return raw ? (JSON.parse(raw) as User) : null
+  } catch {
+    return null
+  }
+}
+
+export function setCachedUser(user: User): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user))
+  } catch {
+    // ignore
+  }
+}
+
+export function clearCachedUser(): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.removeItem(AUTH_USER_KEY)
+  } catch {
+    // ignore
+  }
+}
+
 export function clearStoredToken(): void {
   if (typeof window === 'undefined') return
   try {
     localStorage.removeItem(AUTH_TOKEN_KEY)
+    localStorage.removeItem(AUTH_USER_KEY)
   } catch {
     // ignore
   }
@@ -63,12 +93,6 @@ export const getApiBase = (): string => {
   const envUrl = process.env.NEXT_PUBLIC_API_URL
   if (envUrl && envUrl.trim()) {
     return envUrl.trim().replace(/\/$/, '')
-  }
-  if (typeof window !== 'undefined') {
-    const host = window.location.hostname
-    if (host !== 'localhost' && host !== '127.0.0.1') {
-      return 'https://brainyai.up.railway.app'
-    }
   }
   return ''
 }
@@ -84,7 +108,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}, timeoutMs = 15000): Promise<T> {
   const base = getApiBase()
   const url = `${base}${path}`
   const token = getStoredToken()
@@ -99,27 +123,39 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers['Authorization'] = `Bearer ${token}`
   }
 
-  const response = await fetch(url, {
-    ...options,
-    credentials: 'include',
-    headers,
-  })
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
 
-  if (!response.ok) {
-    if (response.status === 401 && path !== '/api/auth/me') {
-      clearStoredToken()
-    }
-    let errorData: any = null
-    try {
-      errorData = await response.json()
-    } catch {
-      // ignore json parse error
-    }
-    const message = errorData?.error || errorData?.message || `Request failed with status ${response.status}`
-    throw new ApiError(message, response.status, errorData)
+  if (options.signal) {
+    options.signal.addEventListener('abort', () => controller.abort())
   }
 
-  return response.json() as Promise<T>
+  try {
+    const response = await fetch(url, {
+      ...options,
+      credentials: 'include',
+      headers,
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      if (response.status === 401 && path !== '/api/auth/me') {
+        clearStoredToken()
+      }
+      let errorData: any = null
+      try {
+        errorData = await response.json()
+      } catch {
+        // ignore json parse error
+      }
+      const message = errorData?.error || errorData?.message || `Request failed with status ${response.status}`
+      throw new ApiError(message, response.status, errorData)
+    }
+
+    return response.json() as Promise<T>
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 // ── Auth APIs ──────────────────────────────────────────────
@@ -141,30 +177,17 @@ export async function fetchPublicConfig(): Promise<{ google_client_id?: string; 
 
 export async function checkAuth(): Promise<User | null> {
   try {
-    const res = await request<{ authenticated: boolean; user?: User; token?: string }>('/api/auth/me')
+    const res = await request<{ authenticated: boolean; user?: User; token?: string }>('/api/auth/me', {}, 2500)
     if (res?.authenticated && res.user) {
       if (res.token) setStoredToken(res.token)
+      setCachedUser(res.user)
       return res.user
     }
   } catch {
-    // Session not found or 401
+    // Session not found, 401, or timeout
   }
 
-  // Fallback to checking /api/user/profile if session cookie/token is valid
-  try {
-    const prof = await request<UserProfileStats>('/api/user/profile')
-    if (prof?.user_id) {
-      return {
-        id: prof.user_id,
-        first_name: prof.first_name || 'Student',
-        username: prof.username || '',
-        photo_url: '',
-      }
-    }
-  } catch {
-    // not logged in
-  }
-
+  clearCachedUser()
   return null
 }
 
@@ -175,6 +198,7 @@ export async function loginWithTelegramInitData(initData: string): Promise<User>
   })
   if (!res.user) throw new ApiError('Authentication failed: no user returned', 401)
   if (res.token) setStoredToken(res.token)
+  setCachedUser(res.user)
   return res.user
 }
 
@@ -185,6 +209,7 @@ export async function loginWithGoogle(credential: string): Promise<User> {
   })
   if (!res.user) throw new ApiError('Authentication failed: no user returned', 401)
   if (res.token) setStoredToken(res.token)
+  setCachedUser(res.user)
   return res.user
 }
 
@@ -195,6 +220,7 @@ export async function loginWeb(name: string, username?: string): Promise<User> {
   })
   if (!res.user) throw new ApiError('Authentication failed: no user returned', 401)
   if (res.token) setStoredToken(res.token)
+  setCachedUser(res.user)
   return res.user
 }
 
@@ -204,6 +230,7 @@ export async function loginStudentPass(): Promise<User> {
   })
   if (!res.user) throw new ApiError('Authentication failed: no user returned', 401)
   if (res.token) setStoredToken(res.token)
+  setCachedUser(res.user)
   return res.user
 }
 
@@ -217,12 +244,14 @@ export async function initTelegramLogin(): Promise<{ session_id: string; bot_url
 export async function pollTelegramLogin(sessionId: string): Promise<{ status: string; user?: User; token?: string }> {
   const res = await request<{ status: string; user?: User; token?: string }>(`/api/auth/poll/${sessionId}`)
   if (res?.token) setStoredToken(res.token)
+  if (res?.user) setCachedUser(res.user)
   return res
 }
 
 export async function checkAuthSessionParam(sessionId: string): Promise<{ status: string; user?: User; token?: string }> {
   const res = await request<{ status: string; user?: User; token?: string }>(`/api/auth/status/${sessionId}`)
   if (res?.token) setStoredToken(res.token)
+  if (res?.user) setCachedUser(res.user)
   return res
 }
 

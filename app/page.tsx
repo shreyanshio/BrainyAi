@@ -2,8 +2,12 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
+  AUTH_TOKEN_KEY,
   checkAuth,
   checkAuthSessionParam,
+  clearCachedUser,
+  clearStoredToken,
+  getCachedUser,
   createSession,
   deleteSession,
   fetchSessionHistory,
@@ -46,9 +50,38 @@ import { SettingsModal } from '@/components/settings/SettingsModal'
 import { PdfStudioView } from '@/components/pdf/PdfStudioView'
 
 export default function BrainyApp() {
-  // Auth state
-  const [user, setUser] = useState<User | null>(null)
-  const [authLoading, setAuthLoading] = useState(true)
+  // Auth state — initialize synchronously from client-side cache for instant first paint
+  const [user, setUser] = useState<User | null>(() => {
+    if (typeof window === 'undefined') return null
+    try {
+      const cached = getCachedUser()
+      const token = localStorage.getItem(AUTH_TOKEN_KEY)
+      if (cached && token) {
+        return cached
+      }
+    } catch {
+      // ignore
+    }
+    return null
+  })
+
+  // Only display full-page loading blocker when actively processing external auth callback redirects
+  const [authLoading, setAuthLoading] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    try {
+      const urlParams = new URLSearchParams(window.location.search)
+      if (urlParams.has('auth_session') || urlParams.has('google_token')) {
+        return true
+      }
+      const tg = (window as any).Telegram?.WebApp
+      if (tg?.initData) {
+        return true
+      }
+    } catch {
+      // ignore
+    }
+    return false
+  })
 
   // Active View: 'chat' (Study Chat Workspace by default) vs 'overview' (Aptivus Dashboard) vs 'pdf' (PDF Studio)
   const [currentView, setCurrentView] = useState<'overview' | 'chat' | 'pdf'>('chat')
@@ -253,13 +286,13 @@ export default function BrainyApp() {
 
   useEffect(() => {
     const authenticate = async () => {
-      setAuthLoading(true)
       try {
         // 1. Check URL query params for Telegram handshake or Google OAuth redirect
         if (typeof window !== 'undefined') {
           const urlParams = new URLSearchParams(window.location.search)
           const authSessionParam = urlParams.get('auth_session')
           if (authSessionParam) {
+            setAuthLoading(true)
             const statusRes = await checkAuthSessionParam(authSessionParam)
             if (statusRes.status === 'authenticated' && statusRes.user) {
               setUser(statusRes.user)
@@ -273,6 +306,7 @@ export default function BrainyApp() {
 
           const googleTokenParam = urlParams.get('google_token')
           if (googleTokenParam) {
+            setAuthLoading(true)
             try {
               const googleUser = await loginWithGoogle(googleTokenParam)
               if (googleUser) {
@@ -293,6 +327,7 @@ export default function BrainyApp() {
         // 2. Check if inside Telegram WebApp
         const tg = typeof window !== 'undefined' && (window as any).Telegram?.WebApp
         if (tg && tg.initData) {
+          setAuthLoading(true)
           tg.expand?.()
           const loggedUser = await loginWithTelegramInitData(tg.initData)
           if (loggedUser) {
@@ -304,12 +339,27 @@ export default function BrainyApp() {
           }
         }
 
-        // 3. Check existing browser session cookie
+        // 3. Fast path: If cached user exists, trigger initial data load in parallel
+        const cached = getCachedUser()
+        const token = typeof window !== 'undefined' ? localStorage.getItem(AUTH_TOKEN_KEY) : null
+        if (cached && token) {
+          setUser(cached)
+          void loadInitialData(cached.id)
+        }
+
+        // 4. Validate or refresh session against backend (without blocking the UI)
         const currentUser = await checkAuth()
         if (currentUser) {
           setUser(currentUser)
-          setCurrentView('chat')
-          await loadInitialData(currentUser.id)
+          if (!cached || cached.id !== currentUser.id) {
+            await loadInitialData(currentUser.id)
+          }
+        } else {
+          if (cached || token) {
+            setUser(null)
+            clearStoredToken()
+            clearCachedUser()
+          }
         }
       } catch (err) {
         console.warn('Auth check skipped:', err)
@@ -317,7 +367,6 @@ export default function BrainyApp() {
         setAuthLoading(false)
       }
     }
-
     authenticate()
   }, [loadInitialData])
 
