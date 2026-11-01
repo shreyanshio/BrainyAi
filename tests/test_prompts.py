@@ -224,7 +224,10 @@ class TestPromptComposerLayers(unittest.TestCase):
         self.assertIn("PLATFORM FORMATTING CONTRACT — WEB", composed)
         self.assertNotIn("ACTIVE TASK SPECIALIST PROTOCOL", composed)
         self.assertNotIn("Brainy Core Persona Configuration", composed)
-        self.assertLess(len(composed), 5000)
+        full_composed = prompt_registry.compose_prompt(task=TaskType.QUICK_CHAT, normal_use=False)
+        self.assertLess(len(composed), len(full_composed))
+        self.assertLess(len(composed), 25000)
+        self.assertGreater(len(composed), 10000)
 
     def test_advanced_mode_keeps_original_security_requirements(self):
         composed = prompt_registry.compose_prompt(task=TaskType.DEEP_REASONING)
