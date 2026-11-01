@@ -1,216 +1,274 @@
 <div align="center">
-  <a href="https://github.com/shreyanshio/BrainyAi">
-    <img src="./logos/brainy_horizontal_wordmark.png" alt="Brainy" width="600" />
+  <a href="https://brainyai.cenai.workers.dev/">
+    <img src="./public/brand/brainy-web-desktop.png" alt="Brainy — AI Study Companion" width="420" />
   </a>
 
-  <p><strong>Your study companion, wherever you learn.</strong></p>
+  <h3>Think it through. Learn it properly.</h3>
+  <p>An AI study companion for curious minds — built for everyday questions, deeper explanations, and more active learning.</p>
+
   <p>
-    <a href="https://brainyai.cenai.workers.dev/"><b>Open the Web App</b></a>
-    &nbsp;•&nbsp;
-    <a href="https://t.me/AiChatExpert_Bot"><b>Open the Telegram Bot</b></a>
-    &nbsp;•&nbsp;
-    <a href="./logos/README.md"><b>Logo Usage Guide</b></a>
-    &nbsp;•&nbsp;
-    <a href="https://github.com/shreyanshio/BrainyAi"><b>Explore the Source</b></a>
+    <a href="https://brainyai.cenai.workers.dev/"><img src="https://img.shields.io/badge/OPEN_WEB_APP-0D8B67?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Open Web App" /></a>
+    <a href="https://t.me/AiChatExpert_Bot"><img src="https://img.shields.io/badge/TRY_ON_TELEGRAM-229ED9?style=for-the-badge&logo=telegram&logoColor=white" alt="Try on Telegram" /></a>
+    <a href="https://github.com/shreyanshio/BrainyAi"><img src="https://img.shields.io/badge/STAR_ON_GITHUB-24292F?style=for-the-badge&logo=github&logoColor=white" alt="Star on GitHub" /></a>
+    <a href="https://github.com/shreyanshio/BrainyAi/issues/new"><img src="https://img.shields.io/badge/REPORT_A_BUG-EA4335?style=for-the-badge&logo=github&logoColor=white" alt="Report a bug" /></a>
+  </p>
+
+  <p>
+    <img src="https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs" alt="Next.js" />
+    <img src="https://img.shields.io/badge/React-19-149ECA?logo=react&logoColor=white" alt="React" />
+    <img src="https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white" alt="TypeScript" />
+    <img src="https://img.shields.io/badge/Python-3.x-3776AB?logo=python&logoColor=white" alt="Python" />
+    <img src="https://img.shields.io/badge/Flask-Backend-111111?logo=flask&logoColor=white" alt="Flask" />
   </p>
 </div>
 
 ---
 
-## Meet BRAINY
+## What is Brainy?
 
-BRAINY is an advanced, multi-provider AI assistant designed primarily as a study companion. It brings together a feature-rich **Telegram Bot** and a modern **web experience**, so you can learn in the way that feels most natural to you.
+Brainy is a multi-provider AI assistant with a focus on making learning more interactive. Ask a question, unpack a difficult concept, work through a problem, or turn your study material into something you can actually revise.
 
-Use BRAINY to understand difficult concepts, ask follow-up questions, explore a topic from different angles, and turn learning material into something you can actively revise. Its routing layer can select between multiple AI providers based on the task and requested response depth, with fallback paths when a provider is unavailable.
+Use it on the **web app** or through the **Telegram bot**. Under the hood, a task-aware routing layer selects from the providers and tools configured for the request — so a quick everyday question does not need to take the same path as a demanding reasoning task.
 
-BRAINY is being built around one simple idea: **AI should help you understand a subject, not just give you an answer.**
+> **The idea:** AI should help you understand the answer, not just hand one to you.
 
-## What can you do with BRAINY?
+## Why use Brainy?
 
-| Experience | What it helps you do |
+| Benefit | Why it matters |
 |:--|:--|
-| **Study conversations** | Ask questions, request step-by-step explanations, and keep exploring with follow-up questions. |
-| **Multi-provider AI** | Route requests across supported model providers instead of depending on a single AI service. |
-| **PDF Study Studio** | Add study documents, extract and organize their content, and use the document workflow for notes, quizzes, and flashcards. |
-| **Web research** | Ground research-oriented answers with search results and source links when search results are available. |
-| **Telegram Bot** | Take BRAINY into Telegram for a familiar, chat-first experience. |
-| **Personal workspace** | Keep conversations and study activity associated with your account through the configured data layer. |
+| **Learn, don't just look up** | Ask follow-up questions, request simpler explanations, and explore a concept from another angle. |
+| **A more flexible AI stack** | The routing layer can use different configured providers for different kinds of work instead of tying every request to one model. |
+| **Everyday tasks stay lightweight** | Normal Use mode is designed for quick questions, rewriting, translation, and other routine requests without loading the full specialist prompt. |
+| **Turn documents into study material** | PDF Study Studio can extract and organize document content for notes, quizzes, and flashcard workflows. |
+| **Practice active recall** | Use generated questions and flashcards to check what you remember, not only what you have read. |
+| **Use it where you already chat** | Switch between a dedicated web workspace and the Telegram bot. |
+| **Keep your study workspace organized** | Conversation history and workspace features help keep ongoing chats easy to revisit. |
+| **Use the right tool for the task** | Supported arithmetic can use the local maths engine, while research-oriented tasks can use the configured search integration. |
 
-### Try asking BRAINY
+*Provider access, model availability, usage limits, and some features depend on deployment configuration and the credentials supplied by the operator. Brainy does not promise unlimited or universally free third-party AI usage.*
 
-You can start with prompts like these:
+## What you can do
 
-- “Explain this topic like I am learning it for the first time, then give me a real-world example.”
-- “Break this problem into small steps and explain why each step works.”
-- “Turn my study material into concise revision notes and a short practice quiz.”
-- “Compare these two concepts in a table and tell me when each one is useful.”
+### Study and understand
+- Ask questions in natural language and continue with contextual follow-ups.
+- Request step-by-step explanations and examples.
+- Compare concepts, clarify terminology, and explore alternative explanations.
+- Work through supported maths questions with the local maths engine where appropriate.
 
-The best way to use BRAINY is to keep asking questions. Ask it to simplify an explanation, give another example, test your understanding, or approach the same idea from a different angle.
+### Work with PDFs
+- Upload study documents through PDF Study Studio.
+- Extract and organize document text.
+- Create revision notes, quizzes, and flashcards from available document content.
+- Use local OCR support for scanned pages when the required OCR dependencies are installed.
 
-## AI providers and routing
+### Get everyday help
+- Rewrite messages, fix grammar, and translate text.
+- Summarize notes and organize information.
+- Brainstorm ideas and plan tasks.
+- Get help with small coding questions and explanations.
 
-BRAINY uses a provider-routing layer so that different tasks can use different models. The exact provider selected depends on the routing policy, configured API keys, and provider availability.
+### Research with context
+- Use the configured search integration for research-oriented requests.
+- Review source links when search results are returned.
+- Keep in mind that search coverage and source quality vary; verify important information independently.
 
-### Core providers in the central AI router
+## Try asking Brainy
 
-| Provider | How it is used in BRAINY |
+A few useful ways to get started:
+
+- “Explain this concept like I am seeing it for the first time, then give me an example.”
+- “Break this problem into steps and explain why each step works.”
+- “Turn these notes into a concise revision sheet and a short practice quiz.”
+- “Compare these two ideas in a table, including when each is useful.”
+- “Translate this message naturally, but keep the tone polite.”
+- “Help me plan the tasks I need to finish this week.”
+
+The best results usually come from treating Brainy like a conversation: ask, review, follow up, and refine.
+
+## How the AI routing works
+
+Brainy classifies the request and its expected complexity, then uses the configured route that best fits the task. The exact model depends on the routing policy, available provider credentials, and provider availability.
+
+| Route or integration | Intended role |
 |:--|:--|
-| **Groq** | Fast and balanced chat generation, including quick-response routes. |
-| **Google Gemini** | Explanations, deeper reasoning routes, and multimodal document/PDF requests. |
-| **SambaNova** | An alternative inference route for fast and detailed responses. |
-| **Cerebras** | An additional inference option in the routing and fallback chain. |
-| **OpenRouter** | Access to selectable model routes, including the coding-oriented route configured in the registry. |
+| **Normal Use** | Lightweight prompt path for routine questions, short writing tasks, translation, and everyday conversations. |
+| **Local maths engine** | Deterministic handling for supported arithmetic and mathematical expressions. |
+| **Groq** | Fast inference route for suitable everyday and quick-response tasks. |
+| **Google Gemini** | Configured advanced, reasoning, and multimodal routes. |
+| **SambaNova / Cerebras** | Additional inference candidates where enabled by the routing policy. |
+| **OpenRouter** | Additional model access through the configured registry. |
+| **Tavily** | Primary configured web-search integration. |
+| **DuckDuckGo Instant Answer** | Limited fallback source when the primary search path is unavailable or does not provide useful results. |
 
-### Search integrations
+The repository also contains direct provider integrations in the Telegram bot code. Those paths are separate from the central router and depend on their own configuration.
 
-| Service | Role |
-|:--|:--|
-| **Tavily** | Primary web-search integration for research grounding. |
-| **DuckDuckGo Instant Answer** | Fallback when Tavily is unavailable or does not provide useful results. This is an Instant Answer endpoint, not a full web-search results API. |
+### Prompt architecture
 
-### Additional adapters in the Telegram bot code
+Prompts live in `prompts/`. The application selects the appropriate prompt path for the task instead of treating every request as a specialist workflow.
 
-The repository also contains direct provider call implementations for **DeepSeek**, **NVIDIA NIM**, and **Mistral** in the bot's provider code. These are separate from the central `AIRouter` candidate chain shown above, so their availability depends on the bot path and the corresponding configuration.
+- `prompts/normal_use.txt` — compact everyday interaction instructions.
+- `prompts/system_prompt.txt` — the main Brainy system prompt.
+- Other prompt files — task-specific instructions for supported workflows.
 
-Provider availability is configuration-dependent. Listing a provider here does not mean an API key is included, that every provider is enabled in every deployment, or that every provider is used for every request. Never commit API keys or secrets.
+Normal Use is intended to reduce unnecessary prompt overhead; actual token usage and savings depend on the assembled request and provider-reported usage.
 
-## Normal Use mode and prompt routing
+## Architecture
 
-The central router selects a compact Normal Use prompt for greetings, short everyday questions, simple definitions, short translations, and short rewriting or formatting requests when the existing task classifier rates them FAST or LIGHT. These requests prefer the registry's configured Groq fast model. Suitable arithmetic continues to use the local maths engine.
-
-Coding, advanced mathematics, deep reasoning, long context, multimodal requests, and specialist operations keep their existing task prompts and provider policy. PDF Study Studio continues to filter Gemini from every PDF candidate chain. Provider failures continue through the existing bounded fallback chain; fallback after a Normal Use route is recorded as an escalation with the provider failure as its reason. Conversation messages remain intact across routing changes.
-
-Normal Use loads `prompts/normal_use.txt`, platform formatting, and safe caller-specific addenda. It does not load the full Brainy persona or task specialist. If the compact prompt is missing, prompt composition falls back to the established full prompt. `prompts/system_prompt.txt` and all specialist prompts remain available and unchanged.
-
-Telemetry records selected mode, provider, model, selection reason, fallback/escalation reason, latency, provider-reported input/output tokens, and existing estimated cost. Prompt size is estimated from prompt characters at four characters per token; provider-reported input tokens remain the authoritative total input usage. New mode/reason dimensions are held in the in-process telemetry records and structured logs; the Supabase schema is unchanged. Historical comparisons are only possible where prior telemetry exists.
-
-Edit `prompts/normal_use.txt` to tune everyday response behavior. Keep the security and safety section, avoid duplicating task-specific instructions, and run the prompt and router regression tests after changes.
-
-## How BRAINY works
-
-The two entry points connect to the backend, where requests are validated and routed. The router classifies the task and response depth, chooses from the configured provider chain, and can move to another candidate when a provider fails. Research requests can use the search-grounding path. User and study data are persisted through the configured Supabase layer.
-
-```mermaid
+~~~mermaid
 flowchart TD
-    subgraph ENTRY["Ways to use BRAINY"]
-        WEB["BRAINY Web App"]
-        TG["BRAINY Telegram Bot"]
-    end
-
-    WEB --> API["Backend API"]
-    TG --> API
-
-    API --> AUTH["Authentication and request validation"]
-    AUTH --> CLASSIFY["Task and response-depth classification"]
-    CLASSIFY --> ROUTER["Central AI Router"]
-
-    ROUTER --> SELECT{"Routing policy"}
-    SELECT --> GROQ["Groq"]
-    SELECT --> GEMINI["Google Gemini"]
-    SELECT --> SAMBA["SambaNova"]
-    SELECT --> CEREBRAS["Cerebras"]
-    SELECT --> OPENROUTER["OpenRouter"]
-
-    GROQ --> RESULT["Response handling and delivery"]
-    GEMINI --> RESULT
-    SAMBA --> RESULT
-    CEREBRAS --> RESULT
-    OPENROUTER --> RESULT
-
-    ROUTER --> RESEARCH{"Web research task?"}
-    RESEARCH -->|Yes| TAVILY["Tavily Search"]
-    TAVILY -->|Fallback when needed| DDG["DuckDuckGo Instant Answer"]
-    TAVILY --> GROUNDED["Search-grounded context"]
-    DDG --> GROUNDED
-    GROUNDED --> ROUTER
-
+    WEB["Brainy Web App"] --> API["Backend API"]
+    TG["Telegram Bot"] --> API
+    API --> AUTH["Authentication & validation"]
+    AUTH --> ROUTER["Task-aware routing"]
+    ROUTER --> LOCAL["Local maths / local tools"]
+    ROUTER --> NORMAL["Normal Use prompt + fast route"]
+    ROUTER --> ADVANCED["Advanced / specialist prompt routes"]
+    ROUTER --> SEARCH["Search integrations"]
+    LOCAL --> OUT["Response handling"]
+    NORMAL --> OUT
+    ADVANCED --> OUT
+    SEARCH --> OUT
     API <--> DB[("Supabase / PostgreSQL")]
+    PDF["PDF Study Studio"] --> EXTRACT["Local extraction & chunking"]
+    EXTRACT --> OCR["Optional local OCR"]
+    EXTRACT --> DOC["Document study workflows"]
+    OCR --> DOC
+    DOC --> API
+    OUT --> WEB
+    OUT --> TG
+~~~
 
-    PDF["PDF Study Studio"] --> EXTRACT["Text extraction and chunking"]
-    EXTRACT --> OCR["Local OCR fallback for scanned pages"]
-    OCR --> DOCCTX["Document context"]
-    EXTRACT --> DOCCTX
-    DOCCTX --> ROUTER
-
-    RESULT --> WEB
-    RESULT --> TG
-```
-
-## Technology
+## Tech stack
 
 | Layer | Technologies |
 |:--|:--|
-| **Web application** | Next.js, React, TypeScript, Tailwind CSS |
-| **Backend API** | Python, Flask |
-| **AI orchestration** | Custom task classification, provider registry, routing policy, key rotation, and fallback handling |
-| **Database and authentication** | Supabase, PostgreSQL |
-| **Document processing** | Local PDF text extraction, chunking, and optional Tesseract OCR fallback |
+| **Frontend** | Next.js, React, TypeScript, Tailwind CSS |
+| **Backend** | Python, Flask, Gunicorn |
+| **AI orchestration** | Task classification, provider registry, routing policy, prompt selection, and fallback handling |
+| **Database** | Supabase / PostgreSQL |
+| **Document processing** | PyMuPDF, text extraction, chunking, optional Tesseract OCR |
+| **Maths** | SymPy and a restricted local expression engine |
 | **Search** | Tavily, DuckDuckGo Instant Answer |
 | **Messaging** | Telegram Bot API |
-| **Web delivery** | Cloudflare |
+| **Frontend hosting config** | Cloudflare Workers static assets |
+
+## Run locally
+
+### 1. Clone the repository
+
+~~~bash
+git clone https://github.com/shreyanshio/BrainyAi.git
+cd BrainyAi
+~~~
+
+### 2. Install dependencies
+
+~~~bash
+npm install
+python -m venv .venv
+~~~
+
+Activate the virtual environment, then install the Python dependencies:
+
+~~~bash
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+
+# macOS / Linux
+source .venv/bin/activate
+
+pip install -r requirements.txt
+~~~
+
+### 3. Configure environment variables
+
+Copy `.env.example` to `.env` and fill in only the credentials for the services you intend to use.
+
+~~~bash
+# Windows PowerShell
+Copy-Item .env.example .env
+
+# macOS / Linux
+cp .env.example .env
+~~~
+
+At minimum, configure the backend security values and the services required for the features you want to run. The frontend uses `NEXT_PUBLIC_API_URL` to locate the backend; for a local backend this is normally `http://localhost:5000`.
+
+**Never commit your real `.env` file, API keys, service-role keys, or tokens.**
+
+### 4. Start the backend
+
+In one terminal, with the Python virtual environment activated:
+
+~~~bash
+python app.py
+~~~
+
+The Flask backend uses port `5000` by default.
+
+### 5. Start the frontend
+
+In another terminal:
+
+~~~bash
+npm run dev
+~~~
+
+Open [http://localhost:3000](http://localhost:3000).
+
+### Optional services
+
+- Start the Telegram bot separately with `python study_bot.py` after configuring its token and required provider credentials.
+- Scanned-PDF OCR requires the Python OCR dependencies and a Tesseract executable available to the backend.
+- AI providers, search, and database-backed features require the corresponding server-side configuration.
 
 ## Project structure
 
 | Path | Purpose |
 |:--|:--|
-| `app/` | Next.js routes and pages |
-| `components/` | Reusable web interface components |
-| `ai_routing/` | Task classification, provider registry, routing policy, and AI orchestration |
-| `ai_routing/providers/` | Provider adapters used by the central router |
+| `app/` | Next.js application routes and pages |
+| `components/` | Reusable frontend components |
+| `lib/` | Frontend utilities and API integration |
+| `types/` | Shared TypeScript types |
+| `ai_routing/` | Task classification, model registry, routing policy, and provider adapters |
 | `pdf_studio/` | PDF extraction, chunking, OCR, and study workflows |
-| `prompts/` | Reusable assistant prompt resources |
-| `study_bot.py` | Telegram bot and its direct provider integrations |
+| `prompts/` | Main, everyday, and task-specific prompt resources |
+| `logos/` | Approved brand assets and usage guide |
+| `public/` | Static frontend assets |
 | `app.py` | Flask backend API |
-| `security.py` | Authentication and application security controls |
-| `screenshots/` | Screenshots of the BRAINY web experience |
+| `study_bot.py` | Telegram bot entry point |
+| `security.py` | Backend authentication and security controls |
 
-## Screenshots
+## Security notes
 
-<!-- Intentionally left empty until the web screenshots are uploaded to the screenshots/ folder. -->
+Brainy includes application-level authentication, request validation, rate-limiting, and security controls. These are not a guarantee that any deployment is breach-proof or independently certified.
 
-## Security and privacy
+For a safer deployment:
 
-The backend includes application-level security controls such as:
+- Keep provider keys and database service-role credentials on the backend.
+- Use strong, unique production secrets.
+- Restrict allowed frontend origins.
+- Configure Supabase policies for the actual tables and operations.
+- Keep dependencies and deployment services updated.
+- Never commit personal data, uploaded documents, or real environment files.
 
-- HMAC-SHA256-signed bearer tokens with signature and expiry validation.
-- HTTP-only and Secure session-cookie settings, with configurable SameSite behavior.
-- CORS origin allowlisting and Origin/Referer validation for cookie-authenticated write requests.
-- IP-based request rate limiting, with shared Supabase-backed counters when configured.
-- Server-side admin checks against configured user ID, username, and email allowlists.
-- Security headers, including Content Security Policy and production HSTS.
-- Private, non-cacheable handling for sensitive API responses.
+## Contributing
 
-> **Security note:** These controls do not make an application breach-proof and are not a claim of independent security certification. Production security also depends on deployment configuration, secret management, dependency updates, and correctly configured Supabase policies. Keep service-role keys and provider credentials on the server, never in frontend code. No independent security audit is claimed here.
+Issues, thoughtful feature suggestions, and pull requests are welcome.
 
-## Run it locally
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/shreyanshio/BrainyAi.git
-   cd BrainyAi
-   ```
-2. Install the project dependencies:
-   ```bash
-   npm install
-   pip install -r requirements.txt
-   ```
-3. Copy `.env.example` to `.env` and add the credentials for the services you intend to configure. Do not add real secrets to Git.
-4. Start the frontend and backend using the scripts and deployment configuration for your environment.
-
-Some features require their corresponding provider keys, Supabase configuration, or Telegram bot token. You can run only the parts you have configured.
-
-## Get involved
-
-BRAINY is an evolving project, and thoughtful feedback makes it better. Try the web app or Telegram bot, share what helped you learn, report bugs, suggest features, or contribute improvements.
-
-- **Try it:** [BRAINY Web App](https://brainyai.cenai.workers.dev/)
-- **Chat with it:** [BRAINY on Telegram](https://t.me/AiChatExpert_Bot)
-- **Contribute:** [Open an issue or pull request](https://github.com/shreyanshio/BrainyAi)
-
-If BRAINY helps you study, consider giving the repository a star and sharing it with someone who enjoys learning with technology.
-
----
+1. Open an issue describing the problem or proposed change.
+2. Keep changes focused and explain why they are useful.
+3. Run the relevant checks before opening a pull request.
+4. Never include API keys, private data, or production credentials.
 
 <div align="center">
-  <strong>Keep asking. Keep learning. Stay BRAINY.</strong>
+
+  <a href="https://github.com/shreyanshio/BrainyAi/issues/new"><img src="https://img.shields.io/badge/SUGGEST_A_FEATURE-6C63FF?style=for-the-badge&logo=github&logoColor=white" alt="Suggest a feature" /></a>
+  <a href="https://github.com/shreyanshio/BrainyAi/issues/new"><img src="https://img.shields.io/badge/REPORT_AN_ISSUE-EA4335?style=for-the-badge&logo=github&logoColor=white" alt="Report an issue" /></a>
+  <a href="https://github.com/shreyanshio/BrainyAi"><img src="https://img.shields.io/badge/EXPLORE_THE_CODE-24292F?style=for-the-badge&logo=github&logoColor=white" alt="Explore the code" /></a>
+
+  <br />
+
+  **Keep asking. Keep learning. Stay Brainy.**
+
 </div>
