@@ -28,7 +28,7 @@ class GeminiProvider(BaseProvider):
             raise RuntimeError("NO_KEYS: gemini")
 
         primary_model = model_id or registry.gemini_reasoning_model
-        model_chain = [primary_model, "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
+        model_chain = [primary_model, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash-lite"]
         model_chain = list(dict.fromkeys(model_chain))
 
         start_t = time.perf_counter()
@@ -119,7 +119,7 @@ class GeminiProvider(BaseProvider):
             raise RuntimeError("NO_KEYS: gemini")
 
         primary_model = model_id or registry.gemini_reasoning_model
-        model_chain = [primary_model, "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
+        model_chain = [primary_model, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-3.6-flash", "gemini-3.5-flash-lite"]
         model_chain = list(dict.fromkeys(model_chain))
 
         contents = []

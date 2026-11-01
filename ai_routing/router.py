@@ -581,8 +581,8 @@ class AIRouter:
                         status="success" if not fallback_used else "fallback_recovered",
                         continuation_used=continuation_used,
                         continuation_rounds=continuation_rounds,
-                        mode="local_math",
-                        selection_reason="local maths engine solved the request without a provider call",
+                        mode=mode,
+                        selection_reason=mode_reason,
                         escalation_reason=(f"{fallback_from} unavailable; existing fallback chain selected {provider_name}/{model_id}" if fallback_used and normal_use else None),
                         prompt_tokens=max(1, len(sys_prompt) // 4) if sys_prompt else 0,
                         prompt_tokens_estimated=True

@@ -6,7 +6,7 @@ import time
 import logging
 from typing import List, Dict, Any, Optional, Iterator
 from groq import Groq
-from ai_routing.providers.base import BaseProvider, ProviderResult, is_rate_limit, is_auth_error, is_model_not_found
+from ai_routing.providers.base import BaseProvider, ProviderResult, is_rate_limit, is_auth_error, is_model_not_found, is_model_context_or_limit_error
 from ai_routing.registry import registry
 
 logger = logging.getLogger("groq_provider")
@@ -37,7 +37,7 @@ class GroqProvider(BaseProvider):
             raise RuntimeError("NO_KEYS: groq")
 
         primary_model = model_id or registry.groq_fast_model
-        model_chain = [primary_model, registry.groq_balanced_model, "qwen/qwen3.8-27b", "llama-3.1-8b-instant"]
+        model_chain = [primary_model, registry.groq_balanced_model, "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen/qwen3.8-27b"]
         # De-duplicate
         model_chain = list(dict.fromkeys(model_chain))
 
@@ -78,7 +78,8 @@ class GroqProvider(BaseProvider):
                     )
                 except Exception as e:
                     last_exc = e
-                    if is_model_not_found(e):
+                    if is_model_context_or_limit_error(e):
+                        logger.info("Groq model %s context/limit error (%s), falling to next model in chain...", model, type(e).__name__)
                         continue
                     # Key rate-limited or auth error: switch to next key in pool
                     logger.warning("Groq key error (%s), rotating key...", type(e).__name__)
@@ -100,7 +101,7 @@ class GroqProvider(BaseProvider):
             raise RuntimeError("NO_KEYS: groq")
 
         primary_model = model_id or registry.groq_fast_model
-        model_chain = [primary_model, registry.groq_balanced_model, "qwen/qwen3.8-27b", "llama-3.1-8b-instant"]
+        model_chain = [primary_model, registry.groq_balanced_model, "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen/qwen3.8-27b"]
         model_chain = list(dict.fromkeys(model_chain))
 
         last_exc = None
@@ -132,7 +133,8 @@ class GroqProvider(BaseProvider):
                     return
                 except Exception as e:
                     last_exc = e
-                    if is_model_not_found(e):
+                    if is_model_context_or_limit_error(e):
+                        logger.info("Groq stream model %s context/limit error (%s), falling to next model in chain...", model, type(e).__name__)
                         continue
                     logger.warning("Groq stream key failure (%s), rotating...", type(e).__name__)
                     break

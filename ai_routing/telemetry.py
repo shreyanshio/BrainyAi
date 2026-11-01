@@ -67,6 +67,7 @@ class AITelemetry:
         self._provider_stats: Dict[str, Dict[str, Any]] = {}
         self._quota_observations: Dict[str, Dict[str, Any]] = {}
         self._sb_req = None
+        self._ai_request_logs_available = True
         self._local_math_count = 0
         self._ai_math_count = 0
         self._search_requests_count = 0
@@ -171,8 +172,8 @@ class AITelemetry:
             rec.input_tokens, rec.output_tokens, rec.cost_usd, rec.status, rec.escalation_reason, rec.request_id, rec.user_id
         )
 
-        # Durable async/safe persistence to Supabase if configured
-        if self._sb_req:
+        # Durable async/safe persistence to Supabase if configured and table exists
+        if self._sb_req and self._ai_request_logs_available:
             try:
                 created_iso = datetime.fromtimestamp(rec.timestamp, tz=timezone.utc).isoformat()
                 payload = {
@@ -195,9 +196,18 @@ class AITelemetry:
                     "is_estimated": rec.is_estimated,
                     "created_at": created_iso
                 }
-                self._sb_req("POST", "ai_request_logs", json_body=payload)
+                # Pass silent=True so missing table (404) does not spam error logs
+                try:
+                    self._sb_req("POST", "ai_request_logs", json_body=payload, silent=True)
+                except TypeError:
+                    self._sb_req("POST", "ai_request_logs", json_body=payload)
             except Exception as e:
-                logger.debug("Non-fatal Supabase telemetry persistence error: %s", e)
+                err_msg = str(e).lower()
+                if "404" in err_msg or "not found" in err_msg or "relation" in err_msg:
+                    self._ai_request_logs_available = False
+                    logger.info("Supabase table 'ai_request_logs' is not present; disabling remote telemetry logging.")
+                else:
+                    logger.debug("Non-fatal Supabase telemetry persistence error: %s", e)
 
     def observe_provider_quota(self, provider: str, headers: Dict[str, str], model: Optional[str] = None):
         """Parses real rate-limit headers returned by providers and stores observations."""

@@ -759,7 +759,7 @@ def handle_supabase_operation_error(exc):
 
 
 def _sb_request(method: str, table: str, *, params: str = "", json_body=None,
-                prefer: str | None = None, timeout: int = 8):
+                prefer: str | None = None, timeout: int = 8, silent: bool = False):
     if not (SUPABASE_URL and SUPABASE_KEY):
         raise SupabaseOperationError("Supabase is not configured")
     try:
@@ -769,10 +769,11 @@ def _sb_request(method: str, table: str, *, params: str = "", json_body=None,
         return response
     except requests.RequestException as exc:
         upstream = getattr(exc, "response", None)
-        logger.error("Supabase failure operation=%s table=%s status=%s request_id=%s category=%s",
-            method.lower(), table, getattr(upstream, "status_code", None) or "network",
-            upstream.headers.get("sb-request-id", "") if upstream is not None else "",
-            type(exc).__name__)
+        if not silent:
+            logger.error("Supabase failure operation=%s table=%s status=%s request_id=%s category=%s",
+                method.lower(), table, getattr(upstream, "status_code", None) or "network",
+                upstream.headers.get("sb-request-id", "") if upstream is not None else "",
+                type(exc).__name__)
         if upstream is not None and upstream.status_code == 400:
             try:
                 error_body = upstream.json()
@@ -1256,7 +1257,7 @@ def sb_insert_message(session_id: str, role: str, content: str,
             # Try with idempotency constraint if unique index exists in Supabase
             try:
                 _sb_request("POST", "chat_messages?on_conflict=session_id,idempotency_key",
-                            json_body=payload, prefer="resolution=ignore-duplicates,return=minimal")
+                            json_body=payload, prefer="resolution=ignore-duplicates,return=minimal", silent=True)
             except (SupabaseOperationError, SupabaseSchemaUnavailable) as e:
                 # If the unique index or constraint is missing in Supabase, fall back immediately to plain insert
                 logger.info("Retrying chat message insert without on_conflict: %s", str(e)[:100])

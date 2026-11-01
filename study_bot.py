@@ -1253,7 +1253,7 @@ def _call_groq(messages, system_prompt, max_tokens):
             except Exception as e:
                 last_err = e
                 err_s = str(e).lower()
-                if "model" in err_s or "404" in err_s:
+                if "model" in err_s or "404" in err_s or "413" in err_s or "too large" in err_s or "itpm" in err_s:
                     continue
                 print(f"[groq_call] Groq key failure ({type(e).__name__}): {str(e)[:80]}, rotating to next key...")
                 break
@@ -1312,8 +1312,8 @@ def _stream_groq(messages, system_prompt, max_tokens, model_id=None):
             except Exception as e:
                 last_err = e
                 err_s = str(e).lower()
-                if "model" in err_s or "404" in err_s:
-                    # Model not available on this tier/account, try next model
+                if "model" in err_s or "404" in err_s or "413" in err_s or "too large" in err_s or "itpm" in err_s:
+                    # Model not available or hit model-specific rate/context limit on this tier, try next model
                     continue
                 print(f"[groq_stream] Groq key failure ({type(e).__name__}): {str(e)[:80]}, rotating to next key...")
                 break
@@ -1362,7 +1362,7 @@ def _stream_cerebras(messages, system_prompt, max_tokens, model_id=None):
                 except Exception as me:
                     last_err = me
                     err_s = str(me).lower()
-                    if "404" in err_s or "not found" in err_s or "model" in err_s:
+                    if "404" in err_s or "410" in err_s or "gone" in err_s or "not found" in err_s or "model" in err_s or "too large" in err_s:
                         continue
                     print(f"[cerebras_stream] Cerebras key failure ({type(me).__name__}): {str(me)[:80]}, rotating to next key...")
                     break
@@ -1689,7 +1689,7 @@ def _stream_sambanova(messages, system_prompt, max_tokens, model_id=None):
                 except Exception as me:
                     last_err = me
                     err_s = str(me).lower()
-                    if "404" in err_s or "not found" in err_s or "model" in err_s:
+                    if "404" in err_s or "410" in err_s or "gone" in err_s or "not found" in err_s or "model" in err_s or "too large" in err_s:
                         continue
                     print(f"[sambanova_stream] SambaNova key failure ({type(me).__name__}): {str(me)[:80]}, rotating to next key...")
                     break
@@ -1729,7 +1729,7 @@ def _call_sambanova(messages, system_prompt, max_tokens):
             except Exception as e:
                 last_err = e
                 err_str = str(e).lower()
-                if "404" in err_str or "not found" in err_str or "model" in err_str:
+                if "404" in err_str or "410" in err_str or "gone" in err_str or "not found" in err_str or "model" in err_str or "too large" in err_str:
                     continue
                 print(f"[sambanova_call] SambaNova key failure ({type(e).__name__}): {str(e)[:80]}, rotating to next key...")
                 break
@@ -4631,3 +4631,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

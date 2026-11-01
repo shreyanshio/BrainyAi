@@ -7,7 +7,7 @@ import time
 import logging
 import requests
 from typing import List, Dict, Any, Optional, Iterator
-from ai_routing.providers.base import BaseProvider, ProviderResult, is_model_not_found
+from ai_routing.providers.base import BaseProvider, ProviderResult, is_model_not_found, is_model_context_or_limit_error
 from ai_routing.registry import registry
 
 logger = logging.getLogger("sambanova_provider")
@@ -27,7 +27,7 @@ class SambaNovaProvider(BaseProvider):
             raise RuntimeError("NO_KEYS: sambanova")
 
         primary_model = model_id or registry.sambanova_reasoning_model
-        model_chain = [primary_model, "Qwen2.5-72B-Instruct", registry.sambanova_fast_model]
+        model_chain = [primary_model, registry.sambanova_fast_model, "DeepSeek-V3.1", "Qwen2.5-72B-Instruct"]
         model_chain = list(dict.fromkeys(model_chain))
 
         start_t = time.perf_counter()
@@ -67,7 +67,8 @@ class SambaNovaProvider(BaseProvider):
                     )
                 except Exception as e:
                     last_exc = e
-                    if is_model_not_found(e):
+                    if is_model_context_or_limit_error(e):
+                        logger.warning("SambaNova model '%s' unavailable/deprecated (%s), failing over to next model in chain...", model, e)
                         continue
                     logger.warning("SambaNova key failure (%s), rotating...", type(e).__name__)
                     break
@@ -88,7 +89,7 @@ class SambaNovaProvider(BaseProvider):
             raise RuntimeError("NO_KEYS: sambanova")
 
         primary_model = model_id or registry.sambanova_reasoning_model
-        model_chain = [primary_model, "Qwen2.5-72B-Instruct", registry.sambanova_fast_model]
+        model_chain = [primary_model, registry.sambanova_fast_model, "DeepSeek-V3.1", "Qwen2.5-72B-Instruct"]
         model_chain = list(dict.fromkeys(model_chain))
 
         last_exc = None
@@ -131,7 +132,8 @@ class SambaNovaProvider(BaseProvider):
                     return
                 except Exception as e:
                     last_exc = e
-                    if is_model_not_found(e):
+                    if is_model_context_or_limit_error(e):
+                        logger.warning("SambaNova stream model '%s' unavailable/deprecated (%s), failing over to next model in chain...", model, e)
                         continue
                     logger.warning("SambaNova stream failure (%s), rotating...", type(e).__name__)
                     break

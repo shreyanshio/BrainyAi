@@ -46,8 +46,16 @@ def is_auth_error(exc: Exception) -> bool:
 def is_model_not_found(exc: Exception) -> bool:
     s = str(exc).lower()
     return any(w in s for w in [
-        "404", "model_not_found", "model not found", "does not exist", "no endpoints found"
+        "404", "410", "gone", "model_not_found", "model not found", "does not exist", "no endpoints found"
     ])
+
+def is_model_context_or_limit_error(exc: Exception) -> bool:
+    """True if error is specific to this model's context or rate limit rather than the API key."""
+    s = str(exc).lower()
+    return any(w in s for w in [
+        "413", "request too large", "payload too large", "context_length_exceeded",
+        "maximum context length", "itpm", "input tokens per minute", "tokens per minute (itpm)"
+    ]) or is_model_not_found(exc)
 
 class BaseProvider(ABC):
     def __init__(self):
