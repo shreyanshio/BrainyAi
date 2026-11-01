@@ -172,7 +172,7 @@ class AIRouter:
         normal_override_compatible = not system_prompt or bool(standard_core and standard_core in system_prompt)
         normal_use = (
             resolved_task in normal_tasks
-            and resolved_complexity in (TaskComplexity.FAST, TaskComplexity.LIGHT)
+            and resolved_complexity in (TaskComplexity.FAST, TaskComplexity.LIGHT, TaskComplexity.STANDARD)
             and normal_template_available
             and not (document_context and (document_context.get("pdf_text") or document_context.get("document_pages") or document_context.get("multimodal_parts")))
             and normal_override_compatible
@@ -337,7 +337,8 @@ class AIRouter:
                     selection_reason=mode_reason,
                     escalation_reason=(f"{fallback_from} unavailable; existing fallback chain selected {provider_name}/{res.model}" if fallback_used and normal_use else None),
                     prompt_tokens=max(1, len(sys_prompt) // 4) if sys_prompt else 0,
-                    prompt_tokens_estimated=True
+                    prompt_tokens_estimated=True,
+                    is_estimated=bool(tot_in_tokens is None or tot_out_tokens is None)
                 ))
 
                 return RouterResponse(
@@ -425,7 +426,7 @@ class AIRouter:
         normal_override_compatible = not system_prompt or bool(standard_core and standard_core in system_prompt)
         normal_use = (
             resolved_task in normal_tasks
-            and resolved_complexity in (TaskComplexity.FAST, TaskComplexity.LIGHT)
+            and resolved_complexity in (TaskComplexity.FAST, TaskComplexity.LIGHT, TaskComplexity.STANDARD)
             and normal_template_available
             and not (document_context and (document_context.get("pdf_text") or document_context.get("document_pages") or document_context.get("multimodal_parts")))
             and normal_override_compatible

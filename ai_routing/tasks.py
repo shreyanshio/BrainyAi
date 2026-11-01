@@ -100,7 +100,7 @@ class TaskComplexity(str, Enum):
 
 # Calculus
 _CALCULUS_KEYWORDS = re.compile(
-    r"\b(derivative|differential|differentiate|differentiation|integrate|integration|integral|calculus|limits?|series expansion|taylor series|maclaurin)\b|[\∫\∂]",
+    r"\b(derivative|differential|differentiate|differentiation|integrate|integration|integral|calculus|limits?|series expansion|taylor series|maclaurin|gradient descent|gradient|partial derivative)\b|[\∫\∂]",
     re.IGNORECASE
 )
 
@@ -168,13 +168,25 @@ _CODE_KEYWORDS = re.compile(
 
 # Multimodal / Diagram
 _IMAGE_KEYWORDS = re.compile(
-    r"\b(this image|this photo|this diagram|this graph|attached image|look at this picture|in the screenshot|from the graph|from this chart|photographed)\b",
+    r"\b(uploaded image|this image|this photo|this picture|this diagram|this graph|attached image|look at this picture|in the screenshot|from the graph|from this chart|photographed|analyze this image|image)\b",
     re.IGNORECASE
 )
 
 # Web Research
 _RESEARCH_KEYWORDS = re.compile(
-    r"\b(search|current|latest|news|today|recent|who won|who is the current|price of|weather in|live score|lookup|released date|stock price)\b",
+    r"\b(search|current|latest|news|today|recent|who won|who is the current|price of|weather in|weather today|weather|live score|lookup|released date|stock price)\b",
+    re.IGNORECASE
+)
+
+# Comparison / Evaluation / Analytical
+_COMPARISON_KEYWORDS = re.compile(
+    r"\b(compare|comparison|versus|vs\.?|difference between|pros and cons|evaluate|which is better|trade-?offs)\b",
+    re.IGNORECASE
+)
+
+# Grammar / Typo fixes (Lightweight path)
+_GRAMMAR_FIX_KEYWORDS = re.compile(
+    r"\b(small grammar|minor grammar|typo|spelling mistake|correct this typo|fix this typo|fix (?:the |this )?(?:small )?grammar(?: mistake)?|check (?:the |this )?grammar|grammar mistake)\b",
     re.IGNORECASE
 )
 
@@ -223,7 +235,7 @@ _DEEP_KEYWORDS = re.compile(
 )
 
 _BRIEF_KEYWORDS = re.compile(
-    r"\b(briefly|short answer|in short|quick definition|in 1 line|one line|concise|tldr|only the answer|just the answer)\b",
+    r"\b(one[- ]line|in 1 line|briefly|short answer|in short|quick definition|concise|tldr|only the answer|just the answer)\b",
     re.IGNORECASE
 )
 
@@ -300,6 +312,7 @@ def classify_task(
     ctx = context or {}
     has_pdf_context = bool(ctx.get("document_id") or ctx.get("pdf_text") or ctx.get("document_pages"))
     has_multimodal = bool(ctx.get("multimodal_parts") or ctx.get("has_image"))
+    resolved_depth = ResponseDepth.from_str(depth) if depth else ResponseDepth.BALANCED
 
     text = (prompt or "").strip()
     if not text and messages:
@@ -388,20 +401,31 @@ def classify_task(
     if _MATH_KEYWORDS.search(text):
         return TaskType.MATHEMATICS
 
+    # 8.5 Comparison & Evaluation
+    if _COMPARISON_KEYWORDS.search(text):
+        return TaskType.SIMPLE_EXPLANATION if resolved_depth != ResponseDepth.DEEP else TaskType.DETAILED_EXPLANATION
+
     # 9. Title Generation
     if "generate title" in text.lower() or "conversation title" in text.lower():
         return TaskType.CHAT_TITLE_GENERATION
 
     # 10. Summary / Depth-based Explanation vs Quick Chat
-    resolved_depth = ResponseDepth.from_str(depth) if depth else ResponseDepth.BALANCED
-
     if _SUMMARY_KEYWORDS.search(text):
         return TaskType.SIMPLE_EXPLANATION if resolved_depth == ResponseDepth.FAST or len(text.split()) <= 100 else TaskType.DETAILED_EXPLANATION
 
     if _DEEP_KEYWORDS.search(text) or resolved_depth == ResponseDepth.DEEP:
         return TaskType.DEEP_REASONING
 
-    if _BRIEF_KEYWORDS.search(text) or resolved_depth == ResponseDepth.FAST or len(text.split()) <= 4:
+    if _CASUAL_GREETING_KEYWORDS.match(text) or (len(text.split()) <= 3 and _CASUAL_GREETING_KEYWORDS.search(text)):
+        return TaskType.QUICK_CHAT
+
+    if _BRIEF_KEYWORDS.search(text) or resolved_depth == ResponseDepth.FAST:
+        words = text.split()
+        if len(words) <= 4 and not any(k.search(text) for k in (_COMPARISON_KEYWORDS, _WRITING_KEYWORDS, _CODE_KEYWORDS, _RESEARCH_KEYWORDS, _MATH_KEYWORDS, _PHYSICS_KEYWORDS)):
+            return TaskType.QUICK_CHAT
+        return TaskType.SIMPLE_EXPLANATION
+
+    if len(text.split()) <= 4 and not any(k.search(text) for k in (_COMPARISON_KEYWORDS, _WRITING_KEYWORDS, _CODE_KEYWORDS, _RESEARCH_KEYWORDS, _MATH_KEYWORDS, _PHYSICS_KEYWORDS, _CHEMISTRY_KEYWORDS)):
         return TaskType.QUICK_CHAT
 
     if len(text.split()) > 40:
@@ -420,10 +444,10 @@ def classify_task_complexity(
     Deterministic zero-cost task complexity estimator.
     Categorizes incoming user requests into:
       - FAST: Casual greetings, simple acknowledgments, lightweight chat (Target: Groq 8B Instant)
-      - LIGHT: Short definitions, basic facts, simple translations (Target: Groq 8B / Gemini 3.5 Flash-Lite)
-      - STANDARD: Conceptual explanations, tutoring, writing (Target: Gemini 3.8 Flash with medium thinking)
-      - COMPLEX: Coding, debugging, algorithms, science, algebra (Target: Gemini 3.8 Flash with med/high thinking)
-      - DEEP: Mathematical proofs, architecture reviews, multi-step problem solving (Target: Gemini 3.8 Flash with high thinking)
+      - LIGHT: Short definitions, basic facts, simple translations, minor typo/grammar fixes (Target: Groq 8B / Gemini 3.5 Flash-Lite)
+      - STANDARD: Conceptual explanations, tutoring, substantial writing/drafting, comparisons (Target: Gemini 3.8 Flash)
+      - COMPLEX: Coding, debugging, algorithms, science, algebra (Target: Gemini 3.8 Flash with thinking)
+      - DEEP: Mathematical proofs, roadmaps, architecture reviews, multi-step problem solving (Target: Gemini 3.8 Flash with high thinking)
     """
     text = ""
     if isinstance(prompt, str):
@@ -458,23 +482,38 @@ def classify_task_complexity(
     if resolved_task == TaskType.CHAT_TITLE_GENERATION:
         return TaskComplexity.FAST
 
-    # 2. DEEP: Deep reasoning, architectural reviews, multi-step math proofs, explicit deep dive requests
+    # 2. DEEP: Deep reasoning, architectural reviews, roadmaps, multi-step math proofs, explicit deep dive requests
     if resolved_task == TaskType.DEEP_REASONING or resolved_depth == ResponseDepth.DEEP or _DEEP_KEYWORDS.search(text):
+        return TaskComplexity.DEEP
+
+    if re.search(r"\b(project roadmap|roadmap|system design|software architecture|step[- ]by[- ]step proof)\b", text, re.IGNORECASE):
         return TaskComplexity.DEEP
 
     if resolved_task in (TaskType.ADVANCED_MATHEMATICS, TaskType.CALCULUS) and (word_count > 20 or resolved_depth == ResponseDepth.DEEP):
         return TaskComplexity.DEEP
 
-    # 3. LIGHT: Short definitions, basic facts, simple translations, brief explanations
+    # 3. LIGHT: Short definitions, basic facts, simple translations, brief explanations, minor grammar/typo fixes
+    if _GRAMMAR_FIX_KEYWORDS.search(text):
+        return TaskComplexity.LIGHT
+
     if (_BRIEF_KEYWORDS.search(text) or resolved_depth == ResponseDepth.FAST) and resolved_task not in (
         TaskType.CODING, TaskType.CODING_DEBUGGING, TaskType.DSA
     ):
         return TaskComplexity.LIGHT
 
-    if resolved_task in (TaskType.TRANSLATION, TaskType.SIMPLE_EXPLANATION) and word_count <= 20:
+    if resolved_task == TaskType.TRANSLATION and word_count <= 25 and resolved_depth != ResponseDepth.DEEP:
         return TaskComplexity.LIGHT
 
-    if resolved_task == TaskType.WRITING and word_count <= 100:
+    # Short technical acronym/protocol/term definitions (e.g. "What is HTTP?", "Define API", "What is RAM?", "What is gravity?")
+    if word_count <= 4 and re.match(r"^(?:what is|define|meaning of)\s+[A-Za-z0-9\-_/]+[?\.]*$", text, re.IGNORECASE):
+        return TaskComplexity.LIGHT
+
+    # Light sentence tweak (< 15 words) or quick brainstorm (< 10 words)
+    if resolved_task == TaskType.WRITING and word_count <= 15 and ("sentence" in text.lower() or "clearly" in text.lower() or "brainstorm" in text.lower()) and "professionally" not in text.lower() and "essay" not in text.lower() and "email" not in text.lower() and "story" not in text.lower():
+        return TaskComplexity.LIGHT
+
+    # Short paragraph summary
+    if resolved_task == TaskType.SIMPLE_EXPLANATION and "summarize" in text.lower() and word_count <= 20:
         return TaskComplexity.LIGHT
 
     # 4. COMPLEX: Coding, debugging, DSA, SQL, Science (Physics, Chemistry, Biology), Math
@@ -486,16 +525,12 @@ def classify_task_complexity(
     ):
         return TaskComplexity.COMPLEX
 
-    # Check if text strongly indicates coding or science even without resolved_task
     if _CODE_KEYWORDS.search(text) or "```" in text or _SQL_KEYWORDS.search(text) or _DSA_KEYWORDS.search(text):
         return TaskComplexity.COMPLEX
     if _PHYSICS_KEYWORDS.search(text) or _CHEMISTRY_KEYWORDS.search(text) or _CALCULUS_KEYWORDS.search(text):
         return TaskComplexity.COMPLEX
 
-    if word_count <= 8 and not any(k.search(text) for k in (_CODE_KEYWORDS, _MATH_KEYWORDS, _PHYSICS_KEYWORDS, _CHEMISTRY_KEYWORDS)):
-        return TaskComplexity.LIGHT
-
-    # 5. STANDARD: Detailed explanations, tutoring, standard composition, web research, PDF ops
+    # 5. STANDARD: Detailed explanations, tutoring, substantial writing/drafting, comparisons, web research, PDF ops
     return TaskComplexity.STANDARD
 
 

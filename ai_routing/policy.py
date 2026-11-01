@@ -188,7 +188,9 @@ def get_routing_candidates(
         return _filter_eligible(candidates)
 
     # ── 3. Light Tier: Short Definitions, Quick Facts, Simple Translations ──
-    if complexity == TaskComplexity.LIGHT or depth == ResponseDepth.FAST:
+    if (complexity == TaskComplexity.LIGHT or depth == ResponseDepth.FAST) and task not in (
+        CODING_TASKS | MATH_TASKS | SCIENCE_TASKS | MULTIMODAL_TASKS | PDF_STUDY_TASKS | {TaskType.DEEP_REASONING}
+    ):
         candidates = [
             ("groq", groq_fast),
             ("gemini", gemini_fast),
@@ -273,12 +275,23 @@ def get_routing_candidates(
         ]
         return _filter_eligible(candidates)
 
-    # ── 10. Translation & Language Composition ──
-    if task in (TaskType.TRANSLATION, TaskType.WRITING):
+    # ── 10. Writing & Composition Specialists ──
+    if task == TaskType.WRITING:
         candidates = [
+            ("gemini", gemini_reason),
             ("gemini", gemini_balanced),
             ("groq", groq_balanced),
+            ("sambanova", samba_reason),
+            ("cerebras", "gpt-oss-120b"),
+            ("openrouter", openrouter_free)
+        ]
+        return _filter_eligible(candidates)
+
+    if task == TaskType.TRANSLATION:
+        candidates = [
+            ("gemini", gemini_balanced),
             ("gemini", gemini_reason),
+            ("groq", groq_balanced),
             ("sambanova", samba_reason),
             ("openrouter", openrouter_free)
         ]

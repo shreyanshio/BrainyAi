@@ -151,7 +151,7 @@ class NormalUseScenarioMatrixTests(unittest.TestCase):
 
                 if route_type == "normal_use":
                     self.assertIn(task, normal_tasks, f"Query '{query}' should resolve to a normal task, got {task}")
-                    self.assertIn(complexity, (TaskComplexity.FAST, TaskComplexity.LIGHT))
+                    self.assertIn(complexity, (TaskComplexity.FAST, TaskComplexity.LIGHT, TaskComplexity.STANDARD))
                 elif route_type == "local_math_engine":
                     self.assertTrue(can_solve_locally(query), f"Query '{query}' should be solvable locally by SymPy engine")
                 elif route_type == "pdf_route":
