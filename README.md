@@ -1,14 +1,25 @@
 <div align="center">
-  <img src="./public/icon.svg" alt="BRAINY logo" width="112" />
+  <a href="https://github.com/shreyanshio/BrainyAi">
+    <img src="./Brainy-Brand-Identity/06-GitHub-Branding/brainy-readme-header.png" alt="Brainy AI — Human Intelligence + Artificial Intelligence" width="100%" />
+  </a>
 
-  <h1>BRAINY</h1>
-  <p><strong>Your study companion, wherever you learn.</strong></p>
+  <br /><br />
+
+  <p align="center">
+    <img src="./Brainy-Brand-Identity/02-Wordmarks/brainy-horizontal-lockup.svg" alt="brainy logo lockup" height="38" />
+  </p>
+
+  <p><strong>Human Intelligence + Artificial Intelligence</strong></p>
+  <p><em>Your intelligent study companion, wherever you learn.</em></p>
+
   <p>
-    <a href="https://brainyai.cenai.workers.dev/">Open the Web App</a>
+    <a href="https://brainyai.cenai.workers.dev/"><b>Open the Web App</b></a>
     &nbsp;·&nbsp;
-    <a href="https://t.me/AiChatExpert_Bot">Open the Telegram Bot</a>
+    <a href="https://t.me/AiChatExpert_Bot"><b>Open the Telegram Bot</b></a>
     &nbsp;·&nbsp;
-    <a href="https://github.com/shreyanshio/BrainyAi">Explore the Source</a>
+    <a href="./Brainy-Brand-Identity/08-Brand-Guidelines/brainy-brand-guidelines.pdf"><b>Brand Guidelines (PDF)</b></a>
+    &nbsp;·&nbsp;
+    <a href="https://github.com/shreyanshio/BrainyAi"><b>Explore the Source</b></a>
   </p>
 </div>
 
