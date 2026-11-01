@@ -285,13 +285,16 @@ class TestResponseCompletenessSuite(unittest.TestCase):
         )
         self.assertLessEqual(cerebras_budget, 2048)
 
-        # Context headroom check (e.g. 30000 input tokens on 32k window)
+        # Context headroom check (near max context window limit)
+        from ai_routing.registry import registry
+        spec = registry.get_model_spec("llama-3.3-70b-versatile")
+        max_ctx = spec.max_context_tokens if spec and spec.max_context_tokens else 32768
         headroom_budget = OutputBudgetManager.resolve_budget(
             task=TaskType.DETAILED_EXPLANATION,
             depth=ResponseDepth.BALANCED,
             provider_name="groq",
             model_id="llama-3.3-70b-versatile",
-            estimated_input_tokens=31000
+            estimated_input_tokens=max_ctx - 1500
         )
         self.assertLessEqual(headroom_budget, 2000)
 

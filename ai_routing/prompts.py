@@ -45,7 +45,22 @@ class Platform(str, Enum):
 # Task Type to Prompt File Mapping
 TASK_TO_PROMPT_FILE: Dict[TaskType, str] = {
     TaskType.CODING: "coding_prompt.txt",
-    TaskType.MATH_AND_LOGIC: "math_prompt.txt",
+    TaskType.MATH_AND_LOGIC: "maths.txt",
+    TaskType.MATHEMATICS: "maths.txt",
+    TaskType.ADVANCED_MATHEMATICS: "maths.txt",
+    TaskType.ALGEBRA: "maths.txt",
+    TaskType.CALCULUS: "maths.txt",
+    TaskType.STATISTICS: "maths.txt",
+    TaskType.PHYSICS: "maths.txt",
+    TaskType.CHEMISTRY: "brainy_prompt.txt",
+    TaskType.BIOLOGY: "brainy_prompt.txt",
+    TaskType.SCIENCE: "brainy_prompt.txt",
+    TaskType.CODING_DEBUGGING: "coding_prompt.txt",
+    TaskType.CODING_EXPLANATION: "coding_prompt.txt",
+    TaskType.DSA: "coding_prompt.txt",
+    TaskType.SQL: "coding_prompt.txt",
+    TaskType.IMAGE_QUESTION: "image_prompt.txt",
+    TaskType.DIAGRAM_ANALYSIS: "image_prompt.txt",
     TaskType.DEEP_REASONING: "brainy_prompt.txt",
     TaskType.DETAILED_EXPLANATION: "brainy_prompt.txt",
     TaskType.SIMPLE_EXPLANATION: "summarize_prompt.txt",
@@ -59,6 +74,8 @@ TASK_TO_PROMPT_FILE: Dict[TaskType, str] = {
     TaskType.FLASHCARD_GENERATION: "pdf_flashcards_prompt.txt",
     TaskType.IMPORTANT_QUESTION_GENERATION: "pdf_important_questions_prompt.txt",
     TaskType.CHAT_TITLE_GENERATION: "title_prompt.txt",
+    TaskType.TRANSLATION: "translate_prompt.txt",
+    TaskType.WRITING: "brainy_prompt.txt",
 }
 
 # Slash Command / Intent String to Prompt File Mapping
@@ -86,7 +103,8 @@ INTENT_TO_PROMPT_FILE: Dict[str, str] = {
     "pdf_flashcards": "pdf_flashcards_prompt.txt",
     "pdf_important_questions": "pdf_important_questions_prompt.txt",
     "coding": "coding_prompt.txt",
-    "math": "math_prompt.txt",
+    "math": "maths.txt",
+    "maths": "maths.txt",
     "title": "title_prompt.txt",
 }
 

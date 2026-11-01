@@ -1,9 +1,10 @@
 """
 BrainyAi Intelligent Multi-Provider AI Router
 Dispatches requests to optimal providers with automatic failover,
-bounded retries, telemetry, and pre-output streaming fallback guarantees.
+local mathematics engine fast-path, bounded retries, telemetry, and pre-output streaming fallback guarantees.
 """
 
+import os
 import time
 import json
 import uuid
@@ -12,7 +13,7 @@ from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Iterator, Tuple
 
 from ai_routing.tasks import TaskType, ResponseDepth, classify_task
-from ai_routing.policy import get_routing_candidates
+from ai_routing.policy import get_routing_candidates, MATH_TASKS
 from ai_routing.telemetry import global_telemetry, TelemetryRecord
 from ai_routing.providers.base import BaseProvider, ProviderResult
 from ai_routing.providers.groq_provider import GroqProvider
@@ -30,6 +31,7 @@ from ai_routing.continuation import (
     CONTINUATION_PROMPT,
     MAX_CONTINUATION_ROUNDS
 )
+from ai_routing.maths import can_solve_locally, solve_locally, MathResult
 
 logger = logging.getLogger("ai_router")
 
@@ -48,6 +50,9 @@ class RouterResponse:
     citations: Optional[List[Dict[str, str]]] = None
     continuation_used: bool = False
     continuation_rounds: int = 0
+    math_verified: bool = False
+    verification_status: Optional[str] = None
+    verification_details: Optional[str] = None
 
 def _sanitize_grounding_text(text: str) -> str:
     """Sanitizes external web content to prevent prompt injection or boundary breakouts."""
@@ -70,6 +75,7 @@ class AIRouter:
 
     def _apply_search_grounding(self, call_messages: List[Dict[str, str]], prompt: str) -> List[Dict[str, Any]]:
         """Applies isolated untrusted data boundary fences around web research findings."""
+        global_telemetry.record_search_call()
         search_query = prompt or (call_messages[-1]["content"] if call_messages else "")
         search_data = execute_search(search_query)
         citations = search_data.get("citations", [])
@@ -133,6 +139,7 @@ class AIRouter:
     ) -> RouterResponse:
         """
         Unified non-streaming AI generation with automatic task inference and failover.
+        Routes mathematical problems locally to MathsEngine where computable (zero API cost).
         """
         if isinstance(prompt, list):
             messages = prompt
@@ -141,16 +148,53 @@ class AIRouter:
         resolved_depth = ResponseDepth.from_str(str(depth)) if depth else ResponseDepth.BALANCED
         resolved_task = classify_task(prompt, messages, document_context, explicit_task=task, depth=resolved_depth)
         resolved_plat = Platform.from_str(str(platform)) if platform else Platform.WEB
-        sys_prompt = prompt_registry.compose_prompt(
-            task=resolved_task,
-            platform=resolved_plat,
-            system_prompt_override=system_prompt
-        )
 
         # Prepare messages
         call_messages = list(messages) if messages else []
         if prompt and (not call_messages or call_messages[-1].get("content") != prompt):
             call_messages.append({"role": "user", "content": prompt})
+
+        prompt_text = prompt or (call_messages[-1]["content"] if call_messages else "")
+
+        # ── Fast-Path 1: Local Mathematics Engine ──
+        enable_local_math = os.getenv("ENABLE_LOCAL_MATH_ENGINE", "true").lower() in ("true", "1", "yes")
+        if enable_local_math and resolved_task in MATH_TASKS and not json_output:
+            if can_solve_locally(prompt_text):
+                start_math = time.perf_counter()
+                math_res = solve_locally(prompt_text, platform=resolved_plat.value)
+                if math_res.is_solved:
+                    math_lat = (time.perf_counter() - start_math) * 1000.0
+                    global_telemetry.record_math_call(is_local=True)
+                    global_telemetry.record(TelemetryRecord(
+                        request_id=req_id,
+                        user_id=user_id,
+                        task=resolved_task.value,
+                        depth=resolved_depth.value,
+                        provider="local_math_engine",
+                        model="math_engine_v1",
+                        latency_ms=math_lat,
+                        input_tokens=None,
+                        output_tokens=len(math_res.formatted_markdown) // 4,
+                        fallback_used=False,
+                        status="success"
+                    ))
+                    return RouterResponse(
+                        text=math_res.formatted_markdown,
+                        task=resolved_task,
+                        depth=resolved_depth,
+                        provider="local_math_engine",
+                        model="math_engine_v1",
+                        latency_ms=math_lat,
+                        math_verified=True,
+                        verification_status=math_res.verification_status,
+                        verification_details=math_res.verification_details
+                    )
+
+        sys_prompt = prompt_registry.compose_prompt(
+            task=resolved_task,
+            platform=resolved_plat,
+            system_prompt_override=system_prompt
+        )
 
         # ── Web Research Pre-Search Hook ──
         citations = []
@@ -298,23 +342,53 @@ class AIRouter:
         user_id: Optional[int | str] = None
     ) -> Iterator[str]:
         """
-        Unified real-time streaming with pre-output fallback guarantee.
-        If a provider errors before emitting the first token, it falls back to the next candidate.
-        If stream breaks midway after tokens were delivered, it raises cleanly without duplicating text.
+        Unified real-time streaming with pre-output fallback guarantee and local math engine routing.
         """
+        if isinstance(prompt, list):
+            messages = prompt
+            prompt = ""
         req_id = request_id or str(uuid.uuid4())
         resolved_depth = ResponseDepth.from_str(str(depth)) if depth else ResponseDepth.BALANCED
         resolved_task = classify_task(prompt, messages, document_context, explicit_task=task, depth=resolved_depth)
         resolved_plat = Platform.from_str(str(platform)) if platform else Platform.WEB
+
+        call_messages = list(messages) if messages else []
+        if prompt and (not call_messages or call_messages[-1].get("content") != prompt):
+            call_messages.append({"role": "user", "content": prompt})
+
+        prompt_text = prompt or (call_messages[-1]["content"] if call_messages else "")
+
+        # ── Fast-Path: Local Mathematics Engine for Streaming ──
+        enable_local_math = os.getenv("ENABLE_LOCAL_MATH_ENGINE", "true").lower() in ("true", "1", "yes")
+        if enable_local_math and resolved_task in MATH_TASKS:
+            if can_solve_locally(prompt_text):
+                start_math = time.perf_counter()
+                math_res = solve_locally(prompt_text, platform=resolved_plat.value)
+                if math_res.is_solved:
+                    math_lat = (time.perf_counter() - start_math) * 1000.0
+                    global_telemetry.record_math_call(is_local=True)
+                    global_telemetry.record(TelemetryRecord(
+                        request_id=req_id,
+                        user_id=user_id,
+                        task=resolved_task.value,
+                        depth=resolved_depth.value,
+                        provider="local_math_engine",
+                        model="math_engine_v1",
+                        latency_ms=math_lat,
+                        ttft_ms=math_lat,
+                        input_tokens=None,
+                        output_tokens=len(math_res.formatted_markdown) // 4,
+                        fallback_used=False,
+                        status="success"
+                    ))
+                    yield math_res.formatted_markdown
+                    return
+
         sys_prompt = prompt_registry.compose_prompt(
             task=resolved_task,
             platform=resolved_plat,
             system_prompt_override=system_prompt
         )
-
-        call_messages = list(messages) if messages else []
-        if prompt and (not call_messages or call_messages[-1].get("content") != prompt):
-            call_messages.append({"role": "user", "content": prompt})
 
         # Web research grounding hook for streaming
         if resolved_task == TaskType.WEB_RESEARCH:
@@ -463,7 +537,7 @@ class AIRouter:
         user_id: Optional[int | str] = None
     ) -> Dict[str, Any]:
         """
-        Generates and parses guaranteed JSON output. If JSON decode fails, retries once.
+        Generates and parses guaranteed JSON output. If JSON decode fails, repairs cleanly.
         """
         for attempt in range(retries):
             resp = self.generate(
@@ -495,6 +569,45 @@ class AIRouter:
                 continue
 
         raise RuntimeError("Failed to generate structured JSON output")
+
+    def find_similar_solved_examples(self, query: str) -> Dict[str, Any]:
+        """
+        Retrieves similar solved mathematical/scientific examples via Tavily + DuckDuckGo.
+        Returns clean references and citations without scraping raw HTML.
+        """
+        search_query = f"solved example step by step: {query.strip()}"
+        results = execute_search(search_query, max_results=3)
+        citations = results.get("citations", [])
+        return {
+            "query": query,
+            "citations": citations,
+            "direct_answer": results.get("direct_answer", ""),
+            "source": results.get("source", "none")
+        }
+
+    def check_student_solution(self, problem: str, student_solution: str) -> Dict[str, Any]:
+        """
+        Analyzes a student's working for mathematical/scientific problems.
+        Identifies the first incorrect step, explains the error, and provides the corrected continuation.
+        """
+        verification_prompt = (
+            f"You are evaluating a student's working for the following problem:\n\n"
+            f"PROBLEM:\n{problem}\n\n"
+            f"STUDENT'S WORKING:\n{student_solution}\n\n"
+            f"Instructions:\n"
+            f"1. Check the student's solution step-by-step.\n"
+            f"2. Determine whether the final answer and all intermediate steps are correct.\n"
+            f"3. If there is an error, clearly identify the FIRST incorrect step, explain the misconception, and provide the correct step.\n"
+            f"4. If completely correct, confirm and praise their reasoning.\n\n"
+            f"Respond in JSON format with fields: is_correct (bool), first_error_step (number or null), "
+            f"error_explanation (string), correction (string), feedback (string)."
+        )
+        return self.generate_structured(
+            prompt=verification_prompt,
+            system_prompt="You are a strict and helpful mathematics evaluator. Output strict JSON.",
+            task=TaskType.MATHEMATICS
+        )
+
 
 # Global singleton router
 router = AIRouter()

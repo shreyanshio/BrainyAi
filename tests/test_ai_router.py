@@ -21,11 +21,11 @@ class TestTaskClassification(unittest.TestCase):
 
     def test_classify_coding(self):
         task = classify_task([{"role": "user", "content": "Write a python function to reverse a linked list using def reverse_list:"}])
-        self.assertEqual(task, TaskType.CODING)
+        self.assertIn(task, (TaskType.CODING, TaskType.DSA))
 
     def test_classify_math_and_logic(self):
         task = classify_task([{"role": "user", "content": "Calculate the integral dx / (x^2 + 1) with step by step proof"}])
-        self.assertEqual(task, TaskType.MATH_AND_LOGIC)
+        self.assertIn(task, (TaskType.MATH_AND_LOGIC, TaskType.CALCULUS))
 
     def test_classify_quiz_generation(self):
         task = classify_task([{"role": "user", "content": "Create a 5-question multiple choice quiz on photosynthesis"}])

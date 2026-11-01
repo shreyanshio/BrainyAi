@@ -62,6 +62,23 @@ class AITelemetry:
         self._provider_stats: Dict[str, Dict[str, Any]] = {}
         self._quota_observations: Dict[str, Dict[str, Any]] = {}
         self._sb_req = None
+        self._local_math_count = 0
+        self._ai_math_count = 0
+        self._search_requests_count = 0
+        self._http_429_count = 0
+
+    def record_math_call(self, is_local: bool):
+        """Records math problem resolution pathway (local engine vs remote AI)."""
+        with self._lock:
+            if is_local:
+                self._local_math_count += 1
+            else:
+                self._ai_math_count += 1
+
+    def record_search_call(self):
+        """Records search grounding or research request invocation."""
+        with self._lock:
+            self._search_requests_count += 1
 
     def set_supabase_requester(self, sb_req_fn):
         """Allows injecting Supabase PostgREST client for durable persistence."""
@@ -117,6 +134,8 @@ class AITelemetry:
 
         with self._lock:
             self._records.append(rec)
+            if rec.error_category in ("429", "rate_limit") or "429" in str(rec.error_category or ""):
+                self._http_429_count += 1
             stats = self._provider_stats.setdefault(rec.provider, {
                 "success": 0,
                 "failure": 0,
@@ -267,7 +286,9 @@ class AITelemetry:
 
         latencies = [r.latency_ms for r in window_recs if r.latency_ms > 0]
         avg_lat = (sum(latencies) / len(latencies)) if latencies else 0.0
-        p95_lat = sorted(latencies)[int(len(latencies) * 0.95)] if latencies else 0.0
+        sorted_lats = sorted(latencies) if latencies else []
+        p50_lat = sorted_lats[int(len(sorted_lats) * 0.50)] if sorted_lats else 0.0
+        p95_lat = sorted_lats[int(len(sorted_lats) * 0.95)] if sorted_lats else 0.0
 
         unique_users = len(set(r.user_id for r in window_recs if r.user_id is not None))
 
@@ -283,8 +304,13 @@ class AITelemetry:
             "avg_tokens_per_request": round((total_tokens / total_reqs) if total_reqs > 0 else 0.0, 1),
             "estimated_cost_usd": round(total_cost, 4),
             "avg_latency_ms": round(avg_lat, 1),
+            "p50_latency_ms": round(p50_lat, 1),
             "p95_latency_ms": round(p95_lat, 1),
-            "active_users_in_window": unique_users
+            "active_users_in_window": unique_users,
+            "http_429_count": self._http_429_count,
+            "local_math_count": self._local_math_count,
+            "ai_math_count": self._ai_math_count,
+            "search_requests_count": self._search_requests_count
         }
 
     def get_time_series(self, window_sec: float = 86400.0, num_buckets: int = 24) -> List[Dict[str, Any]]:

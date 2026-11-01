@@ -8,3 +8,4 @@ Flask-Cors>=4.0.0
 gunicorn>=21.2.0
 google-auth>=2.0.0
 pymupdf>=1.24.0
+sympy>=1.13.0

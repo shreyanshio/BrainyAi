@@ -25,7 +25,7 @@ class TestPromptLibraryIntegrity(unittest.TestCase):
         "system_prompt.txt",
         "brainy_prompt.txt",
         "coding_prompt.txt",
-        "math_prompt.txt",
+        "maths.txt",
         "search_prompt.txt",
         "summarize_prompt.txt",
         "ask5_prompt.txt",

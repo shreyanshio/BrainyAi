@@ -34,6 +34,10 @@ MODEL_PRICING_REGISTRY: Dict[str, Dict[str, float]] = {
     # OpenRouter Free Models
     "google/gemma-4-31b-it:free": {"input": 0.00, "output": 0.00},
     "nvidia/nemotron-3.5-lightning:free": {"input": 0.00, "output": 0.00},
+    "nvidia/nemotron-3-ultra-550b-a55b:free": {"input": 0.00, "output": 0.00},
+    "nvidia/nemotron-3.5-super-vl:free": {"input": 0.00, "output": 0.00},
+    "cohere/north-mini-code:free": {"input": 0.00, "output": 0.00},
+    "openrouter/free": {"input": 0.00, "output": 0.00},
 }
 
 DEFAULT_FALLBACK_RATES = {"input": 0.40, "output": 0.80}
