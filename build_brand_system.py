@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-BASE_DIR = Path(r"C:\Users\Shrey\Desktop\BrainyAi\Brainy-Brand-Identity")
+BASE_DIR = Path(r"C:\Users\Shrey\Desktop\BrainyAi\logos")
 DIRS = {
     "primary": BASE_DIR / "01-Primary-Logos",
     "wordmarks": BASE_DIR / "02-Wordmarks",

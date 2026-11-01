@@ -1,12 +1,12 @@
 <div align="center">
   <a href="https://github.com/shreyanshio/BrainyAi">
-    <img src="./Brainy-Brand-Identity/06-GitHub-Branding/brainy-readme-header.png" alt="Brainy AI — Human Intelligence + Artificial Intelligence" width="100%" />
+    <img src="./logos/06-GitHub-Branding/brainy-readme-header.png" alt="Brainy AI — Human Intelligence + Artificial Intelligence" width="100%" />
   </a>
 
   <br /><br />
 
   <p align="center">
-    <img src="./Brainy-Brand-Identity/02-Wordmarks/brainy-horizontal-lockup.svg" alt="brainy logo lockup" height="38" />
+    <img src="./logos/02-Wordmarks/brainy-horizontal-lockup.svg" alt="brainy logo lockup" height="38" />
   </p>
 
   <p><strong>Human Intelligence + Artificial Intelligence</strong></p>
@@ -17,7 +17,7 @@
     &nbsp;·&nbsp;
     <a href="https://t.me/AiChatExpert_Bot"><b>Open the Telegram Bot</b></a>
     &nbsp;·&nbsp;
-    <a href="./Brainy-Brand-Identity/08-Brand-Guidelines/brainy-brand-guidelines.pdf"><b>Brand Guidelines (PDF)</b></a>
+    <a href="./logos/08-Brand-Guidelines/brainy-brand-guidelines.pdf"><b>Brand Guidelines (PDF)</b></a>
     &nbsp;·&nbsp;
     <a href="https://github.com/shreyanshio/BrainyAi"><b>Explore the Source</b></a>
   </p>

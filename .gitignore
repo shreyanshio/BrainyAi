@@ -56,5 +56,5 @@ tests/
 # Private user data & uploaded documents
 data/
 *.pdf
-!Brainy-Brand-Identity/**/*.pdf
+!logos/**/*.pdf
 .vercel/
