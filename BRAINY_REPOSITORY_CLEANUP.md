@@ -110,5 +110,5 @@ Exported: /, /_not-found, /admin with 0 errors
 
 ## 6. CLEANUP COMMITS SUMMARY
 
-- Deletions staged: 9 redundant asset files removed via `git rm`.
-- Cleaned working directory: working tree clean, all dependencies and routes verified.
+- Commit 1: `91b0843` — `chore(assets): permanently delete obsolete and redundant duplicate assets` (9 redundant asset files deleted from Git)
+- Commit 2: `e25cba3` — `docs(cleanup): link master logo in README, add logos guide, update gitignore, and record cleanup log`
