@@ -314,7 +314,7 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
     }
   }
 
-  // Generate Notes Action (100% Local Processing - Zero LLM API calls)
+  // Generate Notes Action
   const handleGenerateNotes = async () => {
     if (!selectedDocId) return
     setGeneratingNotes(true)
@@ -688,12 +688,12 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
                   {activeTab === 'notes' && (
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
                       <ShieldCheck size={12} />
-                      <span>100% Local • Zero LLM</span>
+                      <span>Instant Revision</span>
                     </span>
                   )}
                 </h1>
                 <p className="text-[11px] text-[var(--text-muted)] mt-0.5 hidden sm:block">
-                  Academic Revision Studio • Grounded deterministic extraction & non-Gemini exam intelligence.
+                  Academic Revision Studio • Grounded extraction & verified exam intelligence.
                 </p>
               </div>
 
@@ -776,23 +776,23 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
             {/* Tab Body */}
             <div className="flex-1 overflow-y-auto p-3 sm:p-6">
               {/* ════════════════════════════════════════════════════════════════
-                  TAB: NOTES (100% LOCAL DETERMINISTIC REVISION WORKSPACE)
+                  TAB: NOTES (STRUCTURED REVISION WORKSPACE)
               ════════════════════════════════════════════════════════════════ */}
               {activeTab === 'notes' && (
                 <div className="max-w-6xl mx-auto space-y-6">
-                  {/* Top Bar: Mode Selector & Local Generation */}
+                  {/* Top Bar: Mode Selector & Generation */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] shadow-xs">
                     <div>
                       <div className="flex items-center gap-2">
                         <h3 className="text-base font-bold text-[var(--text-primary)]">
-                          Local Revision Notes
+                          Structured Revision Notes
                         </h3>
                         <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold border border-emerald-500/20">
-                          100% Offline • Zero LLM
+                          Fast Synthesis
                         </span>
                       </div>
                       <p className="text-xs text-[var(--text-muted)] mt-1">
-                        Deterministic keyword relevance, section boundary detection, LaTeX formulas, and page citations.
+                        Comprehensive concepts, section boundary detection, LaTeX formulas, and exact page citations.
                       </p>
                     </div>
 
@@ -864,7 +864,7 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
                       <BookOpen className="w-12 h-12 text-[var(--text-muted)] mx-auto mb-3 opacity-40" />
                       <h4 className="font-semibold text-sm text-[var(--text-secondary)]">No notes generated yet</h4>
                       <p className="text-xs text-[var(--text-muted)] mt-1 max-w-md mx-auto">
-                        Select a revision depth mode above and click &quot;Generate Notes&quot; to synthesize structured study material directly from the extracted text without calling external AI models.
+                        Select a revision depth mode above and click &quot;Generate Notes&quot; to synthesize structured study material directly from the extracted document text.
                       </p>
                     </div>
                   ) : (
@@ -1855,7 +1855,7 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
               Welcome to BRAINY PDF Study Studio
             </h3>
             <p className="text-xs text-[var(--text-muted)] mt-1.5 max-w-sm">
-              Upload a course PDF, lecture slide, or textbook to synthesize 100% local revision notes, exam question banks, and strictly verified 4-option quizzes.
+              Upload a course PDF, lecture slide, or textbook to synthesize structured revision notes, exam question banks, and strictly verified 4-option quizzes.
             </p>
             <button
               onClick={() => fileInputRef.current?.click()}

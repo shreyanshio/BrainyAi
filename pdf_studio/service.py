@@ -1,10 +1,9 @@
 """
 BrainyAi PDF Study Studio - Document Lifecycle & Academic Services
 Provides durable Supabase Storage & PostgreSQL persistence, page-aware text indexing,
-completely local & offline deterministic note generation (zero AI calls),
-grounded document Q&A with 10-message conversational context, strictly validated 4-option quizzes,
-high-yield exam question generation, interactive flashcards, and robust progress tracking.
-Zero AI API calls for text extraction, OCR, or note generation.
+fast structured note generation, grounded document Q&A with 10-message conversational context,
+strictly validated 4-option quizzes, high-yield exam question generation,
+interactive flashcards, and robust progress tracking.
 """
 
 import os
@@ -218,6 +217,15 @@ class PDFStudyService:
             "updated_at": created_at
         }
 
+        # Local disk metadata persistence for seamless multi-worker & dev reload support
+        try:
+            user_folder = os.path.join(DATA_DIR, str(user_id))
+            meta_path = os.path.join(user_folder, f"{doc_id}.json")
+            with open(meta_path, "w", encoding="utf-8") as mf:
+                json.dump({"document": doc_record, "pages": processed_pages}, mf)
+        except Exception as lme:
+            logger.warning("Could not persist local document metadata cache for %s: %s", doc_id, lme)
+
         # 4. Durable persistence in Supabase PostgreSQL (if available)
         if self._is_supabase_available():
             try:
@@ -259,7 +267,7 @@ class PDFStudyService:
 
     # ── DOCUMENT RETRIEVAL & DELETION ──
 
-    def get_user_documents(self, user_id: int) -> List[Dict[str, Any]]:
+    def get_user_documents(self, user_id: Any) -> List[Dict[str, Any]]:
         """Lists all documents belonging to the authenticated user."""
         if self._is_supabase_available():
             try:
@@ -273,11 +281,37 @@ class PDFStudyService:
             except Exception as e:
                 logger.warning("Failed to fetch user documents from Supabase: %s", e)
 
-        # In-memory fallback
-        docs = [d for d in _DOCUMENTS_STORE.values() if d.get("user_id") == user_id]
+        # In-memory and local file scan fallback
+        user_str = str(user_id)
+        docs = [d for d in _DOCUMENTS_STORE.values() if str(d.get("user_id")) == user_str]
+        
+        # Also check local filesystem metadata if not found in memory
+        user_folder = os.path.join(DATA_DIR, user_str)
+        if os.path.isdir(user_folder):
+            try:
+                for fname in os.listdir(user_folder):
+                    if fname.endswith(".json"):
+                        doc_id = fname[:-5]
+                        if doc_id not in _DOCUMENTS_STORE:
+                            meta_file = os.path.join(user_folder, fname)
+                            try:
+                                with open(meta_file, "r", encoding="utf-8") as mf:
+                                    cached = json.load(mf)
+                                    cdoc = cached.get("document")
+                                    if cdoc:
+                                        _DOCUMENTS_STORE[doc_id] = cdoc
+                                        if cached.get("pages"):
+                                            _PAGES_STORE[doc_id] = cached.get("pages")
+                                        if str(cdoc.get("user_id")) == user_str:
+                                            docs.append(cdoc)
+                            except Exception:
+                                pass
+            except Exception as dfe:
+                logger.warning("Failed listing local user documents directory: %s", dfe)
+
         return sorted(docs, key=lambda x: x.get("created_at", ""), reverse=True)
 
-    def get_document(self, doc_id: str, user_id: int) -> Dict[str, Any]:
+    def get_document(self, doc_id: str, user_id: Any) -> Dict[str, Any]:
         """Retrieves single document metadata and enforces user ownership."""
         doc = None
         if self._is_supabase_available():
@@ -293,15 +327,31 @@ class PDFStudyService:
         if not doc:
             doc = _DOCUMENTS_STORE.get(doc_id)
 
+        # Check local filesystem metadata backup if not in memory
+        if not doc:
+            user_folder = os.path.join(DATA_DIR, str(user_id))
+            meta_path = os.path.join(user_folder, f"{doc_id}.json")
+            if os.path.exists(meta_path):
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as mf:
+                        cached = json.load(mf)
+                        doc = cached.get("document")
+                        if doc:
+                            _DOCUMENTS_STORE[doc_id] = doc
+                        if cached.get("pages"):
+                            _PAGES_STORE[doc_id] = cached.get("pages")
+                except Exception as lme:
+                    logger.warning("Failed reading local metadata cache for %s: %s", doc_id, lme)
+
         if not doc:
             raise PDFNotFoundError("Document not found.")
 
-        if doc.get("user_id") != user_id:
+        if str(doc.get("user_id")) != str(user_id):
             raise PDFSecurityError("Access denied: You do not own this document.")
 
         return doc
 
-    def delete_document(self, doc_id: str, user_id: int) -> bool:
+    def delete_document(self, doc_id: str, user_id: Any) -> bool:
         """Securely deletes document, files from Supabase Storage and all derived records."""
         doc = self.get_document(doc_id, user_id)
 
@@ -310,13 +360,20 @@ class PDFStudyService:
         if storage_path and not os.path.isabs(storage_path):
             self._delete_from_supabase_storage(storage_path)
 
-        # 2. Delete local physical file if exists
+        # 2. Delete local physical file and metadata cache if exists
         local_path = os.path.join(DATA_DIR, str(user_id), f"{doc_id}.pdf")
         if os.path.exists(local_path):
             try:
                 os.remove(local_path)
             except Exception as e:
                 logger.warning("Could not delete local file %s: %s", local_path, e)
+
+        meta_path = os.path.join(DATA_DIR, str(user_id), f"{doc_id}.json")
+        if os.path.exists(meta_path):
+            try:
+                os.remove(meta_path)
+            except Exception as e:
+                logger.warning("Could not delete local meta file %s: %s", meta_path, e)
 
         # 3. Delete from Supabase PostgreSQL (Foreign Keys ON DELETE CASCADE will clean up pages, notes, quizzes, flashcards, progress)
         if self._is_supabase_available():
@@ -338,7 +395,7 @@ class PDFStudyService:
         logger.info("Deleted document doc_id=%s user_id=%s", doc_id, user_id)
         return True
 
-    def get_document_pages(self, doc_id: str, user_id: int) -> List[Dict[str, Any]]:
+    def get_document_pages(self, doc_id: str, user_id: Any) -> List[Dict[str, Any]]:
         """Retrieves all indexed pages for a document."""
         self.get_document(doc_id, user_id)
 
@@ -352,14 +409,29 @@ class PDFStudyService:
             except Exception as e:
                 logger.warning("Failed to fetch document pages from Supabase: %s", e)
 
-        return _PAGES_STORE.get(doc_id, [])
+        pages = _PAGES_STORE.get(doc_id)
+        if not pages:
+            # Fallback to local metadata cache
+            user_folder = os.path.join(DATA_DIR, str(user_id))
+            meta_path = os.path.join(user_folder, f"{doc_id}.json")
+            if os.path.exists(meta_path):
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as mf:
+                        cached = json.load(mf)
+                        pages = cached.get("pages")
+                        if pages:
+                            _PAGES_STORE[doc_id] = pages
+                except Exception as pe:
+                    logger.warning("Failed reading cached pages for %s: %s", doc_id, pe)
 
-    # ── 100% LOCAL DETERMINISTIC NOTE GENERATION (ZERO LLM / ZERO API CALLS) ──
+        return pages or []
+
+    # ── STRUCTURED NOTE GENERATION ──
 
     def generate_notes(self, doc_id: str, user_id: int, depth: Any = "standard") -> Dict[str, Any]:
         """
-        Synthesizes structured revision notes completely locally without any LLM API calls.
-        Uses deterministic extractive ranking, section heading detection, KaTeX preservation,
+        Synthesizes structured revision notes from the indexed document text.
+        Uses extractive ranking, section heading detection, KaTeX preservation,
         and page citations.
         Supports 3 modes:
           - Quick Revision ('quick'): very concise, top concepts, definitions, formulas, key facts.
@@ -389,7 +461,7 @@ class PDFStudyService:
         }
         clean_mode = mode_map.get(depth_str, "standard")
 
-        # 100% Local notes generation - ZERO LLM calls!
+        # Synthesize notes
         final_content = generate_local_notes(
             pages=pages,
             title=doc.get("filename", "Document Notes"),
