@@ -56,5 +56,4 @@ tests/
 # Private user data & uploaded documents
 data/
 *.pdf
-!logos/**/*.pdf
 .vercel/
