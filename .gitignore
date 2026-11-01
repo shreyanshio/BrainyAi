@@ -50,7 +50,10 @@ __v0_jsx-dev-runtime.ts
 .snowflake/
 
 # Local tests only (not tracked on GitHub)
-tests/
+tests/__pycache__/
+tests/*.pyc
+tests/*.log
+tests/fixtures/private_*
 .v0-trash/
 
 # Private user data & uploaded documents

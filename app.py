@@ -228,11 +228,37 @@ def api_health():
         "gemini": len(getattr(study_bot, "GEMINI_API_KEYS", [])),
         "openrouter": len(getattr(study_bot, "OPENROUTER_API_KEYS", [])),
     }
+    # OCR Diagnostics
+    from pdf_studio.ocr import is_ocr_available, _PYTESSERACT_AVAILABLE, OCR_ENABLED, OCR_DEFAULT_LANG
+    tesseract_version = None
+    tesseract_available = False
+    ocr_error = None
+    if _PYTESSERACT_AVAILABLE:
+        try:
+            import pytesseract
+            tesseract_version = str(pytesseract.get_tesseract_version())
+            tesseract_available = True
+        except Exception as e:
+            ocr_error = f"{type(e).__name__}: {str(e)}"
+    else:
+        ocr_error = "pytesseract or Pillow not installed"
+
+    ocr_health = {
+        "enabled": OCR_ENABLED,
+        "library_available": _PYTESSERACT_AVAILABLE,
+        "tesseract_executable_available": tesseract_available,
+        "tesseract_version": tesseract_version,
+        "languages": [OCR_DEFAULT_LANG] if tesseract_available else [],
+        "available": is_ocr_available(),
+        "last_error": ocr_error,
+    }
+
     return jsonify({
         "status": "healthy" if healthy else "degraded",
         "version": "2026.10.18-v2",
         "database": {"status": database_status, "latency_ms": latency_ms},
         "providers": provider_counts,
+        "ocr": ocr_health,
     }), 200
 
 
@@ -262,66 +288,169 @@ def _memory_storage_error(exc: Exception):
         "request_id": getattr(g, "request_id", None),
     }), 503
 
-# ── SECURE HASH ENCRYPTION FOR CHAT TITLES & USER QUESTIONS ──
-# Prevents sensitive user questions and chat titles from leaking if the Supabase database is dumped
+# ── STANDARD AEAD ENCRYPTION FOR CHAT TITLES & USER QUESTIONS (AES-256-GCM) ──
+# Prevents sensitive user questions and chat titles from leaking if the database is compromised.
+# Uses Python cryptography AESGCM with 96-bit unique random nonces and versioned enc_v2_ format.
+# Fully backward-compatible with legacy hsh_v1_ records via fallback decryptor.
+
 import base64
+from typing import Tuple
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+_AEAD_V2_PREFIX = "enc_v2_"
+_LEGACY_V1_PREFIX = "hsh_v1_"
+_AEAD_AAD = b"brainy_chat_v2"
+
+
+def _derive_32byte_key(key_material: str) -> bytes:
+    """Derives a consistent 32-byte AES-256 key from any input string."""
+    return hashlib.sha256(key_material.encode("utf-8")).digest()
+
+
+def _get_chat_encryption_keys() -> list[bytes]:
+    """Returns list of candidate 32-byte AESGCM keys for encryption & decryption. Active key is candidate_keys[0]."""
+    keys: list[bytes] = []
+
+    # 1. Primary dedicated key
+    dedicated_key = os.getenv("CHAT_ENCRYPTION_KEY", "").strip()
+    if dedicated_key:
+        keys.append(_derive_32byte_key(dedicated_key))
+    else:
+        # Fallback to key derived from auth secret with domain separation salt
+        auth_secret = _get_auth_secret_key()
+        derived = hashlib.pbkdf2_hmac(
+            "sha256", auth_secret.encode("utf-8"), b"brainy_chat_enc_v2_salt", 100000, dklen=32
+        )
+        keys.append(derived)
+
+    # 2. Previous keys for key rotation
+    prev_keys_str = os.getenv("CHAT_ENCRYPTION_PREVIOUS_KEYS", "").strip()
+    if prev_keys_str:
+        for pk in prev_keys_str.split(","):
+            if pk.strip():
+                k_bytes = _derive_32byte_key(pk.strip())
+                if k_bytes not in keys:
+                    keys.append(k_bytes)
+
+    single_prev = os.getenv("CHAT_ENCRYPTION_PREVIOUS_KEY", "").strip()
+    if single_prev:
+        k_bytes = _derive_32byte_key(single_prev)
+        if k_bytes not in keys:
+            keys.append(k_bytes)
+        legacy_derived = hashlib.pbkdf2_hmac(
+            "sha256", single_prev.encode("utf-8"), b"brainy_chat_enc_v2_salt", 100000, dklen=32
+        )
+        if legacy_derived not in keys:
+            keys.append(legacy_derived)
+
+    return keys
+
 
 def mask_secure_hash(text: str) -> str:
-    """Encrypt and format plain text into a secure hash-encoded representation for Supabase storage."""
+    """Encrypt and format plain text into an AES-256-GCM AEAD representation (enc_v2_) for database storage."""
     if not text:
         return text
-    salt = os.urandom(16)
-    secret = _get_auth_secret_key()
-    key = hashlib.pbkdf2_hmac('sha256', secret.encode('utf-8'), salt, 50000, dklen=32)
-    text_bytes = text.encode('utf-8')
-    keystream = bytearray()
-    counter = 0
-    while len(keystream) < len(text_bytes):
-        keystream.extend(hmac.new(key, counter.to_bytes(4, 'big'), hashlib.sha256).digest())
-        counter += 1
-    ciphertext = bytes(a ^ b for a, b in zip(text_bytes, keystream[:len(text_bytes)]))
-    mac = hmac.new(key, ciphertext, hashlib.sha256).digest()[:16]
-    encoded = base64.urlsafe_b64encode(salt + mac + ciphertext).decode('ascii')
-    return f"hsh_v1_{encoded}"
+    try:
+        keys = _get_chat_encryption_keys()
+        active_key = keys[0]
+        aesgcm = AESGCM(active_key)
+        nonce = os.urandom(12)  # 96-bit unique nonce per encryption
+        ciphertext = aesgcm.encrypt(nonce, text.encode("utf-8"), _AEAD_AAD)
+        payload = base64.urlsafe_b64encode(nonce + ciphertext).decode("ascii")
+        return f"{_AEAD_V2_PREFIX}{payload}"
+    except Exception as exc:
+        logger.error("Chat encryption failed: %s", type(exc).__name__)
+        raise RuntimeError("Chat content could not be securely encrypted") from exc
+
+
+def _unmask_legacy_v1(stored_val: str) -> str:
+    """Internal compatibility helper to decrypt historical hsh_v1_ records."""
+    raw = base64.b64decode(stored_val[len(_LEGACY_V1_PREFIX):].encode("ascii"), altchars=b"-_", validate=True)
+    if len(raw) < 32:
+        raise ValueError("invalid encrypted content length")
+    salt = raw[:16]
+    mac = raw[16:32]
+    ciphertext = raw[32:]
+    candidate_secrets = [_get_auth_secret_key()]
+    previous_secrets = [v.strip() for v in os.getenv("CHAT_ENCRYPTION_PREVIOUS_KEYS", "").split(",") if v.strip()]
+    previous_secret = os.getenv("CHAT_ENCRYPTION_PREVIOUS_KEY", "").strip()
+    if previous_secret:
+        previous_secrets.append(previous_secret)
+    candidate_secrets.extend(s for s in previous_secrets if s not in candidate_secrets)
+    for secret in candidate_secrets:
+        key = hashlib.pbkdf2_hmac("sha256", secret.encode("utf-8"), salt, 50000, dklen=32)
+        expected_mac = hmac.new(key, ciphertext, hashlib.sha256).digest()[:16]
+        if not hmac.compare_digest(mac, expected_mac):
+            continue
+        keystream = bytearray()
+        counter = 0
+        while len(keystream) < len(ciphertext):
+            keystream.extend(hmac.new(key, counter.to_bytes(4, "big"), hashlib.sha256).digest())
+            counter += 1
+        plain_bytes = bytes(a ^ b for a, b in zip(ciphertext, keystream[:len(ciphertext)]))
+        return plain_bytes.decode("utf-8")
+    raise StoredChatContentUnavailable("Stored legacy chat content could not be decrypted with active or previous keys")
+
 
 def unmask_secure_hash(stored_val: str) -> str:
-    """Decrypt a masked hash string from Supabase back to readable text for authorized sessions."""
-    if not stored_val or not isinstance(stored_val, str) or not stored_val.startswith("hsh_v1_"):
+    """Decrypt an encrypted chat string (enc_v2_ or legacy hsh_v1_) back to readable text."""
+    if not stored_val or not isinstance(stored_val, str):
         return stored_val
+
+    # 1. Modern AEAD AES-256-GCM format
+    if stored_val.startswith(_AEAD_V2_PREFIX):
+        try:
+            raw = base64.urlsafe_b64decode(stored_val[len(_AEAD_V2_PREFIX):].encode("ascii"))
+            if len(raw) < 28:  # 12 bytes nonce + 16 bytes auth tag
+                raise ValueError("truncated encrypted payload")
+            nonce = raw[:12]
+            ciphertext_tag = raw[12:]
+            keys = _get_chat_encryption_keys()
+            for key in keys:
+                try:
+                    aesgcm = AESGCM(key)
+                    decrypted_bytes = aesgcm.decrypt(nonce, ciphertext_tag, _AEAD_AAD)
+                    return decrypted_bytes.decode("utf-8")
+                except Exception:
+                    continue
+            raise StoredChatContentUnavailable("Stored chat content could not be decrypted")
+        except StoredChatContentUnavailable:
+            raise
+        except Exception as exc:
+            logger.warning("Stored chat AEAD decode failed category=%s", type(exc).__name__)
+            raise StoredChatContentUnavailable("Stored chat content could not be decrypted") from exc
+
+    # 2. Backward compatibility with historical hsh_v1_ format
+    if stored_val.startswith(_LEGACY_V1_PREFIX):
+        try:
+            return _unmask_legacy_v1(stored_val)
+        except StoredChatContentUnavailable:
+            raise
+        except Exception as exc:
+            logger.warning("Stored chat legacy decode failed category=%s", type(exc).__name__)
+            raise StoredChatContentUnavailable("Stored chat content could not be decrypted") from exc
+
+    # 3. Unencrypted plaintext
+    return stored_val
+
+
+def migrate_record_to_v2(stored_val: str) -> Tuple[str, bool]:
+    """
+    Safely migrates a legacy hsh_v1_ record to modern enc_v2_ AEAD format.
+    Returns (migrated_val, was_migrated).
+    If stored_val is already enc_v2_ or plaintext, returns (stored_val, False).
+    If decryption fails, returns (stored_val, False) preserving original record.
+    """
+    if not stored_val or not isinstance(stored_val, str) or not stored_val.startswith(_LEGACY_V1_PREFIX):
+        return stored_val, False
     try:
-        raw = base64.b64decode(stored_val[7:].encode('ascii'), altchars=b'-_', validate=True)
-        if len(raw) < 32:
-            raise ValueError("invalid encrypted content length")
-        salt = raw[:16]
-        mac = raw[16:32]
-        ciphertext = raw[32:]
-        # Keep the active key first. A previous key is optional and exists only
-        # to support a deliberate Railway key rotation without losing old chats.
-        candidate_secrets = [_get_auth_secret_key()]
-        previous_secrets = [value.strip() for value in os.getenv("CHAT_ENCRYPTION_PREVIOUS_KEYS", "").split(",") if value.strip()]
-        previous_secret = os.getenv("CHAT_ENCRYPTION_PREVIOUS_KEY", "").strip()
-        if previous_secret:
-            previous_secrets.append(previous_secret)
-        candidate_secrets.extend(secret for secret in previous_secrets if secret not in candidate_secrets)
-        for secret in candidate_secrets:
-            key = hashlib.pbkdf2_hmac('sha256', secret.encode('utf-8'), salt, 50000, dklen=32)
-            expected_mac = hmac.new(key, ciphertext, hashlib.sha256).digest()[:16]
-            if not hmac.compare_digest(mac, expected_mac):
-                continue
-            keystream = bytearray()
-            counter = 0
-            while len(keystream) < len(ciphertext):
-                keystream.extend(hmac.new(key, counter.to_bytes(4, 'big'), hashlib.sha256).digest())
-                counter += 1
-            plain_bytes = bytes(a ^ b for a, b in zip(ciphertext, keystream[:len(ciphertext)]))
-            return plain_bytes.decode('utf-8')
-        raise StoredChatContentUnavailable("Stored chat content could not be decrypted")
-    except StoredChatContentUnavailable:
-        raise
+        plain = unmask_secure_hash(stored_val)
+        new_val = mask_secure_hash(plain)
+        if unmask_secure_hash(new_val) == plain:
+            return new_val, True
     except Exception as exc:
-        # Never return the encrypted payload to the user or send it to a model.
-        logger.warning("Stored chat content could not be decoded category=%s", type(exc).__name__)
-        raise StoredChatContentUnavailable("Stored chat content could not be decrypted") from exc
+        logger.warning("Migration of chat record to v2 failed; preserving original: %s", exc)
+    return stored_val, False
 
 # ── GLOBAL USER MESSAGE QUOTA: 30 MESSAGES PER 5 HOURS ──
 GLOBAL_MESSAGE_LIMIT = 30

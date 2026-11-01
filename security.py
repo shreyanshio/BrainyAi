@@ -228,6 +228,12 @@ def is_blacklisted(text: str) -> bool:
 def _get_auth_secret_key() -> str:
     key = os.getenv("AUTH_SECRET_KEY") or os.getenv("SECRET_KEY") or os.getenv("FLASK_SECRET_KEY")
     if not key:
+        if _is_production():
+            raise RuntimeError(
+                "CRITICAL: Production deployment requires an explicitly configured, "
+                "high-entropy AUTH_SECRET_KEY (or FLASK_SECRET_KEY / SECRET_KEY). "
+                "Failing closed to prevent multi-worker inconsistency or secret generation on ephemeral filesystems."
+            )
         secret_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".auth_secret")
         if os.path.exists(secret_file):
             try:
@@ -241,6 +247,9 @@ def _get_auth_secret_key() -> str:
             try:
                 with open(secret_file, "w", encoding="utf-8") as f:
                     f.write(key)
+                logging.getLogger(__name__).warning(
+                    "AUTH_SECRET_KEY not configured; generated local development secret into .auth_secret"
+                )
             except Exception:
                 pass
     return key
@@ -268,7 +277,7 @@ def create_auth_token(user_id: int, username: str, first_name: str, email: str =
 
 
 def verify_auth_token(token: str) -> dict | None:
-    """Verify signature and expiry of a bearer token. Returns payload dict or None."""
+    """Verify signature, algorithm, and expiry of a bearer token (JWT). Returns payload dict or None."""
     if not token or not isinstance(token, str):
         return None
     try:
@@ -276,25 +285,52 @@ def verify_auth_token(token: str) -> dict | None:
         if len(parts) != 3:
             return None
         h_b64, p_b64, sig_b64 = parts
-        sig_content = f"{h_b64}.{p_b64}".encode()
-        expected_sig = hmac.new(_get_auth_secret_key().encode(), sig_content, hashlib.sha256).digest()
 
-        # Pad base64 for decoding
-        pad = len(sig_b64) % 4
-        if pad:
-            sig_b64 += "=" * (4 - pad)
-        actual_sig = base64.urlsafe_b64decode(sig_b64.encode())
-
-        if not hmac.compare_digest(expected_sig, actual_sig):
+        # Verify header specifies HS256
+        h_pad = len(h_b64) % 4
+        h_raw = h_b64 + ("=" * (4 - h_pad) if h_pad else "")
+        header = json.loads(base64.urlsafe_b64decode(h_raw.encode()).decode())
+        if header.get("alg") != "HS256":
             return None
 
-        # Decode payload
-        p_pad = len(p_b64) % 4
-        if p_pad:
-            p_b64 += "=" * (4 - p_pad)
-        payload = json.loads(base64.urlsafe_b64decode(p_b64.encode()).decode())
+        # Pad base64 for decoding signature
+        pad = len(sig_b64) % 4
+        sig_raw = sig_b64 + ("=" * (4 - pad) if pad else "")
+        actual_sig = base64.urlsafe_b64decode(sig_raw.encode())
 
-        if payload.get("exp", 0) < time.time():
+        sig_content = f"{h_b64}.{p_b64}".encode()
+
+        # Candidate signing secrets (active key + rotation candidates)
+        candidate_keys = [_get_auth_secret_key()]
+        prev_keys = [k.strip() for k in os.getenv("AUTH_PREVIOUS_KEYS", "").split(",") if k.strip()]
+        candidate_keys.extend(k for k in prev_keys if k not in candidate_keys)
+
+        sig_valid = False
+        for secret in candidate_keys:
+            expected_sig = hmac.new(secret.encode(), sig_content, hashlib.sha256).digest()
+            if hmac.compare_digest(expected_sig, actual_sig):
+                sig_valid = True
+                break
+
+        if not sig_valid:
+            return None
+
+        # Decode and strictly validate payload
+        p_pad = len(p_b64) % 4
+        p_raw = p_b64 + ("=" * (4 - p_pad) if p_pad else "")
+        payload = json.loads(base64.urlsafe_b64decode(p_raw.encode()).decode())
+
+        # Subject and expiry are mandatory
+        if "sub" not in payload:
+            return None
+
+        exp = payload.get("exp")
+        if not isinstance(exp, (int, float)) or exp < time.time():
+            return None
+
+        # Issued-at check (clock skew allowance 300s)
+        iat = payload.get("iat")
+        if iat and isinstance(iat, (int, float)) and iat > time.time() + 300:
             return None
 
         return payload

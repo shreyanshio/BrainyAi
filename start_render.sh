@@ -6,6 +6,13 @@ set -e
 
 echo "[Render Startup] Starting BrainyAi combined services..."
 
+# Check OCR binary availability
+if command -v tesseract >/dev/null 2>&1; then
+    echo "[Render Startup] Tesseract OCR binary detected: $(tesseract --version 2>&1 | head -n 1)"
+else
+    echo "[Render Startup] NOTICE: Tesseract OCR binary not found in PATH; scanned PDFs will use text-layer extraction & fallback tokens."
+fi
+
 # Start Telegram Bot in background if TELEGRAM_TOKEN or TELEGRAM_BOT_TOKEN is provided
 TG_TOKEN="${TELEGRAM_TOKEN:-$TELEGRAM_BOT_TOKEN}"
 if [ -n "$TG_TOKEN" ]; then

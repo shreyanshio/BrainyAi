@@ -9,3 +9,6 @@ gunicorn>=21.2.0
 google-auth>=2.0.0
 pymupdf>=1.24.0
 sympy>=1.13.0
+cryptography>=41.0.0
+pytesseract>=0.3.10
+pillow>=10.0.0
