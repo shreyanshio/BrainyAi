@@ -62,3 +62,6 @@ data/
 .vercel/
 # Local screenshots
 screenshots/
+
+# Generated benchmark report (recreated by scripts/run_benchmarks.py)
+/benchmark_results.json
