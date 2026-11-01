@@ -94,18 +94,13 @@ class ProviderRegistry:
 
     def reload_configuration(self):
         with self._lock:
-            # 1. Load keys for all supported providers
+            # 1. Load keys for active supported providers
             self._rotators["groq"] = ProviderKeyRotator("groq", collect_key_pool("GROQ_API_KEY", 15))
             self._rotators["gemini"] = ProviderKeyRotator("gemini", collect_key_pool("GEMINI_API_KEY", 15))
             self._rotators["sambanova"] = ProviderKeyRotator("sambanova", collect_key_pool("SAMBANOVA_API_KEY", 15))
             self._rotators["cerebras"] = ProviderKeyRotator("cerebras", collect_key_pool("CEREBRAS_API_KEY", 15))
             self._rotators["openrouter"] = ProviderKeyRotator("openrouter", collect_key_pool("OPENROUTER_API_KEY", 15))
             self._rotators["tavily"] = ProviderKeyRotator("tavily", collect_key_pool("TAVILY_API_KEY", 15))
-            self._rotators["mistral"] = ProviderKeyRotator("mistral", collect_key_pool("MISTRAL_API_KEY", 15))
-            self._rotators["deepseek"] = ProviderKeyRotator("deepseek", collect_key_pool("DEEPSEEK_API_KEY", 15))
-            self._rotators["nvidia"] = ProviderKeyRotator("nvidia", collect_key_pool("NVIDIA_API_KEY", 15))
-            self._rotators["together"] = ProviderKeyRotator("together", collect_key_pool("TOGETHER_API_KEY", 15))
-            self._rotators["openai"] = ProviderKeyRotator("openai", collect_key_pool("OPENAI_API_KEY", 15))
 
             # 2. Configurable model IDs with live defaults
             self.groq_fast_model = (os.getenv("GROQ_MODEL_FAST") or "qwen/qwen3.8-27b").strip()
@@ -142,7 +137,6 @@ class ProviderRegistry:
             # OpenRouter
             self._models[self.openrouter_coding_model] = ModelSpec(self.openrouter_coding_model, "openrouter", supports_streaming=True, supports_structured_json=True, max_output_tokens=8192, timeout_sec=30.0)
             self._models[self.openrouter_free_model] = ModelSpec(self.openrouter_free_model, "openrouter", supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=30.0)
-            self._models["nvidia/nemotron-3.5-lightning:free"] = ModelSpec("nvidia/nemotron-3.5-lightning:free", "openrouter", supports_streaming=True, max_output_tokens=4096, timeout_sec=25.0)
 
     def get_rotator(self, provider: str) -> Optional[ProviderKeyRotator]:
         with self._lock:

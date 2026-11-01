@@ -31,7 +31,6 @@ class OpenRouterProvider(BaseProvider):
             primary_model,
             "google/gemma-4-31b-it:free",
             "google/gemma-4-26b-a4b-it:free",
-            "nvidia/nemotron-3.5-lightning:free",
             "liquid/lfm-2.5-2.6b:free",
             "thinkingmachines/inkling:free",
             "cohere/north-mini-code:free"
@@ -105,7 +104,6 @@ class OpenRouterProvider(BaseProvider):
             primary_model,
             "google/gemma-4-31b-it:free",
             "google/gemma-4-26b-a4b-it:free",
-            "nvidia/nemotron-3.5-lightning:free",
             "liquid/lfm-2.5-2.6b:free",
             "thinkingmachines/inkling:free",
             "cohere/north-mini-code:free"

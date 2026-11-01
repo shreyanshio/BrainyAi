@@ -190,20 +190,15 @@ def _collect_keys(prefix: str, count: int = 15) -> list:
             keys.append(k.strip())
     return keys
 
-# ── API Keys (supports singular GROQ_API_KEY and multi-key GROQ_API_KEY_1..N) ──
+# ── API Keys (supports singular and multi-key KEY_1..N) ──
 GROQ_API_KEYS       = _collect_keys("GROQ_API_KEY", 15)
 GROQ_FAST_MODEL = (os.getenv("GROQ_MODEL_FAST") or "qwen/qwen3.8-27b").strip()
 GROQ_BALANCED_MODEL = (os.getenv("GROQ_MODEL_BALANCED") or "openai/gpt-oss-120b").strip()
-NVIDIA_API_KEYS     = _collect_keys("NVIDIA_API_KEY", 15)
-DEEPSEEK_API_KEYS   = _collect_keys("DEEPSEEK_API_KEY", 15)
 GEMINI_API_KEYS     = _collect_keys("GEMINI_API_KEY", 15)
 TAVILY_API_KEYS     = _collect_keys("TAVILY_API_KEY", 15)
 CEREBRAS_API_KEYS   = _collect_keys("CEREBRAS_API_KEY", 15)
 OPENROUTER_API_KEYS = _collect_keys("OPENROUTER_API_KEY", 15)
 SAMBANOVA_API_KEYS  = _collect_keys("SAMBANOVA_API_KEY", 15)
-TOGETHER_API_KEYS   = _collect_keys("TOGETHER_API_KEY", 15)
-MISTRAL_API_KEYS    = _collect_keys("MISTRAL_API_KEY", 15)
-OPENAI_API_KEYS     = _collect_keys("OPENAI_API_KEY", 15)
 
 # ── Supabase (used for broadcast user list — persists across restarts) ──
 SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").rstrip("/")          # e.g. https://xxxx.supabase.co
@@ -215,7 +210,7 @@ if not TELEGRAM_TOKEN or not GROQ_API_KEYS:
         print("ERROR: The bot server must be down try contacting dev for fix:- @shreyanshhh_08")
         exit()
 
-print(f"Groq: {len(GROQ_API_KEYS)} | Nvidia: {len(NVIDIA_API_KEYS)} | Deepseek: {len(DEEPSEEK_API_KEYS)} | Gemini: {len(GEMINI_API_KEYS)} | Tavily: {len(TAVILY_API_KEYS)} | Cerebras: {len(CEREBRAS_API_KEYS)} | OpenRouter: {len(OPENROUTER_API_KEYS)} | SambaNova: {len(SAMBANOVA_API_KEYS)} | Together: {len(TOGETHER_API_KEYS)} | Mistral: {len(MISTRAL_API_KEYS)} | OpenAI: {len(OPENAI_API_KEYS)}")
+print(f"Groq: {len(GROQ_API_KEYS)} | Gemini: {len(GEMINI_API_KEYS)} | Tavily: {len(TAVILY_API_KEYS)} | Cerebras: {len(CEREBRAS_API_KEYS)} | OpenRouter: {len(OPENROUTER_API_KEYS)} | SambaNova: {len(SAMBANOVA_API_KEYS)}")
 print(f"Supabase: {'connected' if (SUPABASE_URL and SUPABASE_KEY) else 'NOT configured — broadcast list wont persist'}")
 
 
@@ -1159,7 +1154,7 @@ def _feedback_keyboard() -> InlineKeyboardMarkup:
         InlineKeyboardButton("👎", callback_data="fb_down"),
     ]])
 
-key_idx = {"groq": 0, "nvidia": 0, "deepseek": 0, "gemini": 0, "tavily": 0, "cerebras": 0, "openrouter": 0, "sambanova": 0, "together": 0, "mistral": 0}
+key_idx = {"groq": 0, "gemini": 0, "tavily": 0, "cerebras": 0, "openrouter": 0, "sambanova": 0}
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1383,7 +1378,6 @@ def _stream_openrouter(messages, system_prompt, max_tokens, model_id=None):
     OPENROUTER_MODELS = [
         "google/gemma-4-31b-it:free",
         "google/gemma-4-26b-a4b-it:free",
-        "nvidia/nemotron-3.5-lightning:free",
         "liquid/lfm-2.5-2.6b:free",
         "thinkingmachines/inkling:free",
         "cohere/north-mini-code:free",
@@ -1558,75 +1552,6 @@ def _call_gemini(messages, system_prompt, max_tokens):
     print(f"All Gemini keys exhausted, moving to next provider...")
     raise Exception("NO_KEYS: gemini")
 
-def _call_deepseek(messages, system_prompt, max_tokens):
-    if not DEEPSEEK_API_KEYS:
-        raise Exception("NO_KEYS: deepseek")
-    DEEPSEEK_MODELS = ["deepseek-chat", "deepseek-v4-flash"]  # alias retires 2026-07-24, v4-flash is the direct replacement
-    for _ in range(len(DEEPSEEK_API_KEYS)):
-        key = _rotate_key("deepseek", DEEPSEEK_API_KEYS)
-        last_err = None
-        for model in DEEPSEEK_MODELS:
-            try:
-                payload = {
-                    "model": model,
-                    "max_tokens": max_tokens,
-                    "messages": [{"role": "system", "content": system_prompt}] + messages
-                }
-                if system_prompt == QUIZ_SYSTEM_PROMPT:
-                    payload["response_format"] = {"type": "json_object"}
-                resp = requests.post(
-                    "https://api.deepseek.com/chat/completions",
-                    headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                    json=payload, timeout=25
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                truncated = data["choices"][0].get("finish_reason") == "length"
-                return data["choices"][0]["message"]["content"], truncated
-            except Exception as e:
-                err_str = str(e).lower()
-                if "404" in err_str or "model" in err_str and "not" in err_str:
-                    last_err = e
-                    continue  # try next model name on this same key
-                SKIP_ERRS = ["rate limit", "quota", "exceeded", "429", "402",
-                             "insufficient", "balance", "credit", "payment"]
-                if any(w in err_str for w in SKIP_ERRS):
-                    print(f"Deepseek key has no balance (top up at platform.deepseek.com) — skipping to next provider...")
-                    raise Exception("NO_KEYS: deepseek")
-                last_err = e
-                break
-        if last_err:
-            continue
-    # All keys exhausted/out of balance — skip to next provider
-    raise Exception("NO_KEYS: deepseek")
-
-def _call_nvidia(messages, system_prompt, max_tokens):
-    if not NVIDIA_API_KEYS:
-        raise Exception("NO_KEYS: nvidia")
-    for _ in range(len(NVIDIA_API_KEYS)):
-        try:
-            key = _rotate_key("nvidia", NVIDIA_API_KEYS)
-            payload = {
-                "model": "meta/llama-3.3-70b-instruct",
-                "max_tokens": max_tokens,
-                "messages": [{"role": "system", "content": system_prompt}] + messages
-            }
-            resp = requests.post(
-                "https://integrate.api.nvidia.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json=payload, timeout=25
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            truncated = data["choices"][0].get("finish_reason") == "length"
-            return data["choices"][0]["message"]["content"], truncated
-        except Exception as e:
-            if _is_rate_err(e):
-                print(f"Nvidia key exhausted, rotating...")
-                continue
-            raise
-    raise Exception("All Nvidia keys exhausted")
-
 def _call_cerebras(messages, system_prompt, max_tokens):
     if not CEREBRAS_API_KEYS:
         raise Exception("NO_KEYS: cerebras")
@@ -1671,52 +1596,6 @@ def _call_cerebras(messages, system_prompt, max_tokens):
             continue
     raise Exception(f"All Cerebras keys/models failed: {last_err}")
 
-def _call_mistral(messages, system_prompt, max_tokens):
-    """Mistral La Plateforme — free tier (Experiment plan), Mistral Small + Codestral"""
-    if not MISTRAL_API_KEYS:
-        raise Exception("NO_KEYS: mistral")
-    MISTRAL_MODELS = [
-        "mistral-small-latest",
-        "open-mistral-nemo",
-        "codestral-latest",
-    ]
-    for _ in range(len(MISTRAL_API_KEYS)):
-        key = _rotate_key("mistral", MISTRAL_API_KEYS)
-        last_err = None
-        for model in MISTRAL_MODELS:
-            try:
-                payload = {
-                    "model": model,
-                    "max_tokens": max_tokens,
-                    "messages": [{"role": "system", "content": system_prompt}] + messages
-                }
-                if system_prompt == QUIZ_SYSTEM_PROMPT:
-                    payload["response_format"] = {"type": "json_object"}
-                resp = requests.post(
-                    "https://api.mistral.ai/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                    json=payload, timeout=25
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                truncated = data["choices"][0].get("finish_reason") == "length"
-                return data["choices"][0]["message"]["content"], truncated
-            except Exception as e:
-                err_str = str(e).lower()
-                if "404" in err_str or "not found" in err_str or "invalid model" in err_str:
-                    print(f"Mistral model {model} unavailable, trying next...")
-                    last_err = e
-                    continue
-                if _is_rate_err(e):
-                    print(f"Mistral key rate-limited, rotating...")
-                    last_err = e
-                    break
-                last_err = e
-                break
-        if last_err and not _is_rate_err(last_err) and "404" not in str(last_err):
-            raise last_err
-    raise Exception("NO_KEYS: mistral")
-
 def _call_openrouter(messages, system_prompt, max_tokens):
     if not OPENROUTER_API_KEYS:
         raise Exception("NO_KEYS: openrouter")
@@ -1724,7 +1603,6 @@ def _call_openrouter(messages, system_prompt, max_tokens):
     OPENROUTER_MODELS = [
         "google/gemma-4-31b-it:free",
         "google/gemma-4-26b-a4b-it:free",
-        "nvidia/nemotron-3.5-lightning:free",
         "liquid/lfm-2.5-2.6b:free",
         "thinkingmachines/inkling:free",
         "cohere/north-mini-code:free",
@@ -1856,97 +1734,6 @@ def _call_sambanova(messages, system_prompt, max_tokens):
                 print(f"[sambanova_call] SambaNova key failure ({type(e).__name__}): {str(e)[:80]}, rotating to next key...")
                 break
     raise Exception(f"All SambaNova keys/models failed: {last_err}")
-
-
-def _call_together(messages, system_prompt, max_tokens):
-    """Together AI — free $1 credit on signup, fast inference"""
-    if not TOGETHER_API_KEYS:
-        raise Exception("NO_KEYS: together")
-    TOGETHER_MODELS = [
-        "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
-        "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
-        "Qwen/Qwen2.5-72B-Instruct-Turbo",
-    ]
-    for _ in range(len(TOGETHER_API_KEYS)):
-        key = _rotate_key("together", TOGETHER_API_KEYS)
-        last_err = None
-        for model in TOGETHER_MODELS:
-            try:
-                payload = {
-                    "model": model,
-                    "max_tokens": max_tokens,
-                    "messages": [{"role": "system", "content": system_prompt}] + messages
-                }
-                resp = requests.post(
-                    "https://api.together.xyz/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                    json=payload, timeout=20
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                truncated = data["choices"][0].get("finish_reason") == "length"
-                return data["choices"][0]["message"]["content"], truncated
-            except Exception as e:
-                err_str = str(e).lower()
-                if "404" in err_str or "not found" in err_str:
-                    last_err = e
-                    continue
-                if _is_rate_err(e):
-                    print(f"Together AI key rate-limited, rotating...")
-                    last_err = e
-                    break
-                last_err = e
-                break
-        if last_err and not _is_rate_err(last_err):
-            raise last_err
-    raise Exception("NO_KEYS: together")
-
-
-def _call_openai(messages, system_prompt, max_tokens):
-    """OpenAI ChatGPT — paid API, 7 rotating keys"""
-    if not OPENAI_API_KEYS:
-        raise Exception("NO_KEYS: openai")
-    OPENAI_MODELS = [
-        "gpt-4o-mini",
-        "gpt-4.1-nano",
-    ]
-    for _ in range(len(OPENAI_API_KEYS)):
-        key = _rotate_key("openai", OPENAI_API_KEYS)
-        last_err = None
-        for model in OPENAI_MODELS:
-            try:
-                payload = {
-                    "model": model,
-                    "max_tokens": max_tokens,
-                    "messages": [{"role": "system", "content": system_prompt}] + messages
-                }
-                if system_prompt == QUIZ_SYSTEM_PROMPT:
-                    payload["response_format"] = {"type": "json_object"}
-                resp = requests.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                    json=payload, timeout=25
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                truncated = data["choices"][0].get("finish_reason") == "length"
-                return data["choices"][0]["message"]["content"], truncated
-            except Exception as e:
-                err_str = str(e).lower()
-                if "404" in err_str or "model" in err_str and "not" in err_str:
-                    last_err = e
-                    continue  # try next model name on this same key
-                SKIP_ERRS = ["rate limit", "quota", "exceeded", "429", "402",
-                             "insufficient", "balance", "billing"]
-                if any(w in err_str for w in SKIP_ERRS):
-                    print(f"OpenAI key rate-limited/billing issue, rotating...")
-                    last_err = e
-                    break
-                last_err = e
-                break
-        if last_err and not _is_rate_err(last_err) and "404" not in str(last_err):
-            raise last_err
-    raise Exception("NO_KEYS: openai")
 
 
 NUMERICAL_KEYWORDS = [
@@ -2179,124 +1966,82 @@ def detect_question_type(messages) -> str:
 
 def get_provider_chain(question_type: str, system_prompt: str) -> list:
     """
-    Every model assigned by its real-world strength, not randomly:
-      • Deepseek    → math/reasoning specialist (DeepSeek-V3 class) — best for numbers, proofs, step-by-step
+    Every model assigned by its real-world strength:
       • Cerebras    → blazing inference speed (gpt-oss-120b @ ~3000 tok/s) — best default/fast/group chat
-      • Gemini      → strongest world-knowledge + native search grounding — best for GK, facts, summaries
-      • Groq        → fast Llama hosting, great at natural creative/comedic tone — best for jokes/roasts/stories
-      • OpenAI      → ChatGPT (gpt-4o-mini) — strong all-rounder, mid-tier paid fallback
-      • SambaNova   → fast Llama hosting, solid all-rounder backup
-      • Together    → wide open-model catalog, good knowledge breadth — backup for GK/summarize
-      • OpenRouter  → 25+ free models in one key — universal last-resort fallback
-      • Nvidia      → NIM-hosted Llama — final safety-net fallback (slowest observed)
-    Routing is keyed off the SPECIFIC system_prompt object first (so /tip, /fact, /joke, /roast,
-    /summarize, /search each get their own ideal chain regardless of what keywords are in the
-    wrapped text), then falls back to keyword-detected question_type for plain chat/ask/brainy.
+      • Gemini      → strongest world-knowledge + native search grounding — best for GK, facts, summaries, and vision
+      • Groq        → fast Llama hosting, great at natural creative/comedic tone and instant responses
+      • SambaNova   → high-speed 70B & 72B parameter inference backup
+      • OpenRouter  → free models catalog fallback
     """
 
-    # ── BRAINY deep-teaching mode + numerical questions → math specialists first
+    # ── BRAINY deep-teaching mode + numerical questions → reasoning/speed chain
     if system_prompt == BRAINY_SYSTEM_PROMPT or question_type == "numerical":
         return [
-            ("Deepseek",    _call_deepseek),
             ("Cerebras",    _call_cerebras),
             ("Gemini",      _call_gemini),
             ("Groq",        _call_groq),
-            ("OpenAI",      _call_openai),
             ("SambaNova",   _call_sambanova),
-            ("Together",    _call_together),
             ("OpenRouter",  _call_openrouter),
-            ("Mistral",     _call_mistral),
-            ("Nvidia",      _call_nvidia),
         ]
 
     # ── Roast modes (savage humor, punchy tone) → Groq's creative tone first
     if system_prompt in (ROAST_SYSTEM_PROMPT, ROAST_COMMAND_PROMPT):
         return [
             ("Groq",        _call_groq),
-            ("Together",    _call_together),
             ("SambaNova",   _call_sambanova),
             ("Cerebras",    _call_cerebras),
-            ("OpenAI",      _call_openai),
             ("Gemini",      _call_gemini),
             ("OpenRouter",  _call_openrouter),
-            ("Deepseek",    _call_deepseek),
-            ("Mistral",     _call_mistral),
-            ("Nvidia",      _call_nvidia),
         ]
 
     # ── Comedy (one-liner jokes) → same creative-tone priority as roast
     if system_prompt == JOKE_SYSTEM_PROMPT:
         return [
             ("Groq",        _call_groq),
-            ("Together",    _call_together),
             ("SambaNova",   _call_sambanova),
-            ("OpenAI",      _call_openai),
             ("Cerebras",    _call_cerebras),
             ("Gemini",      _call_gemini),
             ("OpenRouter",  _call_openrouter),
-            ("Deepseek",    _call_deepseek),
-            ("Mistral",     _call_mistral),
-            ("Nvidia",      _call_nvidia),
         ]
 
     # ── Tip / Fact (accuracy + broad world-knowledge matters) → Gemini first
     if system_prompt in (TIP_SYSTEM_PROMPT, FACT_SYSTEM_PROMPT):
         return [
             ("Gemini",      _call_gemini),
-            ("OpenAI",      _call_openai),
-            ("Together",    _call_together),
             ("Cerebras",    _call_cerebras),
             ("Groq",        _call_groq),
             ("SambaNova",   _call_sambanova),
-            ("Deepseek",    _call_deepseek),
             ("OpenRouter",  _call_openrouter),
-            ("Mistral",     _call_mistral),
-            ("Nvidia",      _call_nvidia),
         ]
 
     # ── Quiz (needs accurate facts/formulas + strict format adherence — not creative tone)
     if system_prompt == QUIZ_SYSTEM_PROMPT:
         return [
             ("Gemini",      _call_gemini),
-            ("Deepseek",    _call_deepseek),
-            ("OpenAI",      _call_openai),
-            ("Together",    _call_together),
             ("Cerebras",    _call_cerebras),
             ("Groq",        _call_groq),
             ("SambaNova",   _call_sambanova),
             ("OpenRouter",  _call_openrouter),
-            ("Mistral",     _call_mistral),
-            ("Nvidia",      _call_nvidia),
         ]
 
     # ── Summarize (long-context compression) → Gemini's long-context handling first
     if system_prompt == SUMMARIZE_SYSTEM_PROMPT:
         return [
             ("Gemini",      _call_gemini),
-            ("OpenAI",      _call_openai),
             ("Cerebras",    _call_cerebras),
-            ("Together",    _call_together),
-            ("Deepseek",    _call_deepseek),
             ("Groq",        _call_groq),
             ("SambaNova",   _call_sambanova),
             ("OpenRouter",  _call_openrouter),
-            ("Mistral",     _call_mistral),
-            ("Nvidia",      _call_nvidia),
         ]
 
     # ── Search synthesis (needs accurate grounding from live web results) → Gemini first
     if system_prompt == SEARCH_SYSTEM_PROMPT:
         return [
             ("Gemini",      _call_gemini),
-            ("OpenAI",      _call_openai),
             ("Cerebras",    _call_cerebras),
-            ("Deepseek",    _call_deepseek),
-            ("Together",    _call_together),
             ("Groq",        _call_groq),
             ("SambaNova",   _call_sambanova),
             ("OpenRouter",  _call_openrouter),
-            ("Mistral",     _call_mistral),
-            ("Nvidia",      _call_nvidia),
         ]
 
     # ── Group chat (fast, punchy, low-latency replies) → speed-first chain
@@ -2306,12 +2051,7 @@ def get_provider_chain(question_type: str, system_prompt: str) -> list:
             ("Groq",        _call_groq),
             ("SambaNova",   _call_sambanova),
             ("Gemini",      _call_gemini),
-            ("OpenAI",      _call_openai),
-            ("Deepseek",    _call_deepseek),
             ("OpenRouter",  _call_openrouter),
-            ("Together",    _call_together),
-            ("Mistral",     _call_mistral),
-            ("Nvidia",      _call_nvidia),
         ]
 
     # ── Generic creative (poems, stories, captions via /ask) → Groq's tone first
@@ -2320,43 +2060,28 @@ def get_provider_chain(question_type: str, system_prompt: str) -> list:
             ("Groq",        _call_groq),
             ("Cerebras",    _call_cerebras),
             ("SambaNova",   _call_sambanova),
-            ("OpenAI",      _call_openai),
-            ("Together",    _call_together),
             ("Gemini",      _call_gemini),
             ("OpenRouter",  _call_openrouter),
-            ("Deepseek",    _call_deepseek),
-            ("Mistral",     _call_mistral),
-            ("Nvidia",      _call_nvidia),
         ]
 
     # ── General knowledge questions → Gemini's world-knowledge first
     if question_type == "gk":
         return [
             ("Gemini",      _call_gemini),
-            ("OpenAI",      _call_openai),
-            ("Together",    _call_together),
             ("Cerebras",    _call_cerebras),
             ("Groq",        _call_groq),
             ("SambaNova",   _call_sambanova),
-            ("Deepseek",    _call_deepseek),
             ("OpenRouter",  _call_openrouter),
-            ("Mistral",     _call_mistral),
-            ("Nvidia",      _call_nvidia),
         ]
 
     # ── Long/detailed explanations → fast model that can sustain longer output
     if question_type == "detailed":
         return [
             ("Cerebras",    _call_cerebras),
-            ("Deepseek",    _call_deepseek),
             ("Gemini",      _call_gemini),
-            ("OpenAI",      _call_openai),
             ("Groq",        _call_groq),
             ("SambaNova",   _call_sambanova),
-            ("Together",    _call_together),
             ("OpenRouter",  _call_openrouter),
-            ("Mistral",     _call_mistral),
-            ("Nvidia",      _call_nvidia),
         ]
 
     # ── Default/simple chat → fastest model first
@@ -2365,25 +2090,15 @@ def get_provider_chain(question_type: str, system_prompt: str) -> list:
         ("Groq",        _call_groq),
         ("SambaNova",   _call_sambanova),
         ("Gemini",      _call_gemini),
-        ("OpenAI",      _call_openai),
-        ("Deepseek",    _call_deepseek),
         ("OpenRouter",  _call_openrouter),
-        ("Together",    _call_together),
-        ("Mistral",     _call_mistral),
-        ("Nvidia",      _call_nvidia),
     ]
 
 PROVIDER_MAX_TOKENS = {
     "Groq":       8192,
     "Gemini":     8192,
-    "Deepseek":   8192,
-    "OpenAI":     4096,
-    "Nvidia":     4096,
     "Cerebras":   2048,   # hard per-call ceiling — continuation rounds make up the rest
     "OpenRouter": 4096,
     "SambaNova":  4096,
-    "Together":   4096,
-    "Mistral":    4096,
 }
 
 MAX_CONTINUATION_ROUNDS = 4  # safety cap so one runaway answer can't loop forever / burn quota
@@ -3663,12 +3378,8 @@ async def providers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ("Cerebras",    _call_cerebras,    CEREBRAS_API_KEYS),
         ("Groq",        _call_groq,        GROQ_API_KEYS),
         ("Gemini",      _call_gemini,      GEMINI_API_KEYS),
-        ("Deepseek",    _call_deepseek,    DEEPSEEK_API_KEYS),
         ("OpenRouter",  _call_openrouter,  OPENROUTER_API_KEYS),
         ("SambaNova",   _call_sambanova,   SAMBANOVA_API_KEYS),
-        ("Together",    _call_together,    TOGETHER_API_KEYS),
-        ("Mistral",     _call_mistral,     MISTRAL_API_KEYS),
-        ("Nvidia",      _call_nvidia,      NVIDIA_API_KEYS),
     ]
 
     status_msg = await update.message.reply_text("🔍 Testing all providers, one sec...")
@@ -4391,11 +4102,8 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     active_session    = len(user_conversations)
     total_interactions = len(interaction_log)
     keys_summary = (
-        f"Groq:{len(GROQ_API_KEYS)} Gemini:{len(GEMINI_API_KEYS)} "
-        f"Deepseek:{len(DEEPSEEK_API_KEYS)} Cerebras:{len(CEREBRAS_API_KEYS)}\n"
-        f"OpenRouter:{len(OPENROUTER_API_KEYS)} SambaNova:{len(SAMBANOVA_API_KEYS)} "
-        f"Together:{len(TOGETHER_API_KEYS)} Nvidia:{len(NVIDIA_API_KEYS)} "
-        f"Tavily:{len(TAVILY_API_KEYS)}"
+        f"Groq:{len(GROQ_API_KEYS)} Gemini:{len(GEMINI_API_KEYS)} Cerebras:{len(CEREBRAS_API_KEYS)}\n"
+        f"OpenRouter:{len(OPENROUTER_API_KEYS)} SambaNova:{len(SAMBANOVA_API_KEYS)} Tavily:{len(TAVILY_API_KEYS)}"
     )
     feedback_pending = len(pending_feedback)
     await send(update,
@@ -4839,7 +4547,7 @@ async def post_init(application: Application) -> None:
 def main():
     print("=" * 55)
     print("  ⚡ BRAINY Study Bot v7.0 Starting...  ")
-    print("  🧠 Cerebras + Groq + Gemini + DeepSeek + OpenRouter ")
+    print("  🧠 Cerebras + Groq + Gemini + SambaNova + OpenRouter ")
     print("  🔍 Tavily Search | Native Quiz Polls + Leaderboard | /ask5 ")
     print("=" * 55)
 
