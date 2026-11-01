@@ -81,6 +81,7 @@ export function BrainyLogo({
   ...rest
 }: BrainyLogoProps) {
   const config = LOGO_CONFIGS[variant] || LOGO_CONFIGS.wordmark
+  const inkMode = variant === 'app-icon' ? undefined : variant === 'dark-symbol' ? 'light' : 'dark'
 
   return (
     <img
@@ -90,12 +91,13 @@ export function BrainyLogo({
       height={height ?? config.defaultHeight}
       loading={priority ? 'eager' : 'lazy'}
       decoding={priority ? 'sync' : 'async'}
-      className={`select-none object-contain ${className}`}
+      className={`brainy-logo-image select-none object-contain ${className}`}
       style={{
         aspectRatio: `${config.defaultWidth} / ${config.defaultHeight}`,
         ...style,
       }}
       {...rest}
+      data-brainy-logo-ink={inkMode}
     />
   )
 }
