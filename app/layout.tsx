@@ -8,10 +8,13 @@ export const metadata: Metadata = {
   description: 'A calm, intelligent AI study companion for concepts, mathematical proofs, problem solving, and exam revision.',
   icons: {
     icon: [
-      { url: '/favicon.ico' },
-      { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
+      // Primary browser-tab mark: white Brainy symbol on a transparent matte.
+      { url: '/favicon.svg', type: 'image/svg+xml', sizes: 'any' },
+      // Raster fallbacks for browsers that do not support SVG favicons.
       { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
+      { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
       { url: '/favicon-48x48.png', sizes: '48x48', type: 'image/png' },
+      { url: '/favicon.ico' },
     ],
     shortcut: '/favicon.ico',
     apple: [
