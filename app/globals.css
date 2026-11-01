@@ -787,3 +787,37 @@ body {
     transition-duration: .01ms !important;
   }
 }
+
+/* ==========================================================================
+   BRAINY BRAND MARK — THEME-AWARE IMAGE BLENDING
+   The approved PNG exports are monochrome artwork on a solid matte.
+   Blend the matte away so the mark inherits the actual surface behind it.
+   ========================================================================== */
+
+.brainy-logo-image[data-brainy-logo-ink='dark'] {
+  mix-blend-mode: multiply;
+}
+
+.dark .brainy-logo-image[data-brainy-logo-ink='dark'] {
+  filter: invert(1);
+  mix-blend-mode: screen;
+}
+
+/* The alternate white-on-black symbol uses the inverse treatment. */
+.brainy-logo-image[data-brainy-logo-ink='light'] {
+  filter: invert(1);
+  mix-blend-mode: multiply;
+}
+
+.dark .brainy-logo-image[data-brainy-logo-ink='light'] {
+  filter: none;
+  mix-blend-mode: screen;
+}
+
+/* The sign-in page has its own fixed warm-paper palette, independent of
+   whichever workspace theme was last active. Keep its wordmark dark. */
+.dark .login-root .brainy-logo-image[data-brainy-logo-ink='dark'] {
+  filter: none;
+  mix-blend-mode: multiply;
+}
+
