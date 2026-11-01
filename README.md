@@ -1,14 +1,17 @@
 <div align="center">
-  <img src="./public/icon.svg" alt="BRAINY logo" width="112" />
+  <a href="https://github.com/shreyanshio/BrainyAi">
+    <img src="./logos/brainy_horizontal_wordmark.png" alt="Brainy" width="380" />
+  </a>
 
-  <h1>BRAINY</h1>
   <p><strong>Your study companion, wherever you learn.</strong></p>
   <p>
-    <a href="https://brainyai.cenai.workers.dev/">Open the Web App</a>
+    <a href="https://brainyai.cenai.workers.dev/"><b>Open the Web App</b></a>
     &nbsp;·&nbsp;
-    <a href="https://t.me/AiChatExpert_Bot">Open the Telegram Bot</a>
+    <a href="https://t.me/AiChatExpert_Bot"><b>Open the Telegram Bot</b></a>
     &nbsp;·&nbsp;
-    <a href="https://github.com/shreyanshio/BrainyAi">Explore the Source</a>
+    <a href="./logos/README.md"><b>Logo & Brand Guide</b></a>
+    &nbsp;·&nbsp;
+    <a href="https://github.com/shreyanshio/BrainyAi"><b>Explore the Source</b></a>
   </p>
 </div>
 
