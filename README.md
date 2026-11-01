@@ -1,118 +1,201 @@
 <div align="center">
-  <img
-    src="https://res.cloudinary.com/dtz0urit6/image/upload/e_trim,c_limit,w_360,q_auto:best,f_png/cloudinary-tools-uploads/xtjfsglkkem4xjxhkqzh"
-    alt="Brainy AI logo"
-    width="136"
-  />
+  <img src="./public/icon.svg" alt="BRAINY logo" width="112" />
 
-  <h1>BRAINY AI</h1>
-  <p><strong>Your AI-powered study companion.</strong></p>
-
+  <h1>BRAINY</h1>
+  <p><strong>Your study companion, wherever you learn.</strong></p>
   <p>
-    <a href="https://brainyai.cenai.workers.dev/">
-      <img src="https://img.shields.io/badge/OPEN%20WEB%20APP-Cloudflare-F38020?style=for-the-badge&logo=cloudflare&logoColor=white" alt="Open Brainy AI web app" />
-    </a>
-    &nbsp;
-    <a href="https://t.me/AiChatExpert_Bot">
-      <img src="https://img.shields.io/badge/OPEN%20TELEGRAM%20BOT-26A5E4?style=for-the-badge&logo=telegram&logoColor=white" alt="Open Brainy AI Telegram bot" />
-    </a>
-    &nbsp;
-    <a href="https://github.com/shreyanshio/BrainyAi">
-      <img src="https://img.shields.io/badge/SOURCE%20CODE-181717?style=for-the-badge&logo=github&logoColor=white" alt="View source code on GitHub" />
-    </a>
-  </p>
-
-  <p>
-    <img src="https://img.shields.io/badge/Next.js-000000?style=flat-square&logo=nextdotjs&logoColor=white" alt="Next.js" />
-    <img src="https://img.shields.io/badge/React-149ECA?style=flat-square&logo=react&logoColor=white" alt="React" />
-    <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" />
-    <img src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python" />
-    <img src="https://img.shields.io/badge/Supabase-3FCF8E?style=flat-square&logo=supabase&logoColor=white" alt="Supabase" />
-    <img src="https://img.shields.io/badge/Cloudflare-F38020?style=flat-square&logo=cloudflare&logoColor=white" alt="Cloudflare" />
+    <a href="https://brainyai.cenai.workers.dev/">Open the Web App</a>
+    &nbsp;·&nbsp;
+    <a href="https://t.me/AiChatExpert_Bot">Open the Telegram Bot</a>
+    &nbsp;·&nbsp;
+    <a href="https://github.com/shreyanshio/BrainyAi">Explore the Source</a>
   </p>
 </div>
 
 ---
 
-## What is Brainy AI?
+## Meet BRAINY
 
-An AI-powered learning workspace for understanding concepts, exploring ideas, and keeping study activity organized — available on the web and through Telegram.
+BRAINY is an advanced, multi-provider AI assistant designed primarily as a study companion. It brings together a feature-rich **Telegram Bot** and a modern **web experience**, so you can learn in the way that feels most natural to you.
 
-## Features
+Use BRAINY to understand difficult concepts, ask follow-up questions, explore a topic from different angles, and turn learning material into something you can actively revise. Its routing layer can select between multiple AI providers based on the task and requested response depth, with fallback paths when a provider is unavailable.
 
-| | Feature | |
-|:--:|:--|:--|
-| <img src="https://cdn.simpleicons.org/openai/412991" width="22" alt="AI" /> | **AI Study Chat** | Study-focused explanations and guided problem solving. |
-| <img src="https://cdn.simpleicons.org/stackblitz/1389FD" width="22" alt="Routing" /> | **Multi-Provider AI** | Configurable model routing and provider fallback. |
-| <img src="https://cdn.simpleicons.org/adobeacrobatreader/EC1C24" width="22" alt="PDF" /> | **PDF Study Studio** | Work with learning documents and study resources. |
-| <img src="https://cdn.simpleicons.org/telegram/26A5E4" width="22" alt="Telegram" /> | **Telegram Bot** | Take study assistance and learning tools into Telegram. |
-| <img src="https://cdn.simpleicons.org/duckduckgo/DE5833" width="22" alt="Search" /> | **Search-Enabled Answers** | Connect answers to live search providers. |
-| <img src="https://cdn.simpleicons.org/supabase/3FCF8E" width="22" alt="Workspace" /> | **Personal Workspace** | Keep conversations and study activity together. |
+BRAINY is being built around one simple idea: **AI should help you understand a subject, not just give you an answer.**
+
+## What can you do with BRAINY?
+
+| Experience | What it helps you do |
+|:--|:--|
+| **Study conversations** | Ask questions, request step-by-step explanations, and keep exploring with follow-up questions. |
+| **Multi-provider AI** | Route requests across supported model providers instead of depending on a single AI service. |
+| **PDF Study Studio** | Add study documents, extract and organize their content, and use the document workflow for notes, quizzes, and flashcards. |
+| **Web research** | Ground research-oriented answers with search results and source links when search results are available. |
+| **Telegram Bot** | Take BRAINY into Telegram for a familiar, chat-first experience. |
+| **Personal workspace** | Keep conversations and study activity associated with your account through the configured data layer. |
+
+### Try asking BRAINY
+
+You can start with prompts like these:
+
+- “Explain this topic like I am learning it for the first time, then give me a real-world example.”
+- “Break this problem into small steps and explain why each step works.”
+- “Turn my study material into concise revision notes and a short practice quiz.”
+- “Compare these two concepts in a table and tell me when each one is useful.”
+
+The best way to use BRAINY is to keep asking questions. Ask it to simplify an explanation, give another example, test your understanding, or approach the same idea from a different angle.
+
+## AI providers and routing
+
+BRAINY uses a provider-routing layer so that different tasks can use different models. The exact provider selected depends on the routing policy, configured API keys, and provider availability.
+
+### Core providers in the central AI router
+
+| Provider | How it is used in BRAINY |
+|:--|:--|
+| **Groq** | Fast and balanced chat generation, including quick-response routes. |
+| **Google Gemini** | Explanations, deeper reasoning routes, and multimodal document/PDF requests. |
+| **SambaNova** | An alternative inference route for fast and detailed responses. |
+| **Cerebras** | An additional inference option in the routing and fallback chain. |
+| **OpenRouter** | Access to selectable model routes, including the coding-oriented route configured in the registry. |
+
+### Search integrations
+
+| Service | Role |
+|:--|:--|
+| **Tavily** | Primary web-search integration for research grounding. |
+| **DuckDuckGo Instant Answer** | Fallback when Tavily is unavailable or does not provide useful results. This is an Instant Answer endpoint, not a full web-search results API. |
+
+### Additional adapters in the Telegram bot code
+
+The repository also contains direct provider call implementations for **DeepSeek**, **NVIDIA NIM**, and **Mistral** in the bot's provider code. These are separate from the central `AIRouter` candidate chain shown above, so their availability depends on the bot path and the corresponding configuration.
+
+Provider availability is configuration-dependent. Listing a provider here does not mean an API key is included, that every provider is enabled in every deployment, or that every provider is used for every request. Never commit API keys or secrets.
+
+## How BRAINY works
+
+The two entry points connect to the backend, where requests are validated and routed. The router classifies the task and response depth, chooses from the configured provider chain, and can move to another candidate when a provider fails. Research requests can use the search-grounding path. User and study data are persisted through the configured Supabase layer.
+
+```mermaid
+flowchart TD
+    subgraph ENTRY["Ways to use BRAINY"]
+        WEB["BRAINY Web App"]
+        TG["BRAINY Telegram Bot"]
+    end
+
+    WEB --> API["Backend API"]
+    TG --> API
+
+    API --> AUTH["Authentication and request validation"]
+    AUTH --> CLASSIFY["Task and response-depth classification"]
+    CLASSIFY --> ROUTER["Central AI Router"]
+
+    ROUTER --> SELECT{"Routing policy"}
+    SELECT --> GROQ["Groq"]
+    SELECT --> GEMINI["Google Gemini"]
+    SELECT --> SAMBA["SambaNova"]
+    SELECT --> CEREBRAS["Cerebras"]
+    SELECT --> OPENROUTER["OpenRouter"]
+
+    GROQ --> RESULT["Response handling and delivery"]
+    GEMINI --> RESULT
+    SAMBA --> RESULT
+    CEREBRAS --> RESULT
+    OPENROUTER --> RESULT
+
+    ROUTER --> RESEARCH{"Web research task?"}
+    RESEARCH -->|Yes| TAVILY["Tavily Search"]
+    TAVILY -->|Fallback when needed| DDG["DuckDuckGo Instant Answer"]
+    TAVILY --> GROUNDED["Search-grounded context"]
+    DDG --> GROUNDED
+    GROUNDED --> ROUTER
+
+    API <--> DB[("Supabase / PostgreSQL")]
+
+    PDF["PDF Study Studio"] --> EXTRACT["Text extraction and chunking"]
+    EXTRACT --> OCR["Local OCR fallback for scanned pages"]
+    OCR --> DOCCTX["Document context"]
+    EXTRACT --> DOCCTX
+    DOCCTX --> ROUTER
+
+    RESULT --> WEB
+    RESULT --> TG
+```
 
 ## Technology
 
-<p>
-  <img src="https://img.shields.io/badge/Next.js-000000?style=flat-square&logo=nextdotjs&logoColor=white" alt="Next.js" />
-  <img src="https://img.shields.io/badge/React-149ECA?style=flat-square&logo=react&logoColor=white" alt="React" />
-  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Tailwind_CSS-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind CSS" />
-  <img src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python" />
-  <img src="https://img.shields.io/badge/Flask-000000?style=flat-square&logo=flask&logoColor=white" alt="Flask" />
-  <img src="https://img.shields.io/badge/Supabase-3FCF8E?style=flat-square&logo=supabase&logoColor=white" alt="Supabase" />
-  <img src="https://img.shields.io/badge/PostgreSQL-4169E1?style=flat-square&logo=postgresql&logoColor=white" alt="PostgreSQL" />
-  <img src="https://img.shields.io/badge/Cloudflare-F38020?style=flat-square&logo=cloudflare&logoColor=white" alt="Cloudflare" />
-  <img src="https://img.shields.io/badge/Telegram-26A5E4?style=flat-square&logo=telegram&logoColor=white" alt="Telegram" />
-</p>
-
-| Layer | Stack |
+| Layer | Technologies |
 |:--|:--|
-| **Web** | Next.js · React · TypeScript · Tailwind CSS |
-| **API** | Python · Flask |
-| **Data & Auth** | Supabase · PostgreSQL |
-| **AI & Search** | Configured AI providers · Tavily · DuckDuckGo |
+| **Web application** | Next.js, React, TypeScript, Tailwind CSS |
+| **Backend API** | Python, Flask |
+| **AI orchestration** | Custom task classification, provider registry, routing policy, key rotation, and fallback handling |
+| **Database and authentication** | Supabase, PostgreSQL |
+| **Document processing** | Local PDF text extraction, chunking, and optional Tesseract OCR fallback |
+| **Search** | Tavily, DuckDuckGo Instant Answer |
 | **Messaging** | Telegram Bot API |
-
-## Security & privacy
-
-Brainy AI includes application-level security controls in its backend:
-
-- **Signed authentication:** HMAC-SHA256-signed bearer tokens with signature and expiry validation.
-- **Session protection:** HTTP-only and Secure cookie settings, with configurable SameSite behavior.
-- **Cross-origin checks:** Configured CORS origin allowlist and Origin/Referer validation for cookie-authenticated write requests.
-- **Abuse controls:** IP-based request rate limiting, with shared Supabase-backed counters when configured.
-- **Admin access control:** Admin privileges are checked server-side against configured user ID, username, and email allowlists.
-- **Security headers:** Content Security Policy, HSTS in production, MIME-sniffing protection, referrer policy, and restricted browser permissions.
-- **Safer API caching:** Sensitive API responses are marked private and non-cacheable.
-- **Production login rules:** Unverified name-only login is disabled in production.
-
-> **Security note:** These safeguards do not mean the application is breach-proof or independently certified. Production security also depends on deployment settings, secret management, dependency updates, and correctly configured Supabase table policies. Keep service-role keys and all provider credentials on the server — never in frontend code. No independent security audit is currently claimed.
-
-## Architecture
-
-```mermaid
-flowchart LR
-    W["Web App"] --> API["Brainy AI Backend"]
-    T["Telegram Bot"] --> API
-    API --> AI["AI Providers"]
-    API --> DB[("Supabase")]
-    API --> S["Search Providers"]
-```
+| **Web delivery** | Cloudflare |
 
 ## Project structure
 
 | Path | Purpose |
 |:--|:--|
-| `app/` · `components/` | Web application and UI |
-| `ai_routing/` | AI provider routing |
-| `pdf_studio/` | PDF study features |
-| `prompts/` | AI prompts |
-| `study_bot.py` | Telegram bot |
-| `app.py` · `security.py` | Backend API and security controls |
+| `app/` | Next.js routes and pages |
+| `components/` | Reusable web interface components |
+| `ai_routing/` | Task classification, provider registry, routing policy, and AI orchestration |
+| `ai_routing/providers/` | Provider adapters used by the central router |
+| `pdf_studio/` | PDF extraction, chunking, OCR, and study workflows |
+| `prompts/` | Reusable assistant prompt resources |
+| `study_bot.py` | Telegram bot and its direct provider integrations |
+| `app.py` | Flask backend API |
+| `security.py` | Authentication and application security controls |
+| `screenshots/` | Screenshots of the BRAINY web experience |
 
-## Contributing
+## Screenshots
 
-Ideas, bug reports, and pull requests are welcome. Open an issue to start a discussion.
+<!-- Intentionally left empty until the web screenshots are uploaded to the screenshots/ folder. -->
 
-## License
+## Security and privacy
 
-[MIT License](LICENSE)
+The backend includes application-level security controls such as:
+
+- HMAC-SHA256-signed bearer tokens with signature and expiry validation.
+- HTTP-only and Secure session-cookie settings, with configurable SameSite behavior.
+- CORS origin allowlisting and Origin/Referer validation for cookie-authenticated write requests.
+- IP-based request rate limiting, with shared Supabase-backed counters when configured.
+- Server-side admin checks against configured user ID, username, and email allowlists.
+- Security headers, including Content Security Policy and production HSTS.
+- Private, non-cacheable handling for sensitive API responses.
+
+> **Security note:** These controls do not make an application breach-proof and are not a claim of independent security certification. Production security also depends on deployment configuration, secret management, dependency updates, and correctly configured Supabase policies. Keep service-role keys and provider credentials on the server, never in frontend code. No independent security audit is claimed here.
+
+## Run it locally
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/shreyanshio/BrainyAi.git
+   cd BrainyAi
+   ```
+2. Install the project dependencies:
+   ```bash
+   npm install
+   pip install -r requirements.txt
+   ```
+3. Copy `.env.example` to `.env` and add the credentials for the services you intend to configure. Do not add real secrets to Git.
+4. Start the frontend and backend using the scripts and deployment configuration for your environment.
+
+Some features require their corresponding provider keys, Supabase configuration, or Telegram bot token. You can run only the parts you have configured.
+
+## Get involved
+
+BRAINY is an evolving project, and thoughtful feedback makes it better. Try the web app or Telegram bot, share what helped you learn, report bugs, suggest features, or contribute improvements.
+
+- **Try it:** [BRAINY Web App](https://brainyai.cenai.workers.dev/)
+- **Chat with it:** [BRAINY on Telegram](https://t.me/AiChatExpert_Bot)
+- **Contribute:** [Open an issue or pull request](https://github.com/shreyanshio/BrainyAi)
+
+If BRAINY helps you study, consider giving the repository a star and sharing it with someone who enjoys learning with technology.
+
+---
+
+<div align="center">
+  <strong>Keep asking. Keep learning. Stay BRAINY.</strong>
+</div>
