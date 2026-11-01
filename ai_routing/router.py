@@ -236,6 +236,12 @@ class AIRouter:
             citations = self._apply_search_grounding(call_messages, prompt)
 
         candidates = candidate_chain or get_routing_candidates(resolved_task, resolved_depth, resolved_complexity)
+        # Context-aware candidate reordering: if prompt is large (> 4,500 tokens), elevate Gemini to the front to prevent Groq ITPM 413
+        est_prompt_tokens = len(str(call_messages)) // 4
+        if est_prompt_tokens > 4500 and not candidate_chain:
+            gemini_cand = [c for c in candidates if c[0] == "gemini"]
+            other_cand = [c for c in candidates if c[0] != "gemini"]
+            candidates = gemini_cand + other_cand
         fallback_used = False
         fallback_from = None
         last_exc = None
@@ -470,6 +476,12 @@ class AIRouter:
             self._apply_search_grounding(call_messages, prompt)
 
         candidates = candidate_chain or get_routing_candidates(resolved_task, resolved_depth, resolved_complexity)
+        # Context-aware candidate reordering: if prompt is large (> 4,500 tokens), elevate Gemini to the front to prevent Groq ITPM 413
+        est_prompt_tokens = len(str(call_messages)) // 4
+        if est_prompt_tokens > 4500 and not candidate_chain:
+            gemini_cand = [c for c in candidates if c[0] == "gemini"]
+            other_cand = [c for c in candidates if c[0] != "gemini"]
+            candidates = gemini_cand + other_cand
         fallback_used = False
         fallback_from = None
         last_exc = None

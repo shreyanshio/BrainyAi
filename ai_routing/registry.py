@@ -163,7 +163,7 @@ class ProviderRegistry:
             self.gemini_flagship_model = (os.getenv("GEMINI_FLAGSHIP_MODEL") or "gemini-4-argon").strip()
             self.gemini_pdf_model = (os.getenv("GEMINI_PDF_MODEL") or "gemini-2.5-flash").strip()
             self.sambanova_reasoning_model = (os.getenv("SAMBANOVA_REASONING_MODEL") or "Meta-Llama-3.3-70B-Instruct").strip()
-            self.sambanova_fast_model = (os.getenv("SAMBANOVA_FAST_MODEL") or "Meta-Llama-3.1-8B-Instruct").strip()
+            self.sambanova_fast_model = (os.getenv("SAMBANOVA_FAST_MODEL") or "Meta-Llama-3.3-70B-Instruct").strip()
             self.openrouter_coding_model = (os.getenv("OPENROUTER_CODING_MODEL") or "cohere/north-mini-code:free").strip()
             self.openrouter_free_model = (os.getenv("OPENROUTER_FREE_MODEL") or "openrouter/free").strip()
 
@@ -268,7 +268,6 @@ class ProviderRegistry:
 
             # SambaNova models
             self._register(ModelSpec("Meta-Llama-3.3-70B-Instruct", "sambanova", "SambaNova Llama 3.3 70B", CostCategory.FREE_TIER, 0.60, 0.80, supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=30.0))
-            self._register(ModelSpec("Meta-Llama-3.1-8B-Instruct", "sambanova", "SambaNova Llama 3.1 8B", CostCategory.FREE_TIER, 0.10, 0.10, supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=20.0))
             self._register(ModelSpec("Qwen2.5-72B-Instruct", "sambanova", "SambaNova Qwen 2.5 72B", CostCategory.FREE_TIER, 0.60, 0.80, supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=30.0))
 
             # Cerebras models (Hardware limit 2048 per call)

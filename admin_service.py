@@ -482,7 +482,7 @@ class AdminControlService:
         provider_keys = {
             "groq": ("GROQ_API_KEY", ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen/qwen3.8-27b", "openai/gpt-oss-120b"]),
             "gemini": ("GEMINI_API_KEY", ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite"]),
-            "sambanova": ("SAMBANOVA_API_KEY", ["Meta-Llama-3.3-70B-Instruct", "Meta-Llama-3.1-8B-Instruct", "Qwen2.5-72B-Instruct"]),
+            "sambanova": ("SAMBANOVA_API_KEY", ["Meta-Llama-3.3-70B-Instruct", "Qwen2.5-72B-Instruct", "DeepSeek-V3.1"]),
             "cerebras": ("CEREBRAS_API_KEY", ["llama3.1-8b", "qwen-3.8-27b", "gpt-oss-120b"]),
             "openrouter": ("OPENROUTER_API_KEY", ["google/gemma-4-31b-it:free", "nvidia/nemotron-3.5-lightning:free"]),
             "tavily": ("TAVILY_API_KEY", ["search"]),

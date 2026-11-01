@@ -31,7 +31,6 @@ MODEL_PRICING_REGISTRY: Dict[str, Dict[str, float]] = {
 
     # SambaNova Models
     "Meta-Llama-3.3-70B-Instruct": {"input": 0.60, "output": 0.80},
-    "Meta-Llama-3.1-8B-Instruct": {"input": 0.10, "output": 0.10},
     "Qwen2.5-72B-Instruct": {"input": 0.60, "output": 0.80},
 
     # Cerebras Models

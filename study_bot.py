@@ -1649,7 +1649,7 @@ def _stream_sambanova(messages, system_prompt, max_tokens, model_id=None):
     SAMBANOVA_MODELS = [
         "Meta-Llama-3.3-70B-Instruct",
         "Qwen2.5-72B-Instruct",
-        "Meta-Llama-3.1-8B-Instruct",
+        "DeepSeek-V3.1",
     ]
     last_err = None
     for _ in range(len(SAMBANOVA_API_KEYS)):
@@ -1705,7 +1705,7 @@ def _call_sambanova(messages, system_prompt, max_tokens):
     SAMBANOVA_MODELS = [
         "Meta-Llama-3.3-70B-Instruct",
         "Qwen2.5-72B-Instruct",
-        "Meta-Llama-3.1-8B-Instruct",
+        "DeepSeek-V3.1",
     ]
     last_err = None
     for _ in range(len(SAMBANOVA_API_KEYS)):

@@ -11,6 +11,43 @@ from ai_routing.registry import registry
 
 logger = logging.getLogger("groq_provider")
 
+
+def _prune_messages_for_groq(messages: List[Dict[str, Any]], system_prompt: str, max_chars: int = 18000) -> List[Dict[str, Any]]:
+    """
+    Groq free tier models enforce a strict 7,000 ITPM (Input Tokens Per Minute) ceiling.
+    Keep system prompt + latest turns strictly under max_chars (~4,500 tokens) to prevent HTTP 413.
+    Always preserves the most recent user turn in its entirety.
+    """
+    sys_len = len(system_prompt or "")
+    budget = max(4000, max_chars - sys_len)
+    
+    if not messages:
+        return []
+    
+    # Process from newest to oldest
+    selected = []
+    used_chars = 0
+    for m in reversed(messages):
+        c = m.get("content")
+        c_len = len(c) if isinstance(c, str) else 200
+        if not selected:
+            # Always include the latest turn (truncate internally only if gargantuan)
+            if c_len > budget and isinstance(c, str):
+                c = c[-budget:]
+                selected.append({**m, "content": c})
+                used_chars += len(c)
+            else:
+                selected.append(m)
+                used_chars += c_len
+        elif used_chars + c_len <= budget:
+            selected.append(m)
+            used_chars += c_len
+        else:
+            break
+            
+    selected.reverse()
+    return selected
+
 class GroqProvider(BaseProvider):
     def __init__(self):
         super().__init__()
@@ -50,9 +87,10 @@ class GroqProvider(BaseProvider):
 
             for model in model_chain:
                 try:
+                    pruned = _prune_messages_for_groq(messages, system_prompt)
                     kwargs: Dict[str, Any] = {
                         "model": model,
-                        "messages": [{"role": "system", "content": system_prompt}] + messages,
+                        "messages": [{"role": "system", "content": system_prompt}] + pruned,
                         "max_tokens": max_tokens or 4096,
                     }
                     if json_output:
@@ -111,9 +149,10 @@ class GroqProvider(BaseProvider):
 
             for model in model_chain:
                 try:
+                    pruned = _prune_messages_for_groq(messages, system_prompt)
                     kwargs: Dict[str, Any] = {
                         "model": model,
-                        "messages": [{"role": "system", "content": system_prompt}] + messages,
+                        "messages": [{"role": "system", "content": system_prompt}] + pruned,
                         "max_tokens": max_tokens or 4096,
                         "stream": True
                     }
