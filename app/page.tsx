@@ -721,11 +721,9 @@ export default function BrainyApp() {
   // Loading Screen
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-[#0e1017] flex flex-col items-center justify-center gap-3 text-zinc-400">
-        <div className="w-10 h-10 rounded-xl bg-white p-1.5 border border-zinc-700 flex items-center justify-center shadow-md">
-          <BrainyLogo variant="symbol" className="w-full h-full object-contain" alt="Brainy" priority />
-        </div>
-        <p className="text-xs text-zinc-500 font-medium">Loading Brainy...</p>
+      <div className="min-h-screen bg-[var(--bg-app)] flex flex-col items-center justify-center gap-3 text-[var(--text-muted)]">
+        <BrainyLogo variant="symbol" className="h-10 w-10" alt="Brainy" priority />
+        <p className="text-xs font-medium">Loading Brainy...</p>
       </div>
     )
   }
