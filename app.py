@@ -2366,13 +2366,20 @@ def view_shared_answer(share_id):
 
 
 _PURE_GREETINGS = {
-    "hi", "hello", "hey", "heyy", "heya", "hola", "namaste", "greetings", "good morning",
+    "hi", "hii", "hiii", "hello", "hey", "heyy", "heya", "hola", "namaste", "greetings", "good morning",
     "good afternoon", "good evening", "good day", "what's up", "whats up", "sup", "yo"
 }
 
+_GREETINGS_REGEX = re.compile(
+    r"^(h+i+|h+e+l+l*o+|h+e+y+|h+e+y+a+|h+o+l+a+|n+a+m+a+s+t+e+|s+u+p+|y+o+|greetings|good\s+(morning|afternoon|evening|night|day)|what\'?s\s*up|kya\s+haal|kem\s+cho)[\s\.\!\?]*$", re.IGNORECASE
+)
+
 def _check_fast_greeting(content: str, first_name: str) -> str | None:
-    cleaned = re.sub(r"[^\w\s]", "", (content or "").strip().lower())
-    if cleaned in _PURE_GREETINGS or re.match(r"^(hi+|hello+|hey+|hola|namaste)", cleaned):
+    c = (content or "").strip()
+    cleaned = re.sub(r"[^\w\s]", "", c.lower())
+    # Only match stand-alone pure greetings (or greetings + name/punctuation, max 3 words)
+    words = cleaned.split()
+    if len(words) <= 3 and (cleaned in _PURE_GREETINGS or _GREETINGS_REGEX.match(c)):
         name_part = f" {first_name}" if first_name and first_name.strip() and first_name.lower() != "user" else ""
         return f"Hey{name_part}! 👋 What are we studying or working on today?"
     return None
