@@ -49,7 +49,7 @@ __v0_devtools.tsx
 __v0_jsx-dev-runtime.ts
 .snowflake/
 
-# Local tests only (not tracked on GitHub)
+# Test caches & private test fixtures
 tests/__pycache__/
 tests/*.pyc
 tests/*.log
@@ -60,3 +60,5 @@ tests/fixtures/private_*
 data/
 *.pdf
 .vercel/
+# Local screenshots
+screenshots/

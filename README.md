@@ -1,18 +1,16 @@
 <div align="center">
   <a href="https://github.com/shreyanshio/BrainyAi">
-    <img src="./Brainy-Optimized-Assets/03-GitHub/brainy-readme-header.png" alt="Brainy" width="600" />
+    <img src="./logos/brainy_horizontal_wordmark.png" alt="Brainy" width="600" />
   </a>
 
   <p><strong>Your study companion, wherever you learn.</strong></p>
   <p>
     <a href="https://brainyai.cenai.workers.dev/"><b>Open the Web App</b></a>
-    &nbsp;·&nbsp;
+    &nbsp;•&nbsp;
     <a href="https://t.me/AiChatExpert_Bot"><b>Open the Telegram Bot</b></a>
-    &nbsp;·&nbsp;
+    &nbsp;•&nbsp;
     <a href="./logos/README.md"><b>Logo Usage Guide</b></a>
-    &nbsp;·&nbsp;
-    <a href="./Brainy-Optimized-Assets/08-Preview/brainy-asset-comparison.png"><b>Asset Comparison Sheet</b></a>
-    &nbsp;·&nbsp;
+    &nbsp;•&nbsp;
     <a href="https://github.com/shreyanshio/BrainyAi"><b>Explore the Source</b></a>
   </p>
 </div>
