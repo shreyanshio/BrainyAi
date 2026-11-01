@@ -118,6 +118,8 @@ def get_routing_candidates(task: TaskType, depth: ResponseDepth = ResponseDepth.
     """
     groq_fast = registry.groq_fast_model
     groq_balanced = registry.groq_balanced_model
+    gemini_code = getattr(registry, "gemini_code_model", "gemini-3.8-flash")
+    gemini_vision = getattr(registry, "gemini_vision_model", "gemini-3.5-flash")
     gemini_reason = registry.gemini_reasoning_model
     gemini_fast = registry.gemini_fast_model
     samba_reason = registry.sambanova_reasoning_model
@@ -156,8 +158,9 @@ def get_routing_candidates(task: TaskType, depth: ResponseDepth = ResponseDepth.
     # ── 2. Multimodal & Diagram Tasks ──
     if task in MULTIMODAL_TASKS:
         candidates = [
-            ("gemini", gemini_reason),
-            ("gemini", "gemini-2.0-flash"),
+            ("gemini", gemini_vision),
+            ("gemini", "gemini-2.5-flash"),
+            ("gemini", gemini_fast),
             ("openrouter", "nvidia/nemotron-3.5-super-vl:free"),
             ("groq", groq_balanced),  # Text fallback if visual is extracted
         ]
@@ -166,9 +169,9 @@ def get_routing_candidates(task: TaskType, depth: ResponseDepth = ResponseDepth.
     # ── 3. Coding Specialists (SQL, DSA, Debugging, Code Writing) ──
     if task in CODING_TASKS:
         candidates = [
+            ("gemini", gemini_code),
             ("openrouter", openrouter_code),
             ("groq", groq_balanced),
-            ("gemini", gemini_reason),
             ("sambanova", samba_reason),
             ("cerebras", "gpt-oss-120b"),
             ("openrouter", "google/gemma-4-31b-it:free"),
@@ -182,6 +185,7 @@ def get_routing_candidates(task: TaskType, depth: ResponseDepth = ResponseDepth.
             ("gemini", gemini_reason),
             ("sambanova", samba_reason),
             ("groq", groq_balanced),
+            ("gemini", "gemini-2.5-flash"),
             ("cerebras", "gpt-oss-120b"),
             ("cerebras", "qwen-3.8-27b"),
             ("openrouter", openrouter_free)
