@@ -1,763 +1,789 @@
-import {
-  AdminUsageReport,
-  AdminUsersResponse,
-  AuthResponse,
-  ChatMessage,
-  ChatSendRequest,
-  ChatSendResponse,
-  ChatSession,
-  ModelDefinition,
-  SystemHealthStatus,
-  UsageStatus,
-  User,
-  UserMemoryData,
-  UserProfileStats,
-  UserPreferences,
-  StreamEvent,
-  StreamChatCallbacks,
-  PdfDocument,
-  DocumentNote,
-  DocumentQuiz,
-  QuizAttempt,
-  DocumentFlashcardDeck,
-  DocumentStudyProgress,
-  AIHealthSummary,
-} from '@/types/api'
-
-export const AUTH_TOKEN_KEY = 'brainy_auth_token'
-
-export function getStoredToken(): string | null {
-  if (typeof window === 'undefined') return null
-  try {
-    return localStorage.getItem(AUTH_TOKEN_KEY)
-  } catch {
-    return null
-  }
-}
-
-export function setStoredToken(token: string): void {
-  if (typeof window === 'undefined') return
-  try {
-    if (token) {
-      localStorage.setItem(AUTH_TOKEN_KEY, token)
-    } else {
-      localStorage.removeItem(AUTH_TOKEN_KEY)
-    }
-  } catch {
-    // ignore
-  }
-}
-
-export function clearStoredToken(): void {
-  if (typeof window === 'undefined') return
-  try {
-    localStorage.removeItem(AUTH_TOKEN_KEY)
-  } catch {
-    // ignore
-  }
-}
-
-export const getApiBase = (): string => {
-  const envUrl = process.env.NEXT_PUBLIC_API_URL
-  if (envUrl && envUrl.trim()) {
-    return envUrl.trim().replace(/\/$/, '')
-  }
-  if (typeof window !== 'undefined') {
-    const host = window.location.hostname
-    if (host !== 'localhost' && host !== '127.0.0.1') {
-      return 'https://brainyai.up.railway.app'
-    }
-  }
-  return ''
-}
-
-export class ApiError extends Error {
-  status: number
-  data?: any
-  constructor(message: string, status: number, data?: any) {
-    super(message)
-    this.name = 'ApiError'
-    this.status = status
-    this.data = data
-  }
-}
-
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const base = getApiBase()
-  const url = `${base}${path}`
-  const token = getStoredToken()
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-    ...(options.headers as Record<string, string>),
-  }
-
-  if (token && !headers['Authorization']) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
-
-  const response = await fetch(url, {
-    ...options,
-    credentials: 'include',
-    headers,
-  })
-
-  if (!response.ok) {
-    if (response.status === 401 && path !== '/api/auth/me') {
-      clearStoredToken()
-    }
-    let errorData: any = null
-    try {
-      errorData = await response.json()
-    } catch {
-      // ignore json parse error
-    }
-    const message = errorData?.error || errorData?.message || `Request failed with status ${response.status}`
-    throw new ApiError(message, response.status, errorData)
-  }
-
-  return response.json() as Promise<T>
-}
-
-// ── Auth APIs ──────────────────────────────────────────────
-
-export async function fetchPublicConfig(): Promise<{ google_client_id?: string; telegram_bot_username?: string }> {
-  try {
-    const res = await request<{ google_client_id?: string; telegram_bot_username?: string }>('/api/config')
-    if (res && res.google_client_id) {
-      return res
-    }
-  } catch (err) {
-    console.warn('Could not fetch /api/config from backend, using production fallbacks:', err)
-  }
-  return {
-    google_client_id: '793579888403-76l0ls9vr4jjrjshmmdbue6apsiabhpk.apps.googleusercontent.com',
-    telegram_bot_username: 'AiChatExpert_Bot',
-  }
-}
-
-export async function checkAuth(): Promise<User | null> {
-  try {
-    const res = await request<{ authenticated: boolean; user?: User; token?: string }>('/api/auth/me')
-    if (res?.authenticated && res.user) {
-      if (res.token) setStoredToken(res.token)
-      return res.user
-    }
-  } catch {
-    // Session not found or 401
-  }
-
-  // Fallback to checking /api/user/profile if session cookie/token is valid
-  try {
-    const prof = await request<UserProfileStats>('/api/user/profile')
-    if (prof?.user_id) {
-      return {
-        id: prof.user_id,
-        first_name: prof.first_name || 'Student',
-        username: prof.username || '',
-        photo_url: '',
-      }
-    }
-  } catch {
-    // not logged in
-  }
-
-  return null
-}
-
-export async function loginWithTelegramInitData(initData: string): Promise<User> {
-  const res = await request<AuthResponse>('/api/auth/initdata', {
-    method: 'POST',
-    body: JSON.stringify({ initData }),
-  })
-  if (!res.user) throw new ApiError('Authentication failed: no user returned', 401)
-  if (res.token) setStoredToken(res.token)
-  return res.user
-}
-
-export async function loginWithGoogle(credential: string): Promise<User> {
-  const res = await request<AuthResponse>('/api/auth/google', {
-    method: 'POST',
-    body: JSON.stringify({ credential }),
-  })
-  if (!res.user) throw new ApiError('Authentication failed: no user returned', 401)
-  if (res.token) setStoredToken(res.token)
-  return res.user
-}
-
-export async function loginWeb(name: string, username?: string): Promise<User> {
-  const res = await request<AuthResponse>('/api/auth/web', {
-    method: 'POST',
-    body: JSON.stringify({ name, username }),
-  })
-  if (!res.user) throw new ApiError('Authentication failed: no user returned', 401)
-  if (res.token) setStoredToken(res.token)
-  return res.user
-}
-
-export async function loginStudentPass(): Promise<User> {
-  const res = await request<AuthResponse>('/api/auth/student_pass', {
-    method: 'POST',
-  })
-  if (!res.user) throw new ApiError('Authentication failed: no user returned', 401)
-  if (res.token) setStoredToken(res.token)
-  return res.user
-}
-
-
-export async function initTelegramLogin(): Promise<{ session_id: string; bot_url: string }> {
-  return request<{ session_id: string; bot_url: string }>('/api/auth/init', {
-    method: 'POST',
-  })
-}
-
-export async function pollTelegramLogin(sessionId: string): Promise<{ status: string; user?: User; token?: string }> {
-  const res = await request<{ status: string; user?: User; token?: string }>(`/api/auth/poll/${sessionId}`)
-  if (res?.token) setStoredToken(res.token)
-  return res
-}
-
-export async function checkAuthSessionParam(sessionId: string): Promise<{ status: string; user?: User; token?: string }> {
-  const res = await request<{ status: string; user?: User; token?: string }>(`/api/auth/status/${sessionId}`)
-  if (res?.token) setStoredToken(res.token)
-  return res
-}
-
-export async function logoutUser(): Promise<void> {
-  try {
-    await request('/api/auth/logout', { method: 'POST' })
-  } catch {
-    // ignore
-  } finally {
-    clearStoredToken()
-  }
-}
-
-// ── Usage & Quota APIs ──────────────────────────────────────
-
-export async function fetchUsage(): Promise<UsageStatus> {
-  return request<UsageStatus>('/api/usage')
-}
-
-// ── Chat Session APIs ──────────────────────────────────────
-
-export async function fetchSessions(): Promise<ChatSession[]> {
-  const data = await request<ChatSession[] | { sessions: ChatSession[] }>('/api/sessions')
-  if (Array.isArray(data)) return data
-  return data.sessions || []
-}
-
-export interface ChatSessionPage {
-  sessions: ChatSession[]
-  has_more: boolean
-  next_offset: number
-}
-
-export async function fetchSessionPage(limit = 50, offset = 0): Promise<ChatSessionPage> {
-  return request<ChatSessionPage>(`/api/sessions?view=all&limit=${limit}&offset=${offset}`)
-}
-
-export async function createSession(title: string = 'New Study Session'): Promise<ChatSession> {
-  return request<ChatSession>('/api/sessions', {
-    method: 'POST',
-    body: JSON.stringify({ title }),
-  })
-}
-
-export async function renameSession(sessionId: string, title: string): Promise<void> {
-  await request(`/api/sessions/${sessionId}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ title }),
-  })
-}
-
-export async function updateSessionWorkspace(
-  sessionId: string,
-  changes: { is_saved?: boolean; is_pinned?: boolean; is_archived?: boolean }
-): Promise<void> {
-  await request(`/api/sessions/${sessionId}`, {
-    method: 'PATCH',
-    body: JSON.stringify(changes),
-  })
-}
-
-export async function deleteSession(sessionId: string): Promise<void> {
-  await request(`/api/sessions/${sessionId}`, {
-    method: 'DELETE',
-  })
-}
-
-export async function fetchSessionHistory(
-  sessionId: string
-): Promise<{ messages: ChatMessage[]; usage: UsageStatus; title?: string }> {
-  return request<{ messages: ChatMessage[]; usage: UsageStatus; title?: string }>(`/api/chat/${sessionId}`)
-}
-
-export async function sendChatMessage(req: ChatSendRequest): Promise<ChatSendResponse> {
-  return request<ChatSendResponse>('/api/chat/send', {
-    method: 'POST',
-    body: JSON.stringify({
-      session_id: req.session_id,
-      message: req.message,
-      content: req.message,
-      model: req.model,
-      answer_length: req.answer_length,
-      tone: req.tone,
-      idempotency_key: req.idempotency_key,
-    }),
-  })
-}
-
-export async function streamChatMessage(
-  req: ChatSendRequest,
-  callbacks: StreamChatCallbacks,
-  signal?: AbortSignal
-): Promise<string> {
-  const base = getApiBase()
-  const url = `${base}/api/chat/stream`
-  const token = getStoredToken()
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Accept: 'application/x-ndjson',
-  }
-
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
-
-  const response = await fetch(url, {
-    method: 'POST',
-    credentials: 'include',
-    headers,
-    body: JSON.stringify({
-      session_id: req.session_id,
-      message: req.message,
-      content: req.message,
-      model: req.model,
-      answer_length: req.answer_length,
-      tone: req.tone,
-      idempotency_key: req.idempotency_key,
-    }),
-    signal,
-  })
-
-  if (!response.ok) {
-    if (response.status === 401) {
-      clearStoredToken()
-    }
-    let errorData: any = null
-    try {
-      errorData = await response.json()
-    } catch {
-      // ignore non-json error body
-    }
-    const message =
-      errorData?.error || errorData?.message || `Streaming request failed (${response.status})`
-    const err = new ApiError(message, response.status, errorData)
-    callbacks.onError?.(err)
-    throw err
-  }
-
-  if (!response.body) {
-    const err = new ApiError('No response body for streaming', response.status)
-    callbacks.onError?.(err)
-    throw err
-  }
-
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder('utf-8')
-  let buffer = ''
-  let accumulatedText = ''
-  let reportedError: Error | null = null
-  let lastDeltaDispatchAt = 0
-
-  const processLine = (line: string) => {
-    const trimmed = line.trim()
-    if (!trimmed) return
-    const event: StreamEvent = JSON.parse(trimmed)
-    switch (event.type) {
-      case 'start': callbacks.onStart?.(event.session_id, event.request_id); break
-      case 'status': callbacks.onStatus?.(event.stage); break
-      case 'delta':
-        accumulatedText += event.text
-        // Avoid rerendering the entire Markdown transcript for every provider
-        // token. Dispatch the first token immediately, then coalesce small
-        // deltas into short 30 ms batches; the final text is flushed on done.
-        if (!lastDeltaDispatchAt || performance.now() - lastDeltaDispatchAt >= 30) {
-          lastDeltaDispatchAt = performance.now()
-          callbacks.onDelta?.(event.text, accumulatedText)
-        }
-        break
-      case 'done':
-        callbacks.onDelta?.('', accumulatedText)
-        callbacks.onDone?.(event)
-        break
-      case 'error': {
-        const streamErr = new ApiError(event.message, 500, event)
-        reportedError = streamErr
-        callbacks.onDelta?.('', accumulatedText)
-        callbacks.onError?.(streamErr, accumulatedText)
-        throw streamErr
-      }
-    }
-  }
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      // Retain incomplete chunk in buffer
-      buffer = lines.pop() || ''
-
-      for (const line of lines) processLine(line)
-    }
-
-    // Flush any leftover line, including a valid final event without a newline.
-    buffer += decoder.decode()
-    if (buffer.trim()) {
-      try {
-        processLine(buffer)
-      } catch (parseErr) {
-        if (parseErr instanceof ApiError) throw parseErr
-        throw new ApiError('The streaming response was malformed.', response.status)
-      }
-    }
-
-    return accumulatedText
-  } catch (err: any) {
-    if (err?.name === 'AbortError') {
-      return accumulatedText
-    }
-    if (err !== reportedError) {
-      callbacks.onDelta?.('', accumulatedText)
-      callbacks.onError?.(err, accumulatedText)
-    }
-    throw err
-  } finally {
-    if (signal?.aborted) reader.cancel().catch(() => {})
-    reader.releaseLock()
-  }
-}
-
-// ── Profile, Notes & Models ────────────────────────────────
-
-export async function fetchUserProfile(): Promise<UserProfileStats> {
-  return request<UserProfileStats>('/api/user/profile')
-}
-
-export async function fetchUserMemory(): Promise<UserMemoryData> {
-  return request<UserMemoryData>('/api/user/memory')
-}
-
-export async function saveUserMemoryNote(note: string): Promise<void> {
-  await request('/api/user/memory', {
-    method: 'POST',
-    body: JSON.stringify({ note }),
-  })
-}
-
-export async function fetchModels(): Promise<ModelDefinition[]> {
-  return request<ModelDefinition[]>('/api/models')
-}
-
-export async function fetchUserPreferences(): Promise<Partial<UserPreferences>> {
-  return request<Partial<UserPreferences>>('/api/user/preferences')
-}
-
-export async function saveUserPreferences(
-  preferences: Partial<UserPreferences>
-): Promise<void> {
-  await request('/api/user/preferences', {
-    method: 'POST',
-    body: JSON.stringify(preferences),
-  })
-}
-
-// ── Admin APIs ─────────────────────────────────────────────
-
-export async function fetchAdminCheck(): Promise<boolean> {
-  try {
-    const res = await request<{ is_admin: boolean }>('/api/admin/check')
-    return Boolean(res?.is_admin)
-  } catch {
-    return false
-  }
-}
-
-export async function fetchAdminOverview(): Promise<AdminUsageReport> {
-  return request<AdminUsageReport>('/api/admin/overview')
-}
-
-export async function fetchAdminUsers(
-  q: string = '',
-  page: number = 1,
-  limit: number = 25
-): Promise<AdminUsersResponse> {
-  const params = new URLSearchParams()
-  if (q) params.set('q', q)
-  params.set('page', String(page))
-  params.set('limit', String(limit))
-  return request<AdminUsersResponse>(`/api/admin/users?${params.toString()}`)
-}
-
-export async function toggleUserSuspend(
-  userId: number
-): Promise<{ status: string; user_id: number; is_suspended: boolean }> {
-  return request<{ status: string; user_id: number; is_suspended: boolean }>(
-    `/api/admin/users/${userId}/suspend`,
-    { method: 'POST' }
-  )
-}
-
-export async function deleteUserAccount(
-  userId: number
-): Promise<{ status: string; deleted_user_id: number }> {
-  return request<{ status: string; deleted_user_id: number }>(
-    `/api/admin/users/${userId}`,
-    { method: 'DELETE' }
-  )
-}
-
-export async function fetchSystemHealth(): Promise<SystemHealthStatus> {
-  return request<SystemHealthStatus>('/api/admin/health')
-}
-
-// ── PDF Study Studio APIs ────────────────────────────────────
-
-export async function uploadPdfDocument(file: File): Promise<PdfDocument> {
-  const base = getApiBase()
-  const url = `${base}/api/pdf/upload`
-  const token = getStoredToken()
-  const formData = new FormData()
-  formData.append('file', file)
-
-  const headers: Record<string, string> = {
-    Accept: 'application/json',
-  }
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`
-  }
-
-  const response = await fetch(url, {
-    method: 'POST',
-    credentials: 'include',
-    headers,
-    body: formData,
-  })
-
-  if (!response.ok) {
-    let errData: any = null
-    try {
-      errData = await response.json()
-    } catch {}
-    const msg = errData?.error || errData?.message || `Upload failed (${response.status})`
-    throw new ApiError(msg, response.status, errData)
-  }
-
-  const data = await response.json()
-  return data.document
-}
-
-export async function fetchPdfDocuments(): Promise<PdfDocument[]> {
-  const data = await request<{ documents: PdfDocument[] }>('/api/pdf/documents')
-  return data.documents || []
-}
-
-export async function fetchSinglePdfDocument(docId: string): Promise<PdfDocument> {
-  const data = await request<{ document: PdfDocument }>(`/api/pdf/documents/${docId}`)
-  return data.document
-}
-
-export async function deletePdfDocument(docId: string): Promise<void> {
-  await request<{ success: boolean; deleted_id: string }>(`/api/pdf/documents/${docId}`, {
-    method: 'DELETE',
-  })
-}
-
-export async function generatePdfNotes(docId: string, depth: 'FAST' | 'BALANCED' | 'DEEP' = 'BALANCED'): Promise<DocumentNote> {
-  const data = await request<{ success: boolean; note: DocumentNote }>(`/api/pdf/documents/${docId}/notes`, {
-    method: 'POST',
-    body: JSON.stringify({ depth }),
-  })
-  return data.note
-}
-
-export async function fetchPdfNotes(docId: string): Promise<DocumentNote[]> {
-  const data = await request<{ notes: DocumentNote[] }>(`/api/pdf/documents/${docId}/notes`)
-  return data.notes || []
-}
-
-export async function askPdfDocument(
-  docId: string,
-  question: string,
-  depth: 'FAST' | 'BALANCED' | 'DEEP' = 'BALANCED'
-): Promise<{ answer: string; citations: number[]; model: string }> {
-  return request<{ answer: string; citations: number[]; model: string }>(`/api/pdf/documents/${docId}/ask`, {
-    method: 'POST',
-    body: JSON.stringify({ question, depth }),
-  })
-}
-
-export async function generatePdfQuiz(
-  docId: string,
-  numQuestions: number = 5,
-  depth: 'FAST' | 'BALANCED' | 'DEEP' = 'BALANCED'
-): Promise<DocumentQuiz> {
-  const data = await request<{ success: boolean; quiz: DocumentQuiz }>(`/api/pdf/documents/${docId}/quiz`, {
-    method: 'POST',
-    body: JSON.stringify({ num_questions: numQuestions, depth }),
-  })
-  return data.quiz
-}
-
-export async function fetchPdfQuizzes(docId: string): Promise<DocumentQuiz[]> {
-  const data = await request<{ quizzes: DocumentQuiz[] }>(`/api/pdf/documents/${docId}/quiz`)
-  return data.quizzes || []
-}
-
-export async function submitPdfQuizAttempt(quizId: string, selectedIndices: number[]): Promise<QuizAttempt> {
-  const data = await request<{ success: boolean; attempt: QuizAttempt }>(`/api/pdf/quizzes/${quizId}/attempt`, {
-    method: 'POST',
-    body: JSON.stringify({ selected_indices: selectedIndices }),
-  })
-  return data.attempt
-}
-
-export async function generatePdfFlashcards(
-  docId: string,
-  count: number = 6,
-  depth: 'FAST' | 'BALANCED' | 'DEEP' = 'BALANCED'
-): Promise<DocumentFlashcardDeck> {
-  const data = await request<{ success: boolean; flashcards: DocumentFlashcardDeck }>(`/api/pdf/documents/${docId}/flashcards`, {
-    method: 'POST',
-    body: JSON.stringify({ count, depth }),
-  })
-  return data.flashcards
-}
-
-export async function fetchPdfFlashcards(docId: string): Promise<DocumentFlashcardDeck[]> {
-  const data = await request<{ flashcards: DocumentFlashcardDeck[] }>(`/api/pdf/documents/${docId}/flashcards`)
-  return data.flashcards || []
-}
-
-export async function fetchPdfStudyProgress(docId: string): Promise<DocumentStudyProgress> {
-  const data = await request<{ progress: DocumentStudyProgress }>(`/api/pdf/documents/${docId}/progress`)
-  return data.progress
-}
-
-export async function fetchAIHealthTelemetry(): Promise<AIHealthSummary> {
-  return request<AIHealthSummary>('/api/admin/ai-health')
-}
-
-// ── ENTERPRISE ADMIN API CLIENTS ──
-import type {
-  AdminKPIs,
-  TimeSeriesBucket,
-  AIRequestLog,
-  ProviderDetail,
-  QuotaObservation,
-  PDFAnalytics,
-  AdminAuditLog,
-  SystemAlert,
-  SystemConfig,
-  CostsSummary
-} from '@/types/api'
-
-export async function fetchAdminKPIs(windowSec: number = 86400): Promise<AdminKPIs> {
-  return request<AdminKPIs>(`/api/admin/kpis?window=${windowSec}`)
-}
-
-export async function fetchAdminTimeSeries(windowSec: number = 86400, buckets: number = 24): Promise<TimeSeriesBucket[]> {
-  return request<TimeSeriesBucket[]>(`/api/admin/timeseries?window=${windowSec}&buckets=${buckets}`)
-}
-
-export async function fetchAdminRequests(params: {
-  limit?: number
-  offset?: number
-  provider?: string
-  model?: string
-  status?: string
-  user_id?: string | number
-} = {}): Promise<{ total: number; limit: number; offset: number; logs: AIRequestLog[] }> {
-  const query = new URLSearchParams()
-  if (params.limit !== undefined) query.set('limit', String(params.limit))
-  if (params.offset !== undefined) query.set('offset', String(params.offset))
-  if (params.provider) query.set('provider', params.provider)
-  if (params.model) query.set('model', params.model)
-  if (params.status) query.set('status', params.status)
-  if (params.user_id !== undefined && params.user_id !== '') query.set('user_id', String(params.user_id))
-  return request<{ total: number; limit: number; offset: number; logs: AIRequestLog[] }>(`/api/admin/requests?${query.toString()}`)
-}
-
-export async function fetchAdminProviders(): Promise<Record<string, ProviderDetail>> {
-  return request<Record<string, ProviderDetail>>('/api/admin/providers')
-}
-
-export async function probeAdminProvider(providerId: string): Promise<{
-  provider: string
-  success: boolean
-  latency_ms: number
-  model?: string
-  error?: string
-}> {
-  return request<{ provider: string; success: boolean; latency_ms: number; model?: string; error?: string }>(
-    `/api/admin/providers/${providerId}/probe`,
-    { method: 'POST' }
-  )
-}
-
-export async function fetchAdminQuotas(): Promise<Record<string, QuotaObservation>> {
-  return request<Record<string, QuotaObservation>>('/api/admin/quotas')
-}
-
-export async function fetchAdminCosts(): Promise<CostsSummary> {
-  return request<CostsSummary>('/api/admin/costs')
-}
-
-export async function fetchAdminPdfAnalytics(): Promise<PDFAnalytics> {
-  return request<PDFAnalytics>('/api/admin/pdf-analytics')
-}
-
-export async function fetchAdminAuditLogs(params: {
-  limit?: number
-  offset?: number
-  action?: string
-} = {}): Promise<{ total: number; limit: number; offset: number; logs: AdminAuditLog[] }> {
-  const query = new URLSearchParams()
-  if (params.limit !== undefined) query.set('limit', String(params.limit))
-  if (params.offset !== undefined) query.set('offset', String(params.offset))
-  if (params.action) query.set('action', params.action)
-  return request<{ total: number; limit: number; offset: number; logs: AdminAuditLog[] }>(`/api/admin/audit-logs?${query.toString()}`)
-}
-
-export async function fetchAdminAlerts(): Promise<SystemAlert[]> {
-  return request<SystemAlert[]>('/api/admin/alerts')
-}
-
-export async function resolveAdminAlert(alertId: string): Promise<{ status: string; alert_id: string }> {
-  return request<{ status: string; alert_id: string }>(`/api/admin/alerts/${alertId}/resolve`, {
-    method: 'POST'
-  })
-}
-
-export async function fetchAdminConfig(): Promise<SystemConfig> {
-  return request<SystemConfig>('/api/admin/config')
-}
-
-export async function updateAdminConfig(key: string, value: any): Promise<SystemConfig> {
-  return request<SystemConfig>('/api/admin/config', {
-    method: 'POST',
-    body: JSON.stringify({ key, value })
-  })
-}
-
-export function getAdminExportUrl(exportType: 'requests' | 'users' | 'audit_logs' | 'costs'): string {
-  const base = getApiBase()
-  return `${base}/api/admin/export/${exportType}`
-}
-
+import {
+  AdminUsageReport,
+  AdminUsersResponse,
+  AuthResponse,
+  ChatMessage,
+  ChatSendRequest,
+  ChatSendResponse,
+  ChatSession,
+  ModelDefinition,
+  SystemHealthStatus,
+  UsageStatus,
+  User,
+  UserMemoryData,
+  UserProfileStats,
+  UserPreferences,
+  StreamEvent,
+  StreamChatCallbacks,
+  PdfDocument,
+  DocumentNote,
+  DocumentQuiz,
+  QuizAttempt,
+  DocumentFlashcardDeck,
+  DocumentStudyProgress,
+  ImportantQuestion,
+  DocumentImportantQuestions,
+  AIHealthSummary,
+} from '@/types/api'
+
+export const AUTH_TOKEN_KEY = 'brainy_auth_token'
+
+export function getStoredToken(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return localStorage.getItem(AUTH_TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function setStoredToken(token: string): void {
+  if (typeof window === 'undefined') return
+  try {
+    if (token) {
+      localStorage.setItem(AUTH_TOKEN_KEY, token)
+    } else {
+      localStorage.removeItem(AUTH_TOKEN_KEY)
+    }
+  } catch {
+    // ignore
+  }
+}
+
+export function clearStoredToken(): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.removeItem(AUTH_TOKEN_KEY)
+  } catch {
+    // ignore
+  }
+}
+
+export const getApiBase = (): string => {
+  const envUrl = process.env.NEXT_PUBLIC_API_URL
+  if (envUrl && envUrl.trim()) {
+    return envUrl.trim().replace(/\/$/, '')
+  }
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname
+    if (host !== 'localhost' && host !== '127.0.0.1') {
+      return 'https://brainyai.up.railway.app'
+    }
+  }
+  return ''
+}
+
+export class ApiError extends Error {
+  status: number
+  data?: any
+  constructor(message: string, status: number, data?: any) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.data = data
+  }
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const base = getApiBase()
+  const url = `${base}${path}`
+  const token = getStoredToken()
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    ...(options.headers as Record<string, string>),
+  }
+
+  if (token && !headers['Authorization']) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
+  const response = await fetch(url, {
+    ...options,
+    credentials: 'include',
+    headers,
+  })
+
+  if (!response.ok) {
+    if (response.status === 401 && path !== '/api/auth/me') {
+      clearStoredToken()
+    }
+    let errorData: any = null
+    try {
+      errorData = await response.json()
+    } catch {
+      // ignore json parse error
+    }
+    const message = errorData?.error || errorData?.message || `Request failed with status ${response.status}`
+    throw new ApiError(message, response.status, errorData)
+  }
+
+  return response.json() as Promise<T>
+}
+
+// ── Auth APIs ──────────────────────────────────────────────
+
+export async function fetchPublicConfig(): Promise<{ google_client_id?: string; telegram_bot_username?: string }> {
+  try {
+    const res = await request<{ google_client_id?: string; telegram_bot_username?: string }>('/api/config')
+    if (res && res.google_client_id) {
+      return res
+    }
+  } catch (err) {
+    console.warn('Could not fetch /api/config from backend, using production fallbacks:', err)
+  }
+  return {
+    google_client_id: '793579888403-76l0ls9vr4jjrjshmmdbue6apsiabhpk.apps.googleusercontent.com',
+    telegram_bot_username: 'AiChatExpert_Bot',
+  }
+}
+
+export async function checkAuth(): Promise<User | null> {
+  try {
+    const res = await request<{ authenticated: boolean; user?: User; token?: string }>('/api/auth/me')
+    if (res?.authenticated && res.user) {
+      if (res.token) setStoredToken(res.token)
+      return res.user
+    }
+  } catch {
+    // Session not found or 401
+  }
+
+  // Fallback to checking /api/user/profile if session cookie/token is valid
+  try {
+    const prof = await request<UserProfileStats>('/api/user/profile')
+    if (prof?.user_id) {
+      return {
+        id: prof.user_id,
+        first_name: prof.first_name || 'Student',
+        username: prof.username || '',
+        photo_url: '',
+      }
+    }
+  } catch {
+    // not logged in
+  }
+
+  return null
+}
+
+export async function loginWithTelegramInitData(initData: string): Promise<User> {
+  const res = await request<AuthResponse>('/api/auth/initdata', {
+    method: 'POST',
+    body: JSON.stringify({ initData }),
+  })
+  if (!res.user) throw new ApiError('Authentication failed: no user returned', 401)
+  if (res.token) setStoredToken(res.token)
+  return res.user
+}
+
+export async function loginWithGoogle(credential: string): Promise<User> {
+  const res = await request<AuthResponse>('/api/auth/google', {
+    method: 'POST',
+    body: JSON.stringify({ credential }),
+  })
+  if (!res.user) throw new ApiError('Authentication failed: no user returned', 401)
+  if (res.token) setStoredToken(res.token)
+  return res.user
+}
+
+export async function loginWeb(name: string, username?: string): Promise<User> {
+  const res = await request<AuthResponse>('/api/auth/web', {
+    method: 'POST',
+    body: JSON.stringify({ name, username }),
+  })
+  if (!res.user) throw new ApiError('Authentication failed: no user returned', 401)
+  if (res.token) setStoredToken(res.token)
+  return res.user
+}
+
+export async function loginStudentPass(): Promise<User> {
+  const res = await request<AuthResponse>('/api/auth/student_pass', {
+    method: 'POST',
+  })
+  if (!res.user) throw new ApiError('Authentication failed: no user returned', 401)
+  if (res.token) setStoredToken(res.token)
+  return res.user
+}
+
+
+export async function initTelegramLogin(): Promise<{ session_id: string; bot_url: string }> {
+  return request<{ session_id: string; bot_url: string }>('/api/auth/init', {
+    method: 'POST',
+  })
+}
+
+export async function pollTelegramLogin(sessionId: string): Promise<{ status: string; user?: User; token?: string }> {
+  const res = await request<{ status: string; user?: User; token?: string }>(`/api/auth/poll/${sessionId}`)
+  if (res?.token) setStoredToken(res.token)
+  return res
+}
+
+export async function checkAuthSessionParam(sessionId: string): Promise<{ status: string; user?: User; token?: string }> {
+  const res = await request<{ status: string; user?: User; token?: string }>(`/api/auth/status/${sessionId}`)
+  if (res?.token) setStoredToken(res.token)
+  return res
+}
+
+export async function logoutUser(): Promise<void> {
+  try {
+    await request('/api/auth/logout', { method: 'POST' })
+  } catch {
+    // ignore
+  } finally {
+    clearStoredToken()
+  }
+}
+
+// ── Usage & Quota APIs ──────────────────────────────────────
+
+export async function fetchUsage(): Promise<UsageStatus> {
+  return request<UsageStatus>('/api/usage')
+}
+
+// ── Chat Session APIs ──────────────────────────────────────
+
+export async function fetchSessions(): Promise<ChatSession[]> {
+  const data = await request<ChatSession[] | { sessions: ChatSession[] }>('/api/sessions')
+  if (Array.isArray(data)) return data
+  return data.sessions || []
+}
+
+export interface ChatSessionPage {
+  sessions: ChatSession[]
+  has_more: boolean
+  next_offset: number
+}
+
+export async function fetchSessionPage(limit = 50, offset = 0): Promise<ChatSessionPage> {
+  return request<ChatSessionPage>(`/api/sessions?view=all&limit=${limit}&offset=${offset}`)
+}
+
+export async function createSession(title: string = 'New Study Session'): Promise<ChatSession> {
+  return request<ChatSession>('/api/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ title }),
+  })
+}
+
+export async function renameSession(sessionId: string, title: string): Promise<void> {
+  await request(`/api/sessions/${sessionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  })
+}
+
+export async function updateSessionWorkspace(
+  sessionId: string,
+  changes: { is_saved?: boolean; is_pinned?: boolean; is_archived?: boolean }
+): Promise<void> {
+  await request(`/api/sessions/${sessionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(changes),
+  })
+}
+
+export async function deleteSession(sessionId: string): Promise<void> {
+  await request(`/api/sessions/${sessionId}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function fetchSessionHistory(
+  sessionId: string
+): Promise<{ messages: ChatMessage[]; usage: UsageStatus; title?: string }> {
+  return request<{ messages: ChatMessage[]; usage: UsageStatus; title?: string }>(`/api/chat/${sessionId}`)
+}
+
+export async function sendChatMessage(req: ChatSendRequest): Promise<ChatSendResponse> {
+  return request<ChatSendResponse>('/api/chat/send', {
+    method: 'POST',
+    body: JSON.stringify({
+      session_id: req.session_id,
+      message: req.message,
+      content: req.message,
+      model: req.model,
+      answer_length: req.answer_length,
+      tone: req.tone,
+      idempotency_key: req.idempotency_key,
+    }),
+  })
+}
+
+export async function streamChatMessage(
+  req: ChatSendRequest,
+  callbacks: StreamChatCallbacks,
+  signal?: AbortSignal
+): Promise<string> {
+  const base = getApiBase()
+  const url = `${base}/api/chat/stream`
+  const token = getStoredToken()
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/x-ndjson',
+  }
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: JSON.stringify({
+      session_id: req.session_id,
+      message: req.message,
+      content: req.message,
+      model: req.model,
+      answer_length: req.answer_length,
+      tone: req.tone,
+      idempotency_key: req.idempotency_key,
+    }),
+    signal,
+  })
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearStoredToken()
+    }
+    let errorData: any = null
+    try {
+      errorData = await response.json()
+    } catch {
+      // ignore non-json error body
+    }
+    const message =
+      errorData?.error || errorData?.message || `Streaming request failed (${response.status})`
+    const err = new ApiError(message, response.status, errorData)
+    callbacks.onError?.(err)
+    throw err
+  }
+
+  if (!response.body) {
+    const err = new ApiError('No response body for streaming', response.status)
+    callbacks.onError?.(err)
+    throw err
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+  let accumulatedText = ''
+  let reportedError: Error | null = null
+  let lastDeltaDispatchAt = 0
+
+  const processLine = (line: string) => {
+    const trimmed = line.trim()
+    if (!trimmed) return
+    const event: StreamEvent = JSON.parse(trimmed)
+    switch (event.type) {
+      case 'start': callbacks.onStart?.(event.session_id, event.request_id); break
+      case 'status': callbacks.onStatus?.(event.stage); break
+      case 'delta':
+        accumulatedText += event.text
+        // Avoid rerendering the entire Markdown transcript for every provider
+        // token. Dispatch the first token immediately, then coalesce small
+        // deltas into short 30 ms batches; the final text is flushed on done.
+        if (!lastDeltaDispatchAt || performance.now() - lastDeltaDispatchAt >= 30) {
+          lastDeltaDispatchAt = performance.now()
+          callbacks.onDelta?.(event.text, accumulatedText)
+        }
+        break
+      case 'done':
+        callbacks.onDelta?.('', accumulatedText)
+        callbacks.onDone?.(event)
+        break
+      case 'error': {
+        const streamErr = new ApiError(event.message, 500, event)
+        reportedError = streamErr
+        callbacks.onDelta?.('', accumulatedText)
+        callbacks.onError?.(streamErr, accumulatedText)
+        throw streamErr
+      }
+    }
+  }
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      // Retain incomplete chunk in buffer
+      buffer = lines.pop() || ''
+
+      for (const line of lines) processLine(line)
+    }
+
+    // Flush any leftover line, including a valid final event without a newline.
+    buffer += decoder.decode()
+    if (buffer.trim()) {
+      try {
+        processLine(buffer)
+      } catch (parseErr) {
+        if (parseErr instanceof ApiError) throw parseErr
+        throw new ApiError('The streaming response was malformed.', response.status)
+      }
+    }
+
+    return accumulatedText
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      return accumulatedText
+    }
+    if (err !== reportedError) {
+      callbacks.onDelta?.('', accumulatedText)
+      callbacks.onError?.(err, accumulatedText)
+    }
+    throw err
+  } finally {
+    if (signal?.aborted) reader.cancel().catch(() => {})
+    reader.releaseLock()
+  }
+}
+
+// ── Profile, Notes & Models ────────────────────────────────
+
+export async function fetchUserProfile(): Promise<UserProfileStats> {
+  return request<UserProfileStats>('/api/user/profile')
+}
+
+export async function fetchUserMemory(): Promise<UserMemoryData> {
+  return request<UserMemoryData>('/api/user/memory')
+}
+
+export async function saveUserMemoryNote(note: string): Promise<void> {
+  await request('/api/user/memory', {
+    method: 'POST',
+    body: JSON.stringify({ note }),
+  })
+}
+
+export async function fetchModels(): Promise<ModelDefinition[]> {
+  return request<ModelDefinition[]>('/api/models')
+}
+
+export async function fetchUserPreferences(): Promise<Partial<UserPreferences>> {
+  return request<Partial<UserPreferences>>('/api/user/preferences')
+}
+
+export async function saveUserPreferences(
+  preferences: Partial<UserPreferences>
+): Promise<void> {
+  await request('/api/user/preferences', {
+    method: 'POST',
+    body: JSON.stringify(preferences),
+  })
+}
+
+// ── Admin APIs ─────────────────────────────────────────────
+
+export async function fetchAdminCheck(): Promise<boolean> {
+  try {
+    const res = await request<{ is_admin: boolean }>('/api/admin/check')
+    return Boolean(res?.is_admin)
+  } catch {
+    return false
+  }
+}
+
+export async function fetchAdminOverview(): Promise<AdminUsageReport> {
+  return request<AdminUsageReport>('/api/admin/overview')
+}
+
+export async function fetchAdminUsers(
+  q: string = '',
+  page: number = 1,
+  limit: number = 25
+): Promise<AdminUsersResponse> {
+  const params = new URLSearchParams()
+  if (q) params.set('q', q)
+  params.set('page', String(page))
+  params.set('limit', String(limit))
+  return request<AdminUsersResponse>(`/api/admin/users?${params.toString()}`)
+}
+
+export async function toggleUserSuspend(
+  userId: number
+): Promise<{ status: string; user_id: number; is_suspended: boolean }> {
+  return request<{ status: string; user_id: number; is_suspended: boolean }>(
+    `/api/admin/users/${userId}/suspend`,
+    { method: 'POST' }
+  )
+}
+
+export async function deleteUserAccount(
+  userId: number
+): Promise<{ status: string; deleted_user_id: number }> {
+  return request<{ status: string; deleted_user_id: number }>(
+    `/api/admin/users/${userId}`,
+    { method: 'DELETE' }
+  )
+}
+
+export async function fetchSystemHealth(): Promise<SystemHealthStatus> {
+  return request<SystemHealthStatus>('/api/admin/health')
+}
+
+// ── PDF Study Studio APIs ────────────────────────────────────
+
+export async function uploadPdfDocument(file: File): Promise<PdfDocument> {
+  const base = getApiBase()
+  const url = `${base}/api/pdf/upload`
+  const token = getStoredToken()
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+  }
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: formData,
+  })
+
+  if (!response.ok) {
+    let errData: any = null
+    try {
+      errData = await response.json()
+    } catch {}
+    const msg = errData?.error || errData?.message || `Upload failed (${response.status})`
+    throw new ApiError(msg, response.status, errData)
+  }
+
+  const data = await response.json()
+  return data.document
+}
+
+export async function fetchPdfDocuments(): Promise<PdfDocument[]> {
+  const data = await request<{ documents: PdfDocument[] }>('/api/pdf/documents')
+  return data.documents || []
+}
+
+export async function fetchSinglePdfDocument(docId: string): Promise<PdfDocument> {
+  const data = await request<{ document: PdfDocument }>(`/api/pdf/documents/${docId}`)
+  return data.document
+}
+
+export async function deletePdfDocument(docId: string): Promise<void> {
+  await request<{ success: boolean; deleted_id: string }>(`/api/pdf/documents/${docId}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function generatePdfNotes(
+  docId: string,
+  depth: 'QUICK' | 'STANDARD' | 'DETAILED' | 'FAST' | 'BALANCED' | 'DEEP' | string = 'STANDARD'
+): Promise<DocumentNote> {
+  const data = await request<{ success: boolean; note: DocumentNote }>(`/api/pdf/documents/${docId}/notes`, {
+    method: 'POST',
+    body: JSON.stringify({ depth }),
+  })
+  return data.note
+}
+
+export async function fetchPdfNotes(docId: string): Promise<DocumentNote[]> {
+  const data = await request<{ notes: DocumentNote[] }>(`/api/pdf/documents/${docId}/notes`)
+  return data.notes || []
+}
+
+export async function askPdfDocument(
+  docId: string,
+  question: string,
+  depth: 'FAST' | 'BALANCED' | 'DEEP' | string = 'BALANCED',
+  history?: Array<{ role: 'user' | 'assistant'; content: string }>
+): Promise<{ answer: string; citations: number[]; model: string; context_count?: number }> {
+  return request<{ answer: string; citations: number[]; model: string; context_count?: number }>(`/api/pdf/documents/${docId}/ask`, {
+    method: 'POST',
+    body: JSON.stringify({ question, depth, history }),
+  })
+}
+
+export async function generatePdfQuiz(
+  docId: string,
+  numQuestions: number = 5,
+  depth: 'FAST' | 'BALANCED' | 'DEEP' | string = 'BALANCED',
+  difficulty: string = 'MEDIUM'
+): Promise<DocumentQuiz> {
+  const data = await request<{ success: boolean; quiz: DocumentQuiz }>(`/api/pdf/documents/${docId}/quiz`, {
+    method: 'POST',
+    body: JSON.stringify({ num_questions: numQuestions, depth, difficulty }),
+  })
+  return data.quiz
+}
+
+export async function generatePdfImportantQuestions(
+  docId: string,
+  count: number = 10
+): Promise<DocumentImportantQuestions> {
+  const data = await request<{ success: boolean; questions: DocumentImportantQuestions }>(
+    `/api/pdf/documents/${docId}/questions`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ count }),
+    }
+  )
+  return data.questions
+}
+
+export async function fetchPdfImportantQuestions(docId: string): Promise<DocumentImportantQuestions[]> {
+  const data = await request<{ questions: DocumentImportantQuestions[] }>(`/api/pdf/documents/${docId}/questions`)
+  return data.questions || []
+}
+
+export async function fetchPdfQuizzes(docId: string): Promise<DocumentQuiz[]> {
+  const data = await request<{ quizzes: DocumentQuiz[] }>(`/api/pdf/documents/${docId}/quiz`)
+  return data.quizzes || []
+}
+
+export async function submitPdfQuizAttempt(quizId: string, selectedIndices: number[]): Promise<QuizAttempt> {
+  const data = await request<{ success: boolean; attempt: QuizAttempt }>(`/api/pdf/quizzes/${quizId}/attempt`, {
+    method: 'POST',
+    body: JSON.stringify({ selected_indices: selectedIndices }),
+  })
+  return data.attempt
+}
+
+export async function generatePdfFlashcards(
+  docId: string,
+  count: number = 6,
+  depth: 'FAST' | 'BALANCED' | 'DEEP' = 'BALANCED'
+): Promise<DocumentFlashcardDeck> {
+  const data = await request<{ success: boolean; flashcards: DocumentFlashcardDeck }>(`/api/pdf/documents/${docId}/flashcards`, {
+    method: 'POST',
+    body: JSON.stringify({ count, depth }),
+  })
+  return data.flashcards
+}
+
+export async function fetchPdfFlashcards(docId: string): Promise<DocumentFlashcardDeck[]> {
+  const data = await request<{ flashcards: DocumentFlashcardDeck[] }>(`/api/pdf/documents/${docId}/flashcards`)
+  return data.flashcards || []
+}
+
+export async function fetchPdfStudyProgress(docId: string): Promise<DocumentStudyProgress> {
+  const data = await request<{ progress: DocumentStudyProgress }>(`/api/pdf/documents/${docId}/progress`)
+  return data.progress
+}
+
+export async function fetchAIHealthTelemetry(): Promise<AIHealthSummary> {
+  return request<AIHealthSummary>('/api/admin/ai-health')
+}
+
+// ── ENTERPRISE ADMIN API CLIENTS ──
+import type {
+  AdminKPIs,
+  TimeSeriesBucket,
+  AIRequestLog,
+  ProviderDetail,
+  QuotaObservation,
+  PDFAnalytics,
+  AdminAuditLog,
+  SystemAlert,
+  SystemConfig,
+  CostsSummary
+} from '@/types/api'
+
+export async function fetchAdminKPIs(windowSec: number = 86400): Promise<AdminKPIs> {
+  return request<AdminKPIs>(`/api/admin/kpis?window=${windowSec}`)
+}
+
+export async function fetchAdminTimeSeries(windowSec: number = 86400, buckets: number = 24): Promise<TimeSeriesBucket[]> {
+  return request<TimeSeriesBucket[]>(`/api/admin/timeseries?window=${windowSec}&buckets=${buckets}`)
+}
+
+export async function fetchAdminRequests(params: {
+  limit?: number
+  offset?: number
+  provider?: string
+  model?: string
+  status?: string
+  user_id?: string | number
+} = {}): Promise<{ total: number; limit: number; offset: number; logs: AIRequestLog[] }> {
+  const query = new URLSearchParams()
+  if (params.limit !== undefined) query.set('limit', String(params.limit))
+  if (params.offset !== undefined) query.set('offset', String(params.offset))
+  if (params.provider) query.set('provider', params.provider)
+  if (params.model) query.set('model', params.model)
+  if (params.status) query.set('status', params.status)
+  if (params.user_id !== undefined && params.user_id !== '') query.set('user_id', String(params.user_id))
+  return request<{ total: number; limit: number; offset: number; logs: AIRequestLog[] }>(`/api/admin/requests?${query.toString()}`)
+}
+
+export async function fetchAdminProviders(): Promise<Record<string, ProviderDetail>> {
+  return request<Record<string, ProviderDetail>>('/api/admin/providers')
+}
+
+export async function probeAdminProvider(providerId: string): Promise<{
+  provider: string
+  success: boolean
+  latency_ms: number
+  model?: string
+  error?: string
+}> {
+  return request<{ provider: string; success: boolean; latency_ms: number; model?: string; error?: string }>(
+    `/api/admin/providers/${providerId}/probe`,
+    { method: 'POST' }
+  )
+}
+
+export async function fetchAdminQuotas(): Promise<Record<string, QuotaObservation>> {
+  return request<Record<string, QuotaObservation>>('/api/admin/quotas')
+}
+
+export async function fetchAdminCosts(): Promise<CostsSummary> {
+  return request<CostsSummary>('/api/admin/costs')
+}
+
+export async function fetchAdminPdfAnalytics(): Promise<PDFAnalytics> {
+  return request<PDFAnalytics>('/api/admin/pdf-analytics')
+}
+
+export async function fetchAdminAuditLogs(params: {
+  limit?: number
+  offset?: number
+  action?: string
+} = {}): Promise<{ total: number; limit: number; offset: number; logs: AdminAuditLog[] }> {
+  const query = new URLSearchParams()
+  if (params.limit !== undefined) query.set('limit', String(params.limit))
+  if (params.offset !== undefined) query.set('offset', String(params.offset))
+  if (params.action) query.set('action', params.action)
+  return request<{ total: number; limit: number; offset: number; logs: AdminAuditLog[] }>(`/api/admin/audit-logs?${query.toString()}`)
+}
+
+export async function fetchAdminAlerts(): Promise<SystemAlert[]> {
+  return request<SystemAlert[]>('/api/admin/alerts')
+}
+
+export async function resolveAdminAlert(alertId: string): Promise<{ status: string; alert_id: string }> {
+  return request<{ status: string; alert_id: string }>(`/api/admin/alerts/${alertId}/resolve`, {
+    method: 'POST'
+  })
+}
+
+export async function fetchAdminConfig(): Promise<SystemConfig> {
+  return request<SystemConfig>('/api/admin/config')
+}
+
+export async function updateAdminConfig(key: string, value: any): Promise<SystemConfig> {
+  return request<SystemConfig>('/api/admin/config', {
+    method: 'POST',
+    body: JSON.stringify({ key, value })
+  })
+}
+
+export function getAdminExportUrl(exportType: 'requests' | 'users' | 'audit_logs' | 'costs'): string {
+  const base = getApiBase()
+  return `${base}/api/admin/export/${exportType}`
+}
+

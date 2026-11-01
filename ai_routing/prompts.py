@@ -57,6 +57,7 @@ TASK_TO_PROMPT_FILE: Dict[TaskType, str] = {
     TaskType.PDF_QUESTION_ANSWERING: "pdf_qa_prompt.txt",
     TaskType.QUIZ_GENERATION: "pdf_quiz_prompt.txt",
     TaskType.FLASHCARD_GENERATION: "pdf_flashcards_prompt.txt",
+    TaskType.IMPORTANT_QUESTION_GENERATION: "pdf_important_questions_prompt.txt",
     TaskType.CHAT_TITLE_GENERATION: "title_prompt.txt",
 }
 
@@ -83,6 +84,7 @@ INTENT_TO_PROMPT_FILE: Dict[str, str] = {
     "pdf_qa": "pdf_qa_prompt.txt",
     "pdf_quiz": "pdf_quiz_prompt.txt",
     "pdf_flashcards": "pdf_flashcards_prompt.txt",
+    "pdf_important_questions": "pdf_important_questions_prompt.txt",
     "coding": "coding_prompt.txt",
     "math": "math_prompt.txt",
     "title": "title_prompt.txt",

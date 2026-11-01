@@ -1,6 +1,6 @@
 """
 BrainyAi Intelligent Task Classification & Response Depth Control
-Defines the 14 core academic and study task categories, response-depth modes,
+Defines academic and study task categories, response-depth modes,
 and a fast, deterministic, zero-overhead task classifier.
 """
 
@@ -9,20 +9,21 @@ import re
 from typing import List, Dict, Any, Optional
 
 class TaskType(str, Enum):
-    QUICK_CHAT               = "QUICK_CHAT"
-    SIMPLE_EXPLANATION       = "SIMPLE_EXPLANATION"
-    DETAILED_EXPLANATION     = "DETAILED_EXPLANATION"
-    DEEP_REASONING           = "DEEP_REASONING"
-    CODING                   = "CODING"
-    MATH_AND_LOGIC           = "MATH_AND_LOGIC"
-    WEB_RESEARCH             = "WEB_RESEARCH"
-    DOCUMENT_INGESTION       = "DOCUMENT_INGESTION"
-    PDF_SUMMARY              = "PDF_SUMMARY"
-    PDF_QUESTION_ANSWERING   = "PDF_QUESTION_ANSWERING"
-    NOTE_GENERATION          = "NOTE_GENERATION"
-    QUIZ_GENERATION          = "QUIZ_GENERATION"
-    FLASHCARD_GENERATION     = "FLASHCARD_GENERATION"
-    CHAT_TITLE_GENERATION    = "CHAT_TITLE_GENERATION"
+    QUICK_CHAT                    = "QUICK_CHAT"
+    SIMPLE_EXPLANATION            = "SIMPLE_EXPLANATION"
+    DETAILED_EXPLANATION          = "DETAILED_EXPLANATION"
+    DEEP_REASONING                = "DEEP_REASONING"
+    CODING                        = "CODING"
+    MATH_AND_LOGIC                = "MATH_AND_LOGIC"
+    WEB_RESEARCH                  = "WEB_RESEARCH"
+    DOCUMENT_INGESTION            = "DOCUMENT_INGESTION"
+    PDF_SUMMARY                   = "PDF_SUMMARY"
+    PDF_QUESTION_ANSWERING        = "PDF_QUESTION_ANSWERING"
+    NOTE_GENERATION               = "NOTE_GENERATION"
+    QUIZ_GENERATION               = "QUIZ_GENERATION"
+    FLASHCARD_GENERATION          = "FLASHCARD_GENERATION"
+    IMPORTANT_QUESTION_GENERATION = "IMPORTANT_QUESTION_GENERATION"
+    CHAT_TITLE_GENERATION         = "CHAT_TITLE_GENERATION"
 
 class ResponseDepth(str, Enum):
     FAST     = "FAST"
@@ -56,8 +57,13 @@ _RESEARCH_KEYWORDS = re.compile(
     re.IGNORECASE
 )
 
+_IMPORTANT_Q_KEYWORDS = re.compile(
+    r"\b(important questions?|exam questions?|high-yield questions?|expected questions?|question bank|frequently asked)\b",
+    re.IGNORECASE
+)
+
 _QUIZ_KEYWORDS = re.compile(
-    r"\b(quiz|mcq|multiple choice|test me|practice questions|exam questions)\b",
+    r"\b(quiz|mcq|multiple choice|test me|practice questions)\b",
     re.IGNORECASE
 )
 
@@ -123,6 +129,8 @@ def classify_task(
     # 1. Document / PDF tasks
     is_doc_topic = has_pdf_context or "pdf" in text.lower() or "document" in text.lower()
     if is_doc_topic:
+        if _IMPORTANT_Q_KEYWORDS.search(text):
+            return TaskType.IMPORTANT_QUESTION_GENERATION
         if _QUIZ_KEYWORDS.search(text):
             return TaskType.QUIZ_GENERATION
         if _FLASHCARD_KEYWORDS.search(text):
@@ -134,7 +142,9 @@ def classify_task(
         if has_pdf_context:
             return TaskType.PDF_QUESTION_ANSWERING
 
-    # 2. Standalone Quizzes & Flashcards
+    # 2. Standalone Quizzes, Important Questions, Flashcards
+    if _IMPORTANT_Q_KEYWORDS.search(text):
+        return TaskType.IMPORTANT_QUESTION_GENERATION
     if _QUIZ_KEYWORDS.search(text):
         return TaskType.QUIZ_GENERATION
     if _FLASHCARD_KEYWORDS.search(text):

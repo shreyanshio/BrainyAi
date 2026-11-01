@@ -1,6 +1,7 @@
 """
 BrainyAi Dynamic Routing Policy
 Maps task types and response-depth modes to ordered candidate chains of (provider, model_id).
+Guarantees: Gemini is completely excluded from every PDF Study Studio operation.
 """
 
 from typing import List, Tuple
@@ -9,19 +10,57 @@ from ai_routing.registry import registry
 
 Candidate = Tuple[str, str]  # (provider_name, model_id)
 
+PDF_STUDY_TASKS = {
+    TaskType.DOCUMENT_INGESTION,
+    TaskType.PDF_SUMMARY,
+    TaskType.PDF_QUESTION_ANSWERING,
+    TaskType.NOTE_GENERATION,
+    TaskType.QUIZ_GENERATION,
+    TaskType.FLASHCARD_GENERATION,
+    TaskType.IMPORTANT_QUESTION_GENERATION,
+}
+
 def get_routing_candidates(task: TaskType, depth: ResponseDepth = ResponseDepth.BALANCED) -> List[Candidate]:
     """
     Returns an ordered list of (provider, model_id) candidates according to the
     architectural routing policy, task classification, and response depth.
+    Strict non-Gemini guarantee for all PDF Study Studio tasks.
     """
     groq_fast = registry.groq_fast_model
     groq_balanced = registry.groq_balanced_model
     gemini_reason = registry.gemini_reasoning_model
-    gemini_pdf = registry.gemini_pdf_model
     samba_reason = registry.sambanova_reasoning_model
     samba_fast = registry.sambanova_fast_model
     openrouter_code = registry.openrouter_coding_model
     openrouter_free = registry.openrouter_free_model
+
+    # ── E. PDF and Document Tasks (STRICTLY NON-GEMINI) ──
+    if task in PDF_STUDY_TASKS:
+        # Candidate chain order: Groq -> Cerebras -> SambaNova -> OpenRouter
+        if task in (TaskType.QUIZ_GENERATION, TaskType.IMPORTANT_QUESTION_GENERATION):
+            candidates = [
+                ("groq", groq_balanced),
+                ("cerebras", "gpt-oss-120b"),
+                ("sambanova", samba_reason),
+                ("openrouter", openrouter_free)
+            ]
+        elif task == TaskType.FLASHCARD_GENERATION:
+            candidates = [
+                ("groq", groq_fast),
+                ("cerebras", "llama3.1-8b"),
+                ("sambanova", samba_fast),
+                ("openrouter", openrouter_free)
+            ]
+        else:
+            candidates = [
+                ("groq", groq_balanced),
+                ("cerebras", "gpt-oss-120b"),
+                ("sambanova", samba_reason),
+                ("openrouter", openrouter_free)
+            ]
+        filtered = _filter_available(candidates)
+        # Guarantee: Under no condition shall Gemini ever be included for a PDF study task
+        return [c for c in filtered if c[0] != "gemini"]
 
     # ── A. Quick responses & Titles ──
     if task in (TaskType.QUICK_CHAT, TaskType.CHAT_TITLE_GENERATION) or depth == ResponseDepth.FAST:
@@ -64,23 +103,6 @@ def get_routing_candidates(task: TaskType, depth: ResponseDepth = ResponseDepth.
             ("groq", groq_balanced),
             ("gemini", gemini_reason),
             ("cerebras", "gpt-oss-120b")
-        ]
-        return _filter_available(candidates)
-
-    # ── E. PDF and document tasks ──
-    if task in (
-        TaskType.DOCUMENT_INGESTION,
-        TaskType.PDF_SUMMARY,
-        TaskType.PDF_QUESTION_ANSWERING,
-        TaskType.NOTE_GENERATION,
-        TaskType.QUIZ_GENERATION,
-        TaskType.FLASHCARD_GENERATION
-    ):
-        candidates = [
-            ("gemini", gemini_pdf),
-            ("sambanova", samba_reason),
-            ("groq", groq_balanced),
-            ("openrouter", openrouter_free)
         ]
         return _filter_available(candidates)
 

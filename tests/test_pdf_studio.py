@@ -275,48 +275,39 @@ class TestPDFStudyServicePersistenceAndSecurity(unittest.TestCase):
         self.assertEqual(len(notes), 1)
         self.assertIn("Executive Summary", notes[0]["content"])
 
+    @patch("ai_routing.router.router.generate_structured")
     @patch("ai_routing.router.router.generate")
-    def test_structured_notes_generation_with_citations(self, mock_generate):
-        mock_generate.return_value = ProviderResult(
-            text=(
-                "# 📘 Calculus Fundamentals\n\n"
-                "## 📌 Executive Summary\nCore limits and derivatives [Page 1].\n\n"
-                "## 💡 Essential Definitions & Terminology\n**Derivative**: Instantaneous rate of change [Page 1].\n\n"
-                "## 🧮 Governing Formulas & Mathematical Notation\n$$f'(x) = \\lim_{h \\to 0} \\frac{f(x+h)-f(x)}{h}$$ [Page 1]\n\n"
-                "## 🎯 High-Yield Revision Takeaways\n1. Product rule: $(uv)' = u'v + uv'$ [Page 2]."
-            ),
-            model="llama-3.3-70b-versatile",
-            provider="groq",
-            latency_ms=120.0,
-            tokens_out=150
-        )
-
+    def test_structured_notes_generation_with_citations(self, mock_generate, mock_gen_struct):
+        """
+        REGRESSION TEST: Verifies that local note generation synthesizes rich revision notes
+        with definitions, formulas, and citations WITHOUT calling router.generate or router.generate_structured.
+        """
         service = PDFStudyService()
         doc = service.upload_and_process_pdf(
             user_id=self.user_1,
             filename="Calculus_Notes.pdf",
             file_bytes=self.pdf_bytes
         )
-        note = service.generate_notes(doc["id"], self.user_1)
-        self.assertIn("Executive Summary", note["content"])
-        self.assertIn("Governing Formulas", note["content"])
+        note = service.generate_notes(doc["id"], self.user_1, depth="standard")
+
+        # MANDATORY ASSERTION: router.generate and router.generate_structured were NEVER invoked!
+        mock_generate.assert_not_called()
+        mock_gen_struct.assert_not_called()
+
+        self.assertIn("Overview", note["content"])
+        self.assertIn("Key Concepts", note["content"])
         self.assertIn("[Page 1]", note["content"])
         self.assertIn(1, note["citations"])
-        self.assertIn(2, note["citations"])
+        self.assertEqual(note["depth"], "STANDARD")
 
+    @patch("ai_routing.router.router.generate_structured")
     @patch("ai_routing.router.router.generate")
-    def test_long_document_multi_stage_notes_synthesis(self, mock_generate):
-        """Tests that documents with > 15 pages trigger multi-stage chunking without hardcoded slices."""
-        mock_generate.return_value = ProviderResult(
-            text="# 📘 Comprehensive Master Study Guide\n## 📌 Executive Summary\nMastered [Page 1] to [Page 20].",
-            model="mock-model",
-            provider="mock-provider",
-            latency_ms=200.0,
-            tokens_out=250
-        )
-
-        # Create a 20-page document
-        twenty_pages = [f"Page {i} comprehensive topic discussion." for i in range(1, 21)]
+    def test_long_document_multi_stage_notes_synthesis(self, mock_generate, mock_gen_struct):
+        """
+        Tests that documents with > 15 pages are processed completely locally without any LLM calls,
+        sampling and citing content across the entire document.
+        """
+        twenty_pages = [f"Chapter {i}: Advanced topic discussion on page {i} with formula $E = mc^2$ and def: Concept {i} is fundamental." for i in range(1, 21)]
         long_pdf = create_test_pdf_bytes(twenty_pages)
 
         service = PDFStudyService()
@@ -327,10 +318,36 @@ class TestPDFStudyServicePersistenceAndSecurity(unittest.TestCase):
         )
         self.assertEqual(doc["page_count"], 20)
 
-        note = service.generate_notes(doc["id"], self.user_1)
-        self.assertIn("Comprehensive Master Study Guide", note["content"])
-        # Multi-stage calls should have happened (chunk calls + consolidation call)
-        self.assertGreaterEqual(mock_generate.call_count, 2)
+        note = service.generate_notes(doc["id"], self.user_1, depth="detailed")
+
+        # Ensure zero AI router invocations
+        mock_generate.assert_not_called()
+        mock_gen_struct.assert_not_called()
+
+        self.assertIn("Chapter-wise", note["content"])
+        self.assertGreater(len(note["citations"]), 0)
+        self.assertEqual(note["depth"], "DETAILED")
+
+    def test_notes_depth_modes(self):
+        """Verifies that the 3 depth modes (quick, standard, detailed) produce appropriate local outputs."""
+        service = PDFStudyService()
+        doc = service.upload_and_process_pdf(
+            user_id=self.user_1,
+            filename="Calculus_Modes.pdf",
+            file_bytes=self.pdf_bytes
+        )
+
+        quick_note = service.generate_notes(doc["id"], self.user_1, depth="quick")
+        self.assertEqual(quick_note["depth"], "QUICK")
+        self.assertIn("Quick Summary", quick_note["content"])
+
+        standard_note = service.generate_notes(doc["id"], self.user_1, depth="standard")
+        self.assertEqual(standard_note["depth"], "STANDARD")
+        self.assertIn("Chapter-wise Notes", standard_note["content"])
+
+        detailed_note = service.generate_notes(doc["id"], self.user_1, depth="detailed")
+        self.assertEqual(detailed_note["depth"], "DETAILED")
+        self.assertIn("Final Quick Revision Checklist", detailed_note["content"])
 
     @patch("ai_routing.router.router.generate_structured")
     def test_quiz_generation_strictly_4_options(self, mock_gen_struct):
@@ -488,6 +505,98 @@ class TestPDFStudyServicePersistenceAndSecurity(unittest.TestCase):
         # Re-fetching raises PDFNotFoundError
         with self.assertRaises(PDFNotFoundError):
             service.get_document(doc_id, self.user_1)
+
+
+    @patch("ai_routing.router.router.generate_structured")
+    def test_important_questions_generation(self, mock_gen_struct):
+        """Verifies generation of high-yield exam questions across 8 categories with priority ratings."""
+        mock_gen_struct.return_value = {
+            "title": "Calculus Important Exam Questions",
+            "questions": [
+                {
+                    "question": "State and prove the Fundamental Theorem of Calculus.",
+                    "priority": "HIGH",
+                    "category": "Derivation/Proof",
+                    "chapter": "Integrals",
+                    "page_ref": "Page 2",
+                    "answer_outline": ["Statement of part 1", "Derivative of area function", "Part 2 evaluation theorem"]
+                },
+                {
+                    "question": "Define the limit of a function at a point.",
+                    "priority": "MEDIUM",
+                    "category": "Definition",
+                    "chapter": "Limits",
+                    "page_ref": "Page 1",
+                    "answer_outline": ["Epsilon-delta definition", "Left and right hand limits"]
+                }
+            ]
+        }
+
+        service = PDFStudyService()
+        doc = service.upload_and_process_pdf(
+            user_id=self.user_1,
+            filename="Questions_Test.pdf",
+            file_bytes=self.pdf_bytes
+        )
+
+        res = service.generate_important_questions(doc["id"], self.user_1, count=2)
+        self.assertEqual(len(res["questions"]), 2)
+        self.assertEqual(res["questions"][0]["priority"], "HIGH")
+        self.assertEqual(res["questions"][0]["category"], "Derivation/Proof")
+        self.assertEqual(len(res["questions"][0]["answer_outline"]), 3)
+
+        # Retrieve questions
+        saved = service.get_important_questions(doc["id"], self.user_1)
+        self.assertEqual(len(saved), 1)
+
+    @patch("ai_routing.router.router.generate")
+    def test_ask_document_strict_10_message_context(self, mock_generate):
+        """Verifies that conversational document chat strictly caps context window to at most 10 messages."""
+        mock_generate.return_value = ProviderResult(
+            text="The derivative at x=2 is 4 [Page 1].",
+            model="llama-3.3-70b-versatile",
+            provider="groq",
+            latency_ms=90.0,
+            tokens_out=25
+        )
+
+        service = PDFStudyService()
+        doc = service.upload_and_process_pdf(
+            user_id=self.user_1,
+            filename="Chat_Test.pdf",
+            file_bytes=self.pdf_bytes
+        )
+
+        # Simulate a 16-turn conversation history
+        long_history = [
+            {"role": "user" if i % 2 == 0 else "assistant", "content": f"Turn {i} discussion"}
+            for i in range(16)
+        ]
+
+        res = service.ask_document(
+            doc_id=doc["id"],
+            user_id=self.user_1,
+            question="What is the derivative at x=2?",
+            history=long_history
+        )
+
+        # Context count should be at most 10 (9 previous turns + 1 current turn)
+        self.assertEqual(res["context_count"], 10)
+        # Verify prompt received by router contains only the sliced history
+        call_prompt = mock_generate.call_args[1]["prompt"]
+        self.assertIn("Recent Conversation (Last 9 turns):", call_prompt)
+        self.assertNotIn("Turn 0 discussion", call_prompt)
+        self.assertIn("Turn 15 discussion", call_prompt)
+
+    def test_non_gemini_routing_for_all_pdf_tasks(self):
+        """Asserts that Gemini is NEVER selected as a candidate model for any PDF study task."""
+        from ai_routing.policy import get_routing_candidates, PDF_STUDY_TASKS
+
+        for task in PDF_STUDY_TASKS:
+            candidates = get_routing_candidates(task)
+            candidate_providers = [c[0] for c in candidates]
+            self.assertNotIn("gemini", candidate_providers, f"Gemini was improperly included in candidates for {task}!")
+            self.assertGreater(len(candidates), 0, f"No candidates found for {task}")
 
 
 if __name__ == "__main__":

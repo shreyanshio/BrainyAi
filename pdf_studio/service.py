@@ -1,9 +1,10 @@
 """
 BrainyAi PDF Study Studio - Document Lifecycle & Academic Services
 Provides durable Supabase Storage & PostgreSQL persistence, page-aware text indexing,
-bounded hierarchical note synthesis, grounded document Q&A, strictly validated 4-option quizzes,
-interactive flashcards, and robust progress tracking.
-Zero AI API calls for text extraction or OCR.
+completely local & offline deterministic note generation (zero AI calls),
+grounded document Q&A with 10-message conversational context, strictly validated 4-option quizzes,
+high-yield exam question generation, interactive flashcards, and robust progress tracking.
+Zero AI API calls for text extraction, OCR, or note generation.
 """
 
 import os
@@ -21,6 +22,7 @@ from ai_routing.tasks import TaskType, ResponseDepth
 from ai_routing.prompts import prompt_registry, Platform
 from pdf_studio.extractor import extract_pdf_pages, PageExtraction
 from pdf_studio.chunker import chunk_document_pages, sample_pages_evenly
+from pdf_studio.notes_engine import generate_local_notes
 
 logger = logging.getLogger("pdf_service")
 
@@ -31,6 +33,7 @@ _NOTES_STORE: Dict[str, List[Dict[str, Any]]] = {}
 _QUIZZES_STORE: Dict[str, List[Dict[str, Any]]] = {}
 _ATTEMPTS_STORE: Dict[str, List[Dict[str, Any]]] = {}
 _FLASHCARDS_STORE: Dict[str, List[Dict[str, Any]]] = {}
+_QUESTIONS_STORE: Dict[str, List[Dict[str, Any]]] = {}
 _PROGRESS_STORE: Dict[str, Dict[str, Any]] = {}
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "documents")
@@ -328,6 +331,7 @@ class PDFStudyService:
         _NOTES_STORE.pop(doc_id, None)
         _QUIZZES_STORE.pop(doc_id, None)
         _FLASHCARDS_STORE.pop(doc_id, None)
+        _QUESTIONS_STORE.pop(doc_id, None)
         prog_key = f"{user_id}_{doc_id}"
         _PROGRESS_STORE.pop(prog_key, None)
 
@@ -350,13 +354,17 @@ class PDFStudyService:
 
         return _PAGES_STORE.get(doc_id, [])
 
-    # ── STRUCTURED NOTE GENERATION (MULTI-STAGE & BOUNDED CHUNKING) ──
+    # ── 100% LOCAL DETERMINISTIC NOTE GENERATION (ZERO LLM / ZERO API CALLS) ──
 
-    def generate_notes(self, doc_id: str, user_id: int, depth: str = "balanced") -> Dict[str, Any]:
+    def generate_notes(self, doc_id: str, user_id: int, depth: Any = "standard") -> Dict[str, Any]:
         """
-        Synthesizes structured revision notes.
-        Uses bounded chunking for long documents without arbitrary truncation.
-        Grounded strictly in source text with [Page X] citations.
+        Synthesizes structured revision notes completely locally without any LLM API calls.
+        Uses deterministic extractive ranking, section heading detection, KaTeX preservation,
+        and page citations.
+        Supports 3 modes:
+          - Quick Revision ('quick'): very concise, top concepts, definitions, formulas, key facts.
+          - Standard Notes ('standard'): chapter-wise, concepts, terminology, formulas, comparisons.
+          - Detailed Study Notes ('detailed'): deep coverage, procedures, examples, checklist.
         """
         doc = self.get_document(doc_id, user_id)
         pages = self.get_document_pages(doc_id, user_id)
@@ -369,68 +377,31 @@ class PDFStudyService:
         if not has_text:
             raise ValueError("Document has no extractable text to generate notes from.")
 
-        sys_prompt = prompt_registry.get_template("pdf_notes_prompt.txt")
-        res_depth = ResponseDepth.from_str(depth) if hasattr(ResponseDepth, "from_str") else ResponseDepth.BALANCED
+        # Map depth string or enum to local mode
+        depth_str = str(depth.value if hasattr(depth, "value") else depth).lower()
+        mode_map = {
+            "quick": "quick",
+            "fast": "quick",
+            "standard": "standard",
+            "balanced": "standard",
+            "detailed": "detailed",
+            "deep": "detailed"
+        }
+        clean_mode = mode_map.get(depth_str, "standard")
 
-        # For shorter documents (<= 15 pages): process directly with all pages
-        if len(pages) <= 15:
-            full_text = "\n\n".join(
-                f"--- [Page {p['page_number']}] ---\n{p.get('text_content', '').strip()}"
-                for p in pages if p.get("text_content", "").strip()
-            )
-            prompt = f"Document Title: {doc['filename']}\n\nDocument Contents:\n{full_text}"
-            resp = router.generate(
-                prompt=prompt,
-                task=TaskType.NOTE_GENERATION,
-                depth=res_depth,
-                system_prompt=sys_prompt
-            )
-            final_content = resp.text
-        else:
-            # Multi-stage chunking for long documents
-            logger.info("Long document detected (%d pages); using bounded multi-stage summarization", len(pages))
-            chunks = chunk_document_pages(pages, target_tokens_per_chunk=3500, overlap_pages=1)
-            chunk_summaries = []
+        # 100% Local notes generation - ZERO LLM calls!
+        final_content = generate_local_notes(
+            pages=pages,
+            title=doc.get("filename", "Document Notes"),
+            mode=clean_mode
+        )
 
-            for c in chunks:
-                chunk_prompt = (
-                    f"Document Title: {doc['filename']}\n"
-                    f"Section: Pages {c.start_page} to {c.end_page}\n\n"
-                    f"Extract key concepts, definitions, formulas, and workflows with [Page X] citations:\n"
-                    f"{c.text}"
-                )
-                chunk_resp = router.generate(
-                    prompt=chunk_prompt,
-                    task=TaskType.NOTE_GENERATION,
-                    depth=ResponseDepth.FAST,
-                    system_prompt="Extract concise structured study notes with exact [Page X] citations."
-                )
-                chunk_summaries.append(
-                    f"### Section: Pages {c.start_page}-{c.end_page}\n{chunk_resp.text.strip()}"
-                )
-
-            # Stage 2: Master synthesis into unified structured guide
-            combined_chunks = "\n\n".join(chunk_summaries)
-            consolidation_prompt = (
-                f"Document Title: {doc['filename']} (Total Pages: {len(pages)})\n\n"
-                f"Synthesize the following section summaries into a comprehensive Master Study Guide "
-                f"following all required Markdown sections and preserving [Page X] citations:\n\n"
-                f"{combined_chunks}"
-            )
-            master_resp = router.generate(
-                prompt=consolidation_prompt,
-                task=TaskType.NOTE_GENERATION,
-                depth=res_depth,
-                system_prompt=sys_prompt
-            )
-            final_content = master_resp.text
-
-        # Extract cited pages
+        # Extract cited pages from generated Markdown
         cited_pages = sorted(list(set(int(m) for m in re.findall(r"\[Page\s+(\d+)\]", final_content, re.IGNORECASE))))
 
         note_id = str(uuid.uuid4())
         created_at = datetime.now(timezone.utc).isoformat()
-        depth_label = depth.upper() if isinstance(depth, str) else "BALANCED"
+        depth_label = clean_mode.upper()
 
         note_record = {
             "id": note_id,
@@ -447,7 +418,6 @@ class PDFStudyService:
         if self._is_supabase_available():
             try:
                 self._sb_req("POST", "document_notes", json_body=note_record)
-                # Update progress in DB
                 self._sb_req(
                     "PATCH",
                     "document_study_progress",
@@ -483,10 +453,21 @@ class PDFStudyService:
         notes = _NOTES_STORE.get(doc_id, [])
         return sorted(notes, key=lambda x: x.get("created_at", ""), reverse=True)
 
-    # ── GROUNDED DOCUMENT Q&A ──
+    # ── GROUNDED DOCUMENT Q&A (STRICT 10-MESSAGE CONVERSATIONAL CONTEXT, NON-GEMINI) ──
 
-    def ask_document(self, doc_id: str, user_id: int, question: str, depth: Any = "balanced") -> Dict[str, Any]:
-        """Source-grounded Document Q&A with exact page citation."""
+    def ask_document(
+        self,
+        doc_id: str,
+        user_id: int,
+        question: str,
+        depth: Any = "balanced",
+        history: Optional[List[Dict[str, str]]] = None
+    ) -> Dict[str, Any]:
+        """
+        Source-grounded Document Q&A with exact page citation.
+        Enforces strict 10-message conversational context limit.
+        Routes strictly to non-Gemini AI providers (Groq, Cerebras, SambaNova, OpenRouter).
+        """
         doc = self.get_document(doc_id, user_id)
         pages = self.get_document_pages(doc_id, user_id)
 
@@ -494,17 +475,34 @@ class PDFStudyService:
         if not q_clean:
             raise ValueError("Question cannot be empty.")
 
+        # Strict 10-message conversational context window:
+        # Accept at most 9 previous messages, so history[-9:] + [current_question] <= 10 turns
+        history_lines = []
+        recent_history_tokens = set()
+        if history and isinstance(history, list):
+            sliced_history = history[-9:]
+            for msg in sliced_history:
+                role = "User" if msg.get("role") == "user" else "Assistant"
+                content = (msg.get("content") or "").strip()
+                if content:
+                    history_lines.append(f"{role}: {content}")
+                    if role == "User":
+                        recent_history_tokens.update(re.findall(r"\w+", content.lower()))
+
         # Keyword / token matching retrieval across pages
+        # Incorporate current question tokens + recent history tokens with emphasis on current question
         q_tokens = set(re.findall(r"\w+", q_clean.lower()))
+        combined_tokens = q_tokens.union(recent_history_tokens)
+
         scored_pages = []
         for p in pages:
             p_text = p.get("text_content", "")
             p_tokens = set(re.findall(r"\w+", p_text.lower()))
-            overlap = len(q_tokens.intersection(p_tokens))
+            overlap = (len(q_tokens.intersection(p_tokens)) * 3) + len(combined_tokens.intersection(p_tokens))
             scored_pages.append((overlap, p))
 
         scored_pages.sort(key=lambda x: x[0], reverse=True)
-        top_pages = [p for _, p in scored_pages[:6]]
+        top_pages = [p for _, p in scored_pages[:4]]
         top_pages.sort(key=lambda x: x["page_number"])
 
         excerpts = []
@@ -516,7 +514,15 @@ class PDFStudyService:
         context_block = "\n\n".join(excerpts)
         sys_prompt = prompt_registry.get_template("pdf_qa_prompt.txt")
 
-        user_prompt = f"Document: {doc['filename']}\n\nDocument Context:\n{context_block}\n\nQuestion: {q_clean}"
+        history_context = ""
+        if history_lines:
+            history_context = f"\n\nRecent Conversation (Last {len(history_lines)} turns):\n" + "\n".join(history_lines)
+
+        user_prompt = (
+            f"Document: {doc['filename']}\n\n"
+            f"Document Context:\n{context_block}{history_context}\n\n"
+            f"User Question: {q_clean}"
+        )
 
         res_depth = ResponseDepth.from_str(str(depth)) if hasattr(ResponseDepth, "from_str") else ResponseDepth.BALANCED
         resp = router.generate(
@@ -532,14 +538,24 @@ class PDFStudyService:
             "page_references": matched_page_nums,
             "citations": matched_page_nums,
             "model": resp.model,
-            "provider": resp.provider
+            "provider": resp.provider,
+            "context_count": len(history_lines) + 1
         }
 
-    # ── STRICT 4-OPTION MCQ QUIZ GENERATION ──
+    # ── STRICT 4-OPTION MCQ QUIZ GENERATION (NON-GEMINI) ──
 
-    def generate_quiz(self, doc_id: str, user_id: int, num_questions: int = 5, depth: Any = "balanced") -> Dict[str, Any]:
+    def generate_quiz(
+        self,
+        doc_id: str,
+        user_id: int,
+        num_questions: int = 5,
+        depth: Any = "balanced",
+        difficulty: str = "MEDIUM"
+    ) -> Dict[str, Any]:
         """
         Generates interactive multiple-choice quiz with strictly 4 distinct options per question.
+        Supports difficulty: EASY, MEDIUM, HARD.
+        Routes strictly to non-Gemini AI providers (Groq, Cerebras, SambaNova, OpenRouter).
         Evenly samples across long documents.
         """
         doc = self.get_document(doc_id, user_id)
@@ -556,10 +572,12 @@ class PDFStudyService:
             raise ValueError("Document contains no readable text to generate quiz questions.")
 
         sys_prompt = prompt_registry.get_template("pdf_quiz_prompt.txt")
+        clean_diff = difficulty.upper() if difficulty and difficulty.upper() in ("EASY", "MEDIUM", "HARD") else "MEDIUM"
 
         prompt = (
             f"Document: {doc['filename']}\n"
-            f"Generate a {num_questions}-question multiple choice quiz from the following document text.\n"
+            f"Target Difficulty: {clean_diff}\n"
+            f"Generate a {num_questions}-question multiple choice quiz with {clean_diff} difficulty from the following document text.\n"
             f"Every question MUST have exactly 4 distinct options, exactly 1 correct option index (0 to 3), "
             f"a helpful explanation, and the specific source page reference:\n\n{sample_text}"
         )
@@ -597,7 +615,8 @@ class PDFStudyService:
                 "options": clean_opts,
                 "correct_index": correct_idx,
                 "explanation": expl,
-                "page_ref": page_ref
+                "page_ref": page_ref,
+                "difficulty": clean_diff
             })
 
         if not validated_questions:
@@ -610,6 +629,7 @@ class PDFStudyService:
             "document_id": doc_id,
             "user_id": user_id,
             "title": str(quiz_data.get("title") or f"Quiz: {doc['filename']}")[:100],
+            "difficulty": clean_diff,
             "questions": validated_questions,
             "created_at": created_at
         }
@@ -753,10 +773,144 @@ class PDFStudyService:
 
         return attempt_record
 
-    # ── FLASHCARDS GENERATION ──
+    # ── PDF-TO-IMPORTANT-QUESTIONS GENERATION (NON-GEMINI) ──
+
+    def generate_important_questions(
+        self,
+        doc_id: str,
+        user_id: int,
+        count: int = 10,
+        depth: str = "balanced"
+    ) -> Dict[str, Any]:
+        """
+        Generates high-yield exam and revision questions across 8 categories with priority ratings
+        and expected answer outlines. Uses non-Gemini AI routing.
+        """
+        doc = self.get_document(doc_id, user_id)
+        pages = self.get_document_pages(doc_id, user_id)
+
+        # Sample pages evenly across the document
+        sampled_pages = sample_pages_evenly(pages, max_pages=25)
+        sample_text = "\n\n".join(
+            f"[Page {p['page_number']}] {p.get('text_content', '')[:1000]}"
+            for p in sampled_pages if p.get("text_content", "").strip()
+        )
+
+        if not sample_text:
+            raise ValueError("Document contains no readable text to generate important questions.")
+
+        sys_prompt = prompt_registry.get_template("pdf_important_questions_prompt.txt")
+
+        prompt = (
+            f"Document Title: {doc['filename']}\n"
+            f"Target Question Count: {count}\n\n"
+            f"Analyze the document text below and generate {count} high-yield examination and revision questions.\n"
+            f"Distribute them across categories (Short Answer, Long Answer, Definition, Conceptual, "
+            f"Derivation/Proof, Numerical/Formula, Comparison, Application).\n"
+            f"Assign priority (HIGH, MEDIUM, LOW) based on exam significance and include a concise bulleted answer outline.\n\n"
+            f"{sample_text}"
+        )
+
+        res = router.generate_structured(
+            prompt=prompt,
+            system_prompt=sys_prompt,
+            task=TaskType.IMPORTANT_QUESTION_GENERATION,
+            max_tokens=4000
+        )
+
+        raw_questions = res.get("questions", [])
+        validated_questions = []
+
+        valid_categories = {
+            "Short Answer", "Long Answer", "Definition", "Conceptual",
+            "Derivation/Proof", "Numerical/Formula", "Comparison", "Application"
+        }
+
+        for q in raw_questions:
+            q_text = str(q.get("question") or "").strip()
+            if not q_text:
+                continue
+
+            priority = str(q.get("priority") or "HIGH").strip().upper()
+            if priority not in ("HIGH", "MEDIUM", "LOW"):
+                priority = "HIGH"
+
+            raw_cat = str(q.get("category") or "Conceptual").strip()
+            cat = raw_cat if raw_cat in valid_categories else "Conceptual"
+
+            chapter = str(q.get("chapter") or "General").strip()
+            page_ref = str(q.get("page_ref") or "Page 1").strip()
+
+            raw_outline = q.get("answer_outline") or []
+            if isinstance(raw_outline, list):
+                outline = [str(item).strip() for item in raw_outline if str(item).strip()]
+            elif isinstance(raw_outline, str):
+                outline = [line.strip("- *").strip() for line in raw_outline.split("\n") if line.strip()]
+            else:
+                outline = []
+
+            validated_questions.append({
+                "question": q_text,
+                "priority": priority,
+                "category": cat,
+                "chapter": chapter,
+                "page_ref": page_ref,
+                "answer_outline": outline
+            })
+
+        if not validated_questions:
+            raise RuntimeError("Model failed to produce validated important questions. Please retry.")
+
+        set_id = str(uuid.uuid4())
+        created_at = datetime.now(timezone.utc).isoformat()
+        questions_record = {
+            "id": set_id,
+            "document_id": doc_id,
+            "user_id": user_id,
+            "title": str(res.get("title") or f"Important Questions: {doc['filename']}")[:100],
+            "count": len(validated_questions),
+            "questions": validated_questions,
+            "created_at": created_at
+        }
+
+        # Persist to Supabase if available
+        if self._is_supabase_available():
+            try:
+                self._sb_req("POST", "document_important_questions", json_body=questions_record)
+            except Exception as e:
+                logger.warning("Failed to persist important questions to Supabase: %s", e)
+
+        _QUESTIONS_STORE.setdefault(doc_id, []).append(questions_record)
+        return questions_record
+
+    def get_important_questions(self, doc_id: str, user_id: int) -> List[Dict[str, Any]]:
+        """Retrieves all generated important question sets for the document."""
+        self.get_document(doc_id, user_id)
+
+        if self._is_supabase_available():
+            try:
+                resp = self._sb_req(
+                    "GET",
+                    "document_important_questions",
+                    params=f"?document_id=eq.{doc_id}&user_id=eq.{user_id}&order=created_at.desc"
+                )
+                rows = resp.json() if hasattr(resp, "json") else []
+                if isinstance(rows, list) and rows:
+                    _QUESTIONS_STORE[doc_id] = rows
+                    return rows
+            except Exception as e:
+                logger.warning("Failed to fetch important questions from Supabase: %s", e)
+
+        sets = _QUESTIONS_STORE.get(doc_id, [])
+        return sorted(sets, key=lambda x: x.get("created_at", ""), reverse=True)
+
+    # ── FLASHCARDS GENERATION (NON-GEMINI) ──
 
     def generate_flashcards(self, doc_id: str, user_id: int, count: int = 8, depth: str = "balanced") -> Dict[str, Any]:
-        """Generates study flashcards evenly sampled from document key concepts."""
+        """
+        Generates study flashcards evenly sampled from document key concepts.
+        Routes strictly to non-Gemini AI providers (Groq, Cerebras, SambaNova, OpenRouter).
+        """
         doc = self.get_document(doc_id, user_id)
         pages = self.get_document_pages(doc_id, user_id)
 
