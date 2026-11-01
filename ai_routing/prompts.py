@@ -216,7 +216,8 @@ class PromptRegistry:
         request_context: Optional[str] = None,
         model_capability_override: Optional[str] = None,
         answer_length_override: Optional[str] = None,
-        include_completeness: bool = True
+        include_completeness: bool = True,
+        normal_use: bool = False
     ) -> str:
         """
         Composes a unified, layered prompt following the deterministic priority model:
@@ -226,8 +227,16 @@ class PromptRegistry:
         4. Layer D: Request-Specific Context & Model Directives
         5. Completeness Directive
         """
+        # Normal Use deliberately omits the verbose core and task specialist. If
+        # its file is unavailable, fall back to the established full prompt so
+        # missing assets cannot silently weaken existing behavior.
+        normal_template = self.get_template("normal_use.txt") if normal_use else ""
+        use_normal_template = bool(normal_use and normal_template)
+
         # 1. Base Core Prompt (Layer A)
-        if system_prompt_override and system_prompt_override.strip():
+        if use_normal_template:
+            base_prompt = normal_template
+        elif system_prompt_override and system_prompt_override.strip():
             base_prompt = system_prompt_override.strip()
         else:
             base_prompt = self.get_template("system_prompt.txt")
@@ -242,7 +251,7 @@ class PromptRegistry:
                 base_prompt,
                 flags=re.DOTALL
             ).strip()
-        elif "COMPLETENESS DIRECTIVE" not in base_prompt:
+        elif not use_normal_template and "COMPLETENESS DIRECTIVE" not in base_prompt:
             comp_block = f"\n\n{COMPLETENESS_DIRECTIVE}"
 
         # 2. Platform Directives (Layer B)
@@ -250,7 +259,7 @@ class PromptRegistry:
 
         # 3. Task-Specific Protocol (Layer C)
         task_prompt = ""
-        if task:
+        if task and not use_normal_template:
             resolved_task_prompt = self.get_task_prompt(task, platform=platform)
             # Only append if not already identical to base prompt or already included
             if resolved_task_prompt and resolved_task_prompt != base_prompt and resolved_task_prompt not in base_prompt:
@@ -274,7 +283,22 @@ class PromptRegistry:
         if "PLATFORM FORMATTING CONTRACT" not in base_prompt:
             plat_block = f"\n\n{plat_directive}"
 
-        composed = f"{base_prompt}{plat_block}{task_prompt}{context_block}{comp_block}".strip()
+        # Carry small caller-specific directives (e.g. account facts and answer
+        # length) across the compact prompt when the caller supplied the usual
+        # full Brainy prompt. Never splice arbitrary custom overrides into the
+        # Normal Use identity.
+        extra_context = ""
+        if use_normal_template and system_prompt_override:
+            standard_core = self.get_template("system_prompt.txt")
+            if standard_core and standard_core in system_prompt_override:
+                remainder = system_prompt_override.replace(standard_core, "", 1).strip()
+                for directive in PLATFORM_DIRECTIVES.values():
+                    remainder = remainder.replace(directive, "").strip()
+                remainder = re.sub(r"━━━━━━━━+\s*🎯\s*COMPLETENESS DIRECTIVE.*", "", remainder, flags=re.DOTALL).strip()
+                if remainder and "ACTIVE TASK SPECIALIST PROTOCOL" not in remainder:
+                    extra_context = f"\n\n{remainder}"
+
+        composed = f"{base_prompt}{plat_block}{task_prompt}{context_block}{extra_context}{comp_block}".strip()
         return composed
 
 

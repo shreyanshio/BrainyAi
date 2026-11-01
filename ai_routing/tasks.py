@@ -186,7 +186,7 @@ _TRANSLATION_KEYWORDS = re.compile(
 
 # Writing / Composition
 _WRITING_KEYWORDS = re.compile(
-    r"\b(write an essay|write a letter|write an application|write a story|draft an email|write a poem|composition)\b",
+    r"\b(write an essay|write a letter|write an application|write a story|draft an email|write a poem|composition|rewrite|rephrase|proofread|correct (?:the )?grammar|fix (?:the )?grammar|format (?:this|the|these)|turn (?:this|the following) into (?:a list|bullet points)|brainstorm)\b",
     re.IGNORECASE
 )
 
@@ -344,11 +344,14 @@ def classify_task(
     if _RESEARCH_KEYWORDS.search(text) and len(text.split()) < 25:
         return TaskType.WEB_RESEARCH
 
-    # 5. Translation & Writing
+    # Route short, plain definition questions through Normal Use even when the
+    # defined term is also a specialist keyword (e.g. "What is gravity?").
+    if len(text.split()) <= 6 and re.match(r"^(?:what is|who is|define|meaning of)\b", text, re.IGNORECASE):
+        return TaskType.SIMPLE_EXPLANATION
+
+    # 5. Translation
     if _TRANSLATION_KEYWORDS.search(text):
         return TaskType.TRANSLATION
-    if _WRITING_KEYWORDS.search(text):
-        return TaskType.WRITING
 
     # 6. Coding Specialists (SQL, DSA, Debugging, Explanation, General Coding)
     if _SQL_KEYWORDS.search(text):
@@ -361,6 +364,11 @@ def classify_task(
         return TaskType.CODING_EXPLANATION
     if _CODE_KEYWORDS.search(text) or "```" in text:
         return TaskType.CODING
+
+    # Rewriting/formatting comes after code recognition so code edits retain
+    # their specialist route (e.g. "rewrite this Python function").
+    if _WRITING_KEYWORDS.search(text):
+        return TaskType.WRITING
 
     # 7. Science Specialists (Physics, Chemistry, Biology)
     if _PHYSICS_KEYWORDS.search(text):
@@ -388,7 +396,7 @@ def classify_task(
     resolved_depth = ResponseDepth.from_str(depth) if depth else ResponseDepth.BALANCED
 
     if _SUMMARY_KEYWORDS.search(text):
-        return TaskType.SIMPLE_EXPLANATION if resolved_depth == ResponseDepth.FAST else TaskType.DETAILED_EXPLANATION
+        return TaskType.SIMPLE_EXPLANATION if resolved_depth == ResponseDepth.FAST or len(text.split()) <= 100 else TaskType.DETAILED_EXPLANATION
 
     if _DEEP_KEYWORDS.search(text) or resolved_depth == ResponseDepth.DEEP:
         return TaskType.DEEP_REASONING
@@ -464,6 +472,9 @@ def classify_task_complexity(
         return TaskComplexity.LIGHT
 
     if resolved_task in (TaskType.TRANSLATION, TaskType.SIMPLE_EXPLANATION) and word_count <= 20:
+        return TaskComplexity.LIGHT
+
+    if resolved_task == TaskType.WRITING and word_count <= 100:
         return TaskComplexity.LIGHT
 
     # 4. COMPLEX: Coding, debugging, DSA, SQL, Science (Physics, Chemistry, Biology), Math

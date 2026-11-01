@@ -166,6 +166,24 @@ class AIRouter:
 
         prompt_text = prompt or (call_messages[-1]["content"] if call_messages else "")
 
+        normal_tasks = {TaskType.QUICK_CHAT, TaskType.SIMPLE_EXPLANATION, TaskType.TRANSLATION, TaskType.WRITING}
+        standard_core = prompt_registry.get_template("system_prompt.txt")
+        normal_template_available = bool(prompt_registry.get_template("normal_use.txt"))
+        normal_override_compatible = not system_prompt or bool(standard_core and standard_core in system_prompt)
+        normal_use = (
+            resolved_task in normal_tasks
+            and resolved_complexity in (TaskComplexity.FAST, TaskComplexity.LIGHT)
+            and normal_template_available
+            and not (document_context and (document_context.get("pdf_text") or document_context.get("document_pages") or document_context.get("multimodal_parts")))
+            and normal_override_compatible
+            and not (system_prompt and "ACTIVE TASK SPECIALIST PROTOCOL" in system_prompt)
+        )
+        mode = "normal_use" if normal_use else "advanced"
+        mode_reason = (
+            f"{resolved_task.value.lower()} classified {resolved_complexity.value.lower()} with no specialist or document requirement"
+            if normal_use else "Normal Use prompt unavailable; existing full prompt path retained" if not normal_template_available else f"{resolved_task.value.lower()} classified {resolved_complexity.value.lower()} or requires specialist context"
+        )
+
         # ── Fast-Path 1: Local Mathematics Engine ──
         enable_local_math = os.getenv("ENABLE_LOCAL_MATH_ENGINE", "true").lower() in ("true", "1", "yes")
         if enable_local_math and resolved_task in MATH_TASKS and not json_output:
@@ -186,7 +204,11 @@ class AIRouter:
                         input_tokens=None,
                         output_tokens=len(math_res.formatted_markdown) // 4,
                         fallback_used=False,
-                        status="success"
+                        status="success",
+                        mode="local_math",
+                        selection_reason="local maths engine solved the request without a provider call",
+                        prompt_tokens=0,
+                        prompt_tokens_estimated=True
                     ))
                     return RouterResponse(
                         text=math_res.formatted_markdown,
@@ -203,7 +225,9 @@ class AIRouter:
         sys_prompt = prompt_registry.compose_prompt(
             task=resolved_task,
             platform=resolved_plat,
-            system_prompt_override=system_prompt
+            system_prompt_override=system_prompt,
+            normal_use=normal_use,
+            include_completeness=not normal_use
         )
 
         # ── Web Research Pre-Search Hook ──
@@ -302,7 +326,12 @@ class AIRouter:
                     fallback_from=fallback_from,
                     status="success" if not fallback_used else "fallback_recovered",
                     continuation_used=continuation_used,
-                    continuation_rounds=continuation_rounds
+                    continuation_rounds=continuation_rounds,
+                    mode=mode,
+                    selection_reason=mode_reason,
+                    escalation_reason=(f"{fallback_from} unavailable; existing fallback chain selected {provider_name}/{res.model}" if fallback_used and normal_use else None),
+                    prompt_tokens=max(1, len(sys_prompt) // 4) if sys_prompt else 0,
+                    prompt_tokens_estimated=True
                 ))
 
                 return RouterResponse(
@@ -343,7 +372,11 @@ class AIRouter:
             fallback_used=fallback_used,
             fallback_from=fallback_from,
             error_category=type(last_exc).__name__ if last_exc else "Exhausted",
-            status="error"
+            status="error",
+            mode=mode,
+            selection_reason=mode_reason,
+            prompt_tokens=max(1, len(sys_prompt) // 4) if sys_prompt else 0,
+            prompt_tokens_estimated=True
         ))
         raise RuntimeError(f"All AI routing candidates failed: {last_exc}")
 
@@ -380,6 +413,24 @@ class AIRouter:
 
         prompt_text = prompt or (call_messages[-1]["content"] if call_messages else "")
 
+        normal_tasks = {TaskType.QUICK_CHAT, TaskType.SIMPLE_EXPLANATION, TaskType.TRANSLATION, TaskType.WRITING}
+        standard_core = prompt_registry.get_template("system_prompt.txt")
+        normal_template_available = bool(prompt_registry.get_template("normal_use.txt"))
+        normal_override_compatible = not system_prompt or bool(standard_core and standard_core in system_prompt)
+        normal_use = (
+            resolved_task in normal_tasks
+            and resolved_complexity in (TaskComplexity.FAST, TaskComplexity.LIGHT)
+            and normal_template_available
+            and not (document_context and (document_context.get("pdf_text") or document_context.get("document_pages") or document_context.get("multimodal_parts")))
+            and normal_override_compatible
+            and not (system_prompt and "ACTIVE TASK SPECIALIST PROTOCOL" in system_prompt)
+        )
+        mode = "normal_use" if normal_use else "advanced"
+        mode_reason = (
+            f"{resolved_task.value.lower()} classified {resolved_complexity.value.lower()} with no specialist or document requirement"
+            if normal_use else "Normal Use prompt unavailable; existing full prompt path retained" if not normal_template_available else f"{resolved_task.value.lower()} classified {resolved_complexity.value.lower()} or requires specialist context"
+        )
+
         # ── Fast-Path: Local Mathematics Engine for Streaming ──
         enable_local_math = os.getenv("ENABLE_LOCAL_MATH_ENGINE", "true").lower() in ("true", "1", "yes")
         if enable_local_math and resolved_task in MATH_TASKS:
@@ -409,7 +460,9 @@ class AIRouter:
         sys_prompt = prompt_registry.compose_prompt(
             task=resolved_task,
             platform=resolved_plat,
-            system_prompt_override=system_prompt
+            system_prompt_override=system_prompt,
+            normal_use=normal_use,
+            include_completeness=not normal_use
         )
 
         # Web research grounding hook for streaming
@@ -527,7 +580,12 @@ class AIRouter:
                         fallback_from=fallback_from,
                         status="success" if not fallback_used else "fallback_recovered",
                         continuation_used=continuation_used,
-                        continuation_rounds=continuation_rounds
+                        continuation_rounds=continuation_rounds,
+                        mode="local_math",
+                        selection_reason="local maths engine solved the request without a provider call",
+                        escalation_reason=(f"{fallback_from} unavailable; existing fallback chain selected {provider_name}/{model_id}" if fallback_used and normal_use else None),
+                        prompt_tokens=max(1, len(sys_prompt) // 4) if sys_prompt else 0,
+                        prompt_tokens_estimated=True
                     ))
                     return
             except Exception as e:
@@ -555,7 +613,11 @@ class AIRouter:
             fallback_used=fallback_used,
             fallback_from=fallback_from,
             error_category=type(last_exc).__name__ if last_exc else "Exhausted",
-            status="error"
+            status="error",
+            mode=mode,
+            selection_reason=mode_reason,
+            prompt_tokens=max(1, len(sys_prompt) // 4) if sys_prompt else 0,
+            prompt_tokens_estimated=True
         ))
         raise RuntimeError(f"All streaming candidates exhausted: {last_exc}")
 

@@ -37,6 +37,11 @@ class TelemetryRecord:
     status: str = "success"  # success, error, fallback_recovered
     continuation_used: bool = False
     continuation_rounds: int = 0
+    mode: str = "advanced"
+    selection_reason: Optional[str] = None
+    escalation_reason: Optional[str] = None
+    prompt_tokens: Optional[int] = None
+    prompt_tokens_estimated: bool = True
     cost_usd: float = 0.0
     is_estimated: bool = False
     timestamp: float = 0.0
@@ -161,9 +166,9 @@ class AITelemetry:
 
         # Log clean telemetry line without secrets or prompt bodies
         logger.info(
-            "ai_call task=%s depth=%s provider=%s model=%s latency_ms=%.1f tokens_in=%s tokens_out=%s cost=$%.6f status=%s req_id=%s user_id=%s",
-            rec.task, rec.depth, rec.provider, rec.model, rec.latency_ms,
-            rec.input_tokens, rec.output_tokens, rec.cost_usd, rec.status, rec.request_id, rec.user_id
+            "ai_call task=%s depth=%s mode=%s provider=%s model=%s latency_ms=%.1f prompt_tokens_est=%s tokens_in=%s tokens_out=%s cost=$%.6f status=%s escalation=%s req_id=%s user_id=%s",
+            rec.task, rec.depth, rec.mode, rec.provider, rec.model, rec.latency_ms, rec.prompt_tokens,
+            rec.input_tokens, rec.output_tokens, rec.cost_usd, rec.status, rec.escalation_reason, rec.request_id, rec.user_id
         )
 
         # Durable async/safe persistence to Supabase if configured
@@ -278,6 +283,8 @@ class AITelemetry:
         succ_reqs = sum(1 for r in window_recs if r.status != "error")
         fail_reqs = sum(1 for r in window_recs if r.status == "error")
         fallback_reqs = sum(1 for r in window_recs if r.fallback_used)
+        normal_use_reqs = sum(1 for r in window_recs if r.mode == "normal_use")
+        escalation_reqs = sum(1 for r in window_recs if r.escalation_reason)
 
         in_tokens = sum(r.input_tokens or 0 for r in window_recs)
         out_tokens = sum(r.output_tokens or 0 for r in window_recs)
@@ -297,6 +304,8 @@ class AITelemetry:
             "successful_requests": succ_reqs,
             "failed_requests": fail_reqs,
             "fallback_requests": fallback_reqs,
+            "normal_use_requests": normal_use_reqs,
+            "escalation_requests": escalation_reqs,
             "success_rate_pct": round((succ_reqs / total_reqs * 100.0) if total_reqs > 0 else 100.0, 1),
             "input_tokens": in_tokens,
             "output_tokens": out_tokens,

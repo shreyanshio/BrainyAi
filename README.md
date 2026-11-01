@@ -74,6 +74,18 @@ The repository also contains direct provider call implementations for **DeepSeek
 
 Provider availability is configuration-dependent. Listing a provider here does not mean an API key is included, that every provider is enabled in every deployment, or that every provider is used for every request. Never commit API keys or secrets.
 
+## Normal Use mode and prompt routing
+
+The central router selects a compact Normal Use prompt for greetings, short everyday questions, simple definitions, short translations, and short rewriting or formatting requests when the existing task classifier rates them FAST or LIGHT. These requests prefer the registry's configured Groq fast model. Suitable arithmetic continues to use the local maths engine.
+
+Coding, advanced mathematics, deep reasoning, long context, multimodal requests, and specialist operations keep their existing task prompts and provider policy. PDF Study Studio continues to filter Gemini from every PDF candidate chain. Provider failures continue through the existing bounded fallback chain; fallback after a Normal Use route is recorded as an escalation with the provider failure as its reason. Conversation messages remain intact across routing changes.
+
+Normal Use loads `prompts/normal_use.txt`, platform formatting, and safe caller-specific addenda. It does not load the full Brainy persona or task specialist. If the compact prompt is missing, prompt composition falls back to the established full prompt. `prompts/system_prompt.txt` and all specialist prompts remain available and unchanged.
+
+Telemetry records selected mode, provider, model, selection reason, fallback/escalation reason, latency, provider-reported input/output tokens, and existing estimated cost. Prompt size is estimated from prompt characters at four characters per token; provider-reported input tokens remain the authoritative total input usage. New mode/reason dimensions are held in the in-process telemetry records and structured logs; the Supabase schema is unchanged. Historical comparisons are only possible where prior telemetry exists.
+
+Edit `prompts/normal_use.txt` to tune everyday response behavior. Keep the security and safety section, avoid duplicating task-specific instructions, and run the prompt and router regression tests after changes.
+
 ## How BRAINY works
 
 The two entry points connect to the backend, where requests are validated and routed. The router classifies the task and response depth, chooses from the configured provider chain, and can move to another candidate when a provider fails. Research requests can use the search-grounding path. User and study data are persisted through the configured Supabase layer.

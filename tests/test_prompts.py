@@ -23,6 +23,7 @@ class TestPromptLibraryIntegrity(unittest.TestCase):
 
     EXPECTED_PROMPT_FILES = [
         "system_prompt.txt",
+        "normal_use.txt",
         "brainy_prompt.txt",
         "coding_prompt.txt",
         "maths.txt",
@@ -215,6 +216,31 @@ class TestPromptComposerLayers(unittest.TestCase):
 
         without_comp = prompt_registry.compose_prompt(task=TaskType.CODING, include_completeness=False)
         self.assertNotIn("COMPLETENESS DIRECTIVE", without_comp)
+
+    def test_normal_use_prompt_is_compact_and_keeps_security_and_platform(self):
+        composed = prompt_registry.compose_prompt(task=TaskType.QUICK_CHAT, normal_use=True)
+        self.assertIn("NORMAL USE — BRAINY", composed)
+        self.assertIn("Security and safety", composed)
+        self.assertIn("PLATFORM FORMATTING CONTRACT — WEB", composed)
+        self.assertNotIn("ACTIVE TASK SPECIALIST PROTOCOL", composed)
+        self.assertNotIn("Brainy Core Persona Configuration", composed)
+        self.assertLess(len(composed), 5000)
+
+    def test_advanced_mode_keeps_original_security_requirements(self):
+        composed = prompt_registry.compose_prompt(task=TaskType.DEEP_REASONING)
+        self.assertIn("SECURITY, SAFETY & BEHAVIOUR RULES", composed)
+
+    def test_missing_normal_prompt_falls_back_to_full_existing_prompt(self):
+        registry = PromptRegistry(PROMPTS_DIR)
+        registry._cache.pop("normal_use.txt", None)
+        original = registry.prompts_dir
+        registry.prompts_dir = os.path.join(PROMPTS_DIR, "missing-normal-use-test")
+        try:
+            composed = registry.compose_prompt(task=TaskType.QUICK_CHAT, normal_use=True)
+        finally:
+            registry.prompts_dir = original
+        self.assertIn("Brainy Core Persona Configuration", composed)
+        self.assertIn("SECURITY, SAFETY & BEHAVIOUR RULES", composed)
 
 
 if __name__ == "__main__":
