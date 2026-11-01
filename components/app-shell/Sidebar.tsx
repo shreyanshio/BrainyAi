@@ -289,9 +289,7 @@ export function Sidebar({
         <div className="p-3.5 space-y-3 border-b border-[var(--border-subtle)]">
           {/* Brand Row */}
           <div className="flex items-center justify-between px-1 pt-0.5">
-            <div className="bg-white/95 dark:bg-white px-2 py-1 rounded-lg shadow-2xs border border-zinc-200/50 flex items-center">
-              <BrainyLogo variant="wordmark" className="h-5 sm:h-6 w-auto" />
-            </div>
+            <BrainyLogo variant="wordmark" className="h-7 w-auto" />
 
             {/* Mobile drawer close button */}
             <button
