@@ -10,7 +10,7 @@ Enforces:
 """
 
 from typing import List, Tuple, Dict, Any, Optional
-from ai_routing.tasks import TaskType, ResponseDepth
+from ai_routing.tasks import TaskType, ResponseDepth, TaskComplexity
 from ai_routing.registry import registry, CostCategory
 
 Candidate = Tuple[str, str]  # (provider_name, model_id)
@@ -110,18 +110,27 @@ def compute_routing_score(
     return round(final_score, 2)
 
 
-def get_routing_candidates(task: TaskType, depth: ResponseDepth = ResponseDepth.BALANCED) -> List[Candidate]:
+def get_routing_candidates(
+    task: TaskType,
+    depth: ResponseDepth = ResponseDepth.BALANCED,
+    complexity: Optional[TaskComplexity] = None
+) -> List[Candidate]:
     """
     Returns an ordered list of (provider, model_id) candidates according to the
     specialist routing policy, task classification, modalities, and response depth.
-    Enforces strict zero-budget eligibility and strict non-Gemini guarantee for PDF Study Studio.
+    Enforces:
+      - Groq = Speed: Instant routing for casual chit-chat, simple definitions, and greetings.
+      - Gemini = Intelligence: Gemini 3.8 Flash primary for coding, math, science, and reasoning.
+      - Gemini 3.6 Flash: High-quality secondary balanced intelligence and fallback.
+      - Strict zero-budget eligibility and strict non-Gemini guarantee for PDF Study Studio.
     """
     groq_fast = registry.groq_fast_model
     groq_balanced = registry.groq_balanced_model
     gemini_code = getattr(registry, "gemini_code_model", "gemini-3.8-flash")
-    gemini_vision = getattr(registry, "gemini_vision_model", "gemini-3.5-flash")
-    gemini_reason = registry.gemini_reasoning_model
-    gemini_fast = registry.gemini_fast_model
+    gemini_vision = getattr(registry, "gemini_vision_model", "gemini-3.8-flash")
+    gemini_reason = getattr(registry, "gemini_reasoning_model", "gemini-3.8-flash")
+    gemini_balanced = getattr(registry, "gemini_balanced_model", "gemini-3.6-flash")
+    gemini_fast = getattr(registry, "gemini_fast_model", "gemini-3.5-flash-lite")
     samba_reason = registry.sambanova_reasoning_model
     samba_fast = registry.sambanova_fast_model
     openrouter_code = registry.openrouter_coding_model
@@ -155,21 +164,46 @@ def get_routing_candidates(task: TaskType, depth: ResponseDepth = ResponseDepth.
         filtered = _filter_eligible(candidates, disallow_gemini=True)
         return filtered
 
-    # ── 2. Multimodal & Diagram Tasks ──
+    # ── 2. Fast Speed Tier: Greetings, Casual Chat, Simple Turn (Groq 8B First) ──
+    if complexity == TaskComplexity.FAST or task in (TaskType.QUICK_CHAT, TaskType.CHAT_TITLE_GENERATION):
+        candidates = [
+            ("groq", groq_fast),
+            ("cerebras", "llama3.1-8b"),
+            ("sambanova", samba_fast),
+            ("groq", groq_balanced),
+            ("gemini", gemini_fast),
+            ("openrouter", openrouter_free)
+        ]
+        return _filter_eligible(candidates)
+
+    # ── 3. Light Tier: Short Definitions, Quick Facts, Simple Translations ──
+    if complexity == TaskComplexity.LIGHT or depth == ResponseDepth.FAST:
+        candidates = [
+            ("groq", groq_fast),
+            ("gemini", gemini_fast),
+            ("cerebras", "llama3.1-8b"),
+            ("sambanova", samba_fast),
+            ("groq", groq_balanced),
+            ("openrouter", openrouter_free)
+        ]
+        return _filter_eligible(candidates)
+
+    # ── 4. Multimodal & Diagram Tasks ──
     if task in MULTIMODAL_TASKS:
         candidates = [
             ("gemini", gemini_vision),
-            ("gemini", "gemini-2.5-flash"),
+            ("gemini", gemini_balanced),
             ("gemini", gemini_fast),
             ("openrouter", "nvidia/nemotron-3.5-super-vl:free"),
             ("groq", groq_balanced),  # Text fallback if visual is extracted
         ]
         return _filter_eligible(candidates)
 
-    # ── 3. Coding Specialists (SQL, DSA, Debugging, Code Writing) ──
+    # ── 5. Coding Specialists (SQL, DSA, Debugging, Code Writing) ──
     if task in CODING_TASKS:
         candidates = [
             ("gemini", gemini_code),
+            ("gemini", gemini_balanced),
             ("openrouter", openrouter_code),
             ("groq", groq_balanced),
             ("sambanova", samba_reason),
@@ -179,65 +213,47 @@ def get_routing_candidates(task: TaskType, depth: ResponseDepth = ResponseDepth.
         ]
         return _filter_eligible(candidates)
 
-    # ── 4. Mathematics Specialists ──
+    # ── 6. Mathematics Specialists ──
     if task in MATH_TASKS:
         candidates = [
             ("gemini", gemini_reason),
+            ("gemini", gemini_balanced),
             ("sambanova", samba_reason),
             ("groq", groq_balanced),
-            ("gemini", "gemini-2.5-flash"),
             ("cerebras", "gpt-oss-120b"),
             ("cerebras", "qwen-3.8-27b"),
             ("openrouter", openrouter_free)
         ]
         return _filter_eligible(candidates)
 
-    # ── 5. Science Specialists (Physics, Chemistry, Biology) ──
+    # ── 7. Science Specialists (Physics, Chemistry, Biology) ──
     if task in SCIENCE_TASKS:
         candidates = [
             ("gemini", gemini_reason),
-            ("sambanova", samba_reason),
+            ("gemini", gemini_balanced),
             ("groq", groq_balanced),
+            ("sambanova", samba_reason),
             ("cerebras", "gpt-oss-120b"),
             ("openrouter", openrouter_free)
         ]
         return _filter_eligible(candidates)
 
-    # ── 6. Web Research Synthesis ──
+    # ── 8. Web Research Synthesis ──
     if task == TaskType.WEB_RESEARCH:
         candidates = [
             ("gemini", gemini_reason),
+            ("gemini", gemini_balanced),
             ("groq", groq_balanced),
             ("sambanova", samba_reason),
             ("openrouter", openrouter_free)
         ]
         return _filter_eligible(candidates)
 
-    # ── 7. Translation & Language Composition ──
-    if task in (TaskType.TRANSLATION, TaskType.WRITING):
-        candidates = [
-            ("groq", groq_balanced),
-            ("gemini", gemini_reason),
-            ("sambanova", samba_reason),
-            ("openrouter", openrouter_free)
-        ]
-        return _filter_eligible(candidates)
-
-    # ── 8. Quick Chat & Titles (Low Latency First) ──
-    if task in (TaskType.QUICK_CHAT, TaskType.CHAT_TITLE_GENERATION) or depth == ResponseDepth.FAST:
-        candidates = [
-            ("groq", groq_fast),
-            ("cerebras", "llama3.1-8b"),
-            ("sambanova", samba_fast),
-            ("gemini", gemini_fast),
-            ("openrouter", openrouter_free)
-        ]
-        return _filter_eligible(candidates)
-
-    # ── 9. Deep Reasoning ──
-    if task == TaskType.DEEP_REASONING or depth == ResponseDepth.DEEP:
+    # ── 9. Deep Reasoning / Complex Architecture ──
+    if task == TaskType.DEEP_REASONING or depth == ResponseDepth.DEEP or complexity == TaskComplexity.DEEP:
         candidates = [
             ("gemini", gemini_reason),
+            ("gemini", gemini_balanced),
             ("sambanova", samba_reason),
             ("groq", groq_balanced),
             ("cerebras", "gpt-oss-120b"),
@@ -246,10 +262,22 @@ def get_routing_candidates(task: TaskType, depth: ResponseDepth = ResponseDepth.
         ]
         return _filter_eligible(candidates)
 
-    # ── 10. General Simple / Balanced Explanations ──
+    # ── 10. Translation & Language Composition ──
+    if task in (TaskType.TRANSLATION, TaskType.WRITING):
+        candidates = [
+            ("gemini", gemini_balanced),
+            ("groq", groq_balanced),
+            ("gemini", gemini_reason),
+            ("sambanova", samba_reason),
+            ("openrouter", openrouter_free)
+        ]
+        return _filter_eligible(candidates)
+
+    # ── 11. General Detailed / Balanced Explanations ──
     candidates = [
-        ("groq", groq_balanced),
         ("gemini", gemini_reason),
+        ("gemini", gemini_balanced),
+        ("groq", groq_balanced),
         ("sambanova", samba_reason),
         ("cerebras", "gpt-oss-120b"),
         ("openrouter", openrouter_free)

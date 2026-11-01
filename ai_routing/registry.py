@@ -35,12 +35,22 @@ class ModelSpec:
     supports_structured_json: bool = True
     supports_tool_calling: bool = False
     supports_vision: bool = False
+    supported_modalities: List[str] = field(default_factory=lambda: ["text"])
+    supported_thinking_levels: List[str] = field(default_factory=list)
+    lifecycle: str = "stable"  # "stable", "preview", "experimental", "legacy"
+    is_paid_only: bool = False
     max_context_tokens: int = 128000
     max_output_tokens: int = 4096
     timeout_sec: float = 25.0
     fallback_priority: int = 1
     availability_status: str = "available"  # "available", "unavailable", "quarantined"
     last_verified_ts: float = field(default_factory=time.time)
+
+    def __post_init__(self):
+        if self.supports_vision and "image" not in self.supported_modalities:
+            self.supported_modalities.append("image")
+        elif "image" in self.supported_modalities and not self.supports_vision:
+            self.supports_vision = True
 
 
 def collect_key_pool(prefix: str, count: int = 15) -> List[str]:
@@ -110,7 +120,7 @@ class ProviderKeyRotator:
 
 class ProviderRegistry:
     def __init__(self):
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._rotators: Dict[str, ProviderKeyRotator] = {}
         self._models: Dict[str, ModelSpec] = {}
         self._provider_switches: Dict[str, bool] = {}
@@ -143,10 +153,14 @@ class ProviderRegistry:
             # 4. Configurable model IDs
             self.groq_fast_model = (os.getenv("GROQ_MODEL_FAST") or "llama-3.1-8b-instant").strip()
             self.groq_balanced_model = (os.getenv("GROQ_MODEL_BALANCED") or "llama-3.3-70b-versatile").strip()
+            self.gemini_primary_model = (os.getenv("GEMINI_PRIMARY_MODEL") or "gemini-3.8-flash").strip()
             self.gemini_code_model = (os.getenv("GEMINI_CODE_MODEL") or "gemini-3.8-flash").strip()
-            self.gemini_vision_model = (os.getenv("GEMINI_VISION_MODEL") or "gemini-3.5-flash").strip()
+            self.gemini_vision_model = (os.getenv("GEMINI_VISION_MODEL") or "gemini-3.8-flash").strip()
             self.gemini_reasoning_model = (os.getenv("GEMINI_REASONING_MODEL") or "gemini-3.8-flash").strip()
+            self.gemini_balanced_model = (os.getenv("GEMINI_BALANCED_MODEL") or "gemini-3.6-flash").strip()
             self.gemini_fast_model = (os.getenv("GEMINI_FAST_MODEL") or "gemini-3.5-flash-lite").strip()
+            self.gemini_fallback_model = (os.getenv("GEMINI_FALLBACK_MODEL") or "gemini-3.6-flash").strip()
+            self.gemini_flagship_model = (os.getenv("GEMINI_FLAGSHIP_MODEL") or "gemini-4-argon").strip()
             self.gemini_pdf_model = (os.getenv("GEMINI_PDF_MODEL") or "gemini-2.5-flash").strip()
             self.sambanova_reasoning_model = (os.getenv("SAMBANOVA_REASONING_MODEL") or "Meta-Llama-3.3-70B-Instruct").strip()
             self.sambanova_fast_model = (os.getenv("SAMBANOVA_FAST_MODEL") or "Meta-Llama-3.1-8B-Instruct").strip()
@@ -157,18 +171,100 @@ class ProviderRegistry:
             self._models.clear()
 
             # Groq models
-            self._register(ModelSpec("llama-3.1-8b-instant", "groq", "Llama 3.1 8B Instant", CostCategory.FREE_TIER, 0.05, 0.08, supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=15.0))
-            self._register(ModelSpec("llama-3.3-70b-versatile", "groq", "Llama 3.3 70B Versatile", CostCategory.FREE_TIER, 0.59, 0.79, supports_streaming=True, supports_structured_json=True, max_output_tokens=8192, timeout_sec=25.0))
-            self._register(ModelSpec("qwen/qwen3.8-27b", "groq", "Qwen 3.8 27B", CostCategory.FREE_TIER, 0.20, 0.60, supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=20.0))
-            self._register(ModelSpec("openai/gpt-oss-120b", "groq", "GPT OSS 120B", CostCategory.FREE_TIER, 0.60, 1.20, supports_streaming=True, supports_structured_json=True, max_output_tokens=8192, timeout_sec=25.0))
+            self._register(ModelSpec("llama-3.1-8b-instant", "groq", "Llama 3.1 8B Instant", CostCategory.FREE_TIER, 0.05, 0.08, supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=15.0, lifecycle="stable"))
+            self._register(ModelSpec("llama-3.3-70b-versatile", "groq", "Llama 3.3 70B Versatile", CostCategory.FREE_TIER, 0.59, 0.79, supports_streaming=True, supports_structured_json=True, max_output_tokens=8192, timeout_sec=25.0, lifecycle="stable"))
+            self._register(ModelSpec("qwen/qwen3.8-27b", "groq", "Qwen 3.8 27B", CostCategory.FREE_TIER, 0.20, 0.60, supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=20.0, lifecycle="stable"))
+            self._register(ModelSpec("openai/gpt-oss-120b", "groq", "GPT OSS 120B", CostCategory.FREE_TIER, 0.60, 1.20, supports_streaming=True, supports_structured_json=True, max_output_tokens=8192, timeout_sec=25.0, lifecycle="stable"))
 
-            # Gemini models (Multimodal & Agentic Reasoning support)
-            self._register(ModelSpec("gemini-3.8-flash", "gemini", "Gemini 3.8 Flash", CostCategory.FREE_TIER, 0.75, 3.75, supports_streaming=True, supports_structured_json=True, supports_vision=True, max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=35.0))
-            self._register(ModelSpec("gemini-3.5-flash", "gemini", "Gemini 3.5 Flash", CostCategory.FREE_TIER, 0.15, 0.60, supports_streaming=True, supports_structured_json=True, supports_vision=True, max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=30.0))
-            self._register(ModelSpec("gemini-3.5-flash-lite", "gemini", "Gemini 3.5 Flash Lite", CostCategory.FREE_TIER, 0.075, 0.30, supports_streaming=True, supports_structured_json=True, supports_vision=True, max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=20.0))
-            self._register(ModelSpec("gemini-2.5-flash", "gemini", "Gemini 2.5 Flash", CostCategory.FREE_TIER, 0.15, 0.60, supports_streaming=True, supports_structured_json=True, supports_vision=True, max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=30.0))
-            self._register(ModelSpec("gemini-2.0-flash", "gemini", "Gemini 2.0 Flash", CostCategory.FREE_TIER, 0.10, 0.40, supports_streaming=True, supports_structured_json=True, supports_vision=True, max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=25.0))
-            self._register(ModelSpec("gemini-2.5-flash-lite", "gemini", "Gemini 2.5 Flash Lite", CostCategory.FREE_TIER, 0.075, 0.30, supports_streaming=True, supports_structured_json=True, supports_vision=True, max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=20.0))
+            # Gemini models (Multimodal, Thinking & Reasoning Support)
+            self._register(ModelSpec(
+                "gemini-3.8-flash", "gemini", "Gemini 3.8 Flash", CostCategory.FREE_TIER, 0.75, 3.75,
+                supports_streaming=True, supports_structured_json=True, supports_vision=True,
+                supported_modalities=["text", "image", "audio", "video"],
+                supported_thinking_levels=["low", "medium", "high"],
+                lifecycle="stable", is_paid_only=False,
+                max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=35.0, fallback_priority=1
+            ))
+            self._register(ModelSpec(
+                "gemini-3.6-flash", "gemini", "Gemini 3.6 Flash", CostCategory.FREE_TIER, 0.25, 1.00,
+                supports_streaming=True, supports_structured_json=True, supports_vision=True,
+                supported_modalities=["text", "image", "audio", "video"],
+                supported_thinking_levels=["low", "medium", "high"],
+                lifecycle="stable", is_paid_only=False,
+                max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=30.0, fallback_priority=2
+            ))
+            self._register(ModelSpec(
+                "gemini-3.5-flash-lite", "gemini", "Gemini 3.5 Flash Lite", CostCategory.FREE_TIER, 0.075, 0.30,
+                supports_streaming=True, supports_structured_json=True, supports_vision=True,
+                supported_modalities=["text", "image", "audio", "video"],
+                supported_thinking_levels=[],
+                lifecycle="stable", is_paid_only=False,
+                max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=20.0, fallback_priority=3
+            ))
+            self._register(ModelSpec(
+                "gemini-3.1-flash-lite", "gemini", "Gemini 3.1 Flash Lite", CostCategory.FREE_TIER, 0.075, 0.30,
+                supports_streaming=True, supports_structured_json=True, supports_vision=True,
+                supported_modalities=["text", "image", "audio", "video"],
+                supported_thinking_levels=[],
+                lifecycle="preview", is_paid_only=False,
+                max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=20.0, fallback_priority=4
+            ))
+            self._register(ModelSpec(
+                "gemini-3.1-pro-preview", "gemini", "Gemini 3.1 Pro Preview", CostCategory.FREE_TIER, 1.25, 5.00,
+                supports_streaming=True, supports_structured_json=True, supports_vision=True,
+                supported_modalities=["text", "image", "audio", "video"],
+                supported_thinking_levels=["low", "medium", "high"],
+                lifecycle="preview", is_paid_only=False,
+                max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=45.0, fallback_priority=5
+            ))
+            self._register(ModelSpec(
+                "gemini-4-argon", "gemini", "Gemini 4 Argon (Paid Flagship)", CostCategory.PAID, 2.50, 10.00,
+                supports_streaming=True, supports_structured_json=True, supports_vision=True,
+                supported_modalities=["text", "image", "audio", "video"],
+                supported_thinking_levels=["low", "medium", "high"],
+                lifecycle="preview", is_paid_only=True,
+                max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=60.0, fallback_priority=10
+            ))
+            self._register(ModelSpec(
+                "gemini-2.5-flash", "gemini", "Gemini 2.5 Flash", CostCategory.FREE_TIER, 0.15, 0.60,
+                supports_streaming=True, supports_structured_json=True, supports_vision=True,
+                supported_modalities=["text", "image", "audio", "video"],
+                supported_thinking_levels=[],
+                lifecycle="legacy", is_paid_only=False,
+                max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=30.0, fallback_priority=6
+            ))
+            self._register(ModelSpec(
+                "gemini-2.5-pro", "gemini", "Gemini 2.5 Pro", CostCategory.FREE_TIER, 1.25, 5.00,
+                supports_streaming=True, supports_structured_json=True, supports_vision=True,
+                supported_modalities=["text", "image", "audio", "video"],
+                supported_thinking_levels=[],
+                lifecycle="legacy", is_paid_only=False,
+                max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=45.0, fallback_priority=7
+            ))
+            self._register(ModelSpec(
+                "gemini-2.0-flash", "gemini", "Gemini 2.0 Flash", CostCategory.FREE_TIER, 0.10, 0.40,
+                supports_streaming=True, supports_structured_json=True, supports_vision=True,
+                supported_modalities=["text", "image", "audio", "video"],
+                supported_thinking_levels=[],
+                lifecycle="legacy", is_paid_only=False,
+                max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=25.0, fallback_priority=8
+            ))
+            self._register(ModelSpec(
+                "gemini-2.5-flash-lite", "gemini", "Gemini 2.5 Flash Lite", CostCategory.FREE_TIER, 0.075, 0.30,
+                supports_streaming=True, supports_structured_json=True, supports_vision=True,
+                supported_modalities=["text", "image", "audio", "video"],
+                supported_thinking_levels=[],
+                lifecycle="legacy", is_paid_only=False,
+                max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=20.0, fallback_priority=9
+            ))
+            self._register(ModelSpec(
+                "gemini-3.5-flash", "gemini", "Gemini 3.5 Flash", CostCategory.FREE_TIER, 0.15, 0.60,
+                supports_streaming=True, supports_structured_json=True, supports_vision=True,
+                supported_modalities=["text", "image", "audio", "video"],
+                supported_thinking_levels=[],
+                lifecycle="stable", is_paid_only=False,
+                max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=30.0, fallback_priority=5
+            ))
 
             # SambaNova models
             self._register(ModelSpec("Meta-Llama-3.3-70B-Instruct", "sambanova", "SambaNova Llama 3.3 70B", CostCategory.FREE_TIER, 0.60, 0.80, supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=30.0))
@@ -251,11 +347,51 @@ class ProviderRegistry:
         if spec.availability_status == "unavailable":
             return False
 
+        if spec.is_paid_only and not self.allow_paid_models:
+            return False
+
         if self.strict_zero_budget and not self.allow_paid_models:
             if spec.cost_category not in (CostCategory.ZERO_PRICE, CostCategory.FREE_TIER):
                 return False
 
         return True
+
+    def get_model_thinking_level(self, model_id: str, complexity: Optional[Any] = None) -> Optional[str]:
+        """Resolves optimal thinking level (low, medium, high) based on model capabilities and task complexity."""
+        with self._lock:
+            spec = self.get_model_spec(model_id)
+            if not spec or not spec.supported_thinking_levels:
+                return None
+            comp_str = str(getattr(complexity, "value", complexity) or "").upper()
+            if comp_str in ("FAST", "LIGHT"):
+                return "low" if "low" in spec.supported_thinking_levels else None
+            elif comp_str == "STANDARD":
+                return "medium" if "medium" in spec.supported_thinking_levels else "low"
+            elif comp_str in ("COMPLEX", "DEEP"):
+                return "high" if "high" in spec.supported_thinking_levels else "medium"
+            return "medium" if "medium" in spec.supported_thinking_levels else spec.supported_thinking_levels[0]
+
+    def get_model_capabilities(self, model_id: str) -> Dict[str, Any]:
+        """Returns verified capabilities, lifecycle, modalities, and limits for a given model."""
+        with self._lock:
+            spec = self.get_model_spec(model_id)
+            if not spec:
+                return {}
+            return {
+                "model_id": spec.model_id,
+                "provider": spec.provider,
+                "lifecycle": spec.lifecycle,
+                "supported_modalities": list(spec.supported_modalities),
+                "supported_thinking_levels": list(spec.supported_thinking_levels),
+                "cost_category": spec.cost_category.value,
+                "is_paid_only": spec.is_paid_only,
+                "supports_vision": spec.supports_vision,
+                "supports_streaming": spec.supports_streaming,
+                "supports_structured_json": spec.supports_structured_json,
+                "max_context_tokens": spec.max_context_tokens,
+                "max_output_tokens": spec.max_output_tokens,
+                "timeout_sec": spec.timeout_sec
+            }
 
     def set_model_enabled(self, model_id: str, enabled: bool):
         """Allows enabling or disabling a specific model at runtime."""
@@ -284,6 +420,10 @@ class ProviderRegistry:
                     "provider": spec.provider,
                     "display_name": spec.display_name or spec.model_id,
                     "cost_category": spec.cost_category.value,
+                    "lifecycle": spec.lifecycle,
+                    "supported_modalities": spec.supported_modalities,
+                    "supported_thinking_levels": spec.supported_thinking_levels,
+                    "is_paid_only": spec.is_paid_only,
                     "supports_vision": spec.supports_vision,
                     "supports_streaming": spec.supports_streaming,
                     "supports_structured_json": spec.supports_structured_json,

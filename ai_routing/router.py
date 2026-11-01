@@ -12,8 +12,16 @@ import logging
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Iterator, Tuple
 
-from ai_routing.tasks import TaskType, ResponseDepth, classify_task
+from ai_routing.tasks import (
+    TaskType,
+    ResponseDepth,
+    TaskComplexity,
+    classify_task,
+    classify_task_complexity,
+    classify_task_with_complexity
+)
 from ai_routing.policy import get_routing_candidates, MATH_TASKS
+from ai_routing.registry import registry
 from ai_routing.telemetry import global_telemetry, TelemetryRecord
 from ai_routing.providers.base import BaseProvider, ProviderResult
 from ai_routing.providers.groq_provider import GroqProvider
@@ -146,7 +154,9 @@ class AIRouter:
             prompt = ""
         req_id = request_id or str(uuid.uuid4())
         resolved_depth = ResponseDepth.from_str(str(depth)) if depth else ResponseDepth.BALANCED
-        resolved_task = classify_task(prompt, messages, document_context, explicit_task=task, depth=resolved_depth)
+        resolved_task, resolved_complexity = classify_task_with_complexity(
+            prompt, messages, document_context, explicit_task=task, depth=resolved_depth
+        )
         resolved_plat = Platform.from_str(str(platform)) if platform else Platform.WEB
 
         # Prepare messages
@@ -201,7 +211,7 @@ class AIRouter:
         if resolved_task == TaskType.WEB_RESEARCH:
             citations = self._apply_search_grounding(call_messages, prompt)
 
-        candidates = candidate_chain or get_routing_candidates(resolved_task, resolved_depth)
+        candidates = candidate_chain or get_routing_candidates(resolved_task, resolved_depth, resolved_complexity)
         fallback_used = False
         fallback_from = None
         last_exc = None
@@ -222,14 +232,21 @@ class AIRouter:
                     model_id=model_id,
                     estimated_input_tokens=est_in_tokens
                 )
-                res = provider.generate(
-                    messages=call_messages,
-                    system_prompt=sys_prompt,
-                    max_tokens=token_budget,
-                    model_id=model_id,
-                    json_output=json_output,
-                    multimodal_parts=document_context.get("multimodal_parts") if document_context else None
-                )
+                gen_kwargs = {
+                    "messages": call_messages,
+                    "system_prompt": sys_prompt,
+                    "max_tokens": token_budget,
+                    "model_id": model_id,
+                    "json_output": json_output,
+                    "multimodal_parts": document_context.get("multimodal_parts") if document_context else None
+                }
+                thinking_lvl = None
+                if provider_name == "gemini":
+                    thinking_lvl = registry.get_model_thinking_level(model_id, resolved_complexity)
+                    if thinking_lvl:
+                        gen_kwargs["thinking_level"] = thinking_lvl
+
+                res = provider.generate(**gen_kwargs)
 
                 accumulated_text = res.text
                 continuation_used = False
@@ -251,14 +268,17 @@ class AIRouter:
                         {"role": "user", "content": CONTINUATION_PROMPT}
                     ]
                     try:
-                        cont_res = provider.generate(
-                            messages=cont_messages,
-                            system_prompt=sys_prompt,
-                            max_tokens=token_budget,
-                            model_id=model_id,
-                            json_output=json_output,
-                            multimodal_parts=None
-                        )
+                        cont_kwargs = {
+                            "messages": cont_messages,
+                            "system_prompt": sys_prompt,
+                            "max_tokens": token_budget,
+                            "model_id": model_id,
+                            "json_output": json_output,
+                            "multimodal_parts": None
+                        }
+                        if provider_name == "gemini" and thinking_lvl:
+                            cont_kwargs["thinking_level"] = thinking_lvl
+                        cont_res = provider.generate(**cont_kwargs)
                         accumulated_text = stitch_continuation(accumulated_text, cont_res.text)
                         tot_in_tokens += cont_res.input_tokens or 0
                         tot_out_tokens += cont_res.output_tokens or 0
@@ -349,7 +369,9 @@ class AIRouter:
             prompt = ""
         req_id = request_id or str(uuid.uuid4())
         resolved_depth = ResponseDepth.from_str(str(depth)) if depth else ResponseDepth.BALANCED
-        resolved_task = classify_task(prompt, messages, document_context, explicit_task=task, depth=resolved_depth)
+        resolved_task, resolved_complexity = classify_task_with_complexity(
+            prompt, messages, document_context, explicit_task=task, depth=resolved_depth
+        )
         resolved_plat = Platform.from_str(str(platform)) if platform else Platform.WEB
 
         call_messages = list(messages) if messages else []
@@ -394,7 +416,7 @@ class AIRouter:
         if resolved_task == TaskType.WEB_RESEARCH:
             self._apply_search_grounding(call_messages, prompt)
 
-        candidates = candidate_chain or get_routing_candidates(resolved_task, resolved_depth)
+        candidates = candidate_chain or get_routing_candidates(resolved_task, resolved_depth, resolved_complexity)
         fallback_used = False
         fallback_from = None
         last_exc = None
@@ -421,13 +443,20 @@ class AIRouter:
             )
 
             try:
-                for token in provider.stream(
-                    messages=call_messages,
-                    system_prompt=sys_prompt,
-                    max_tokens=token_budget,
-                    model_id=model_id,
-                    multimodal_parts=document_context.get("multimodal_parts") if document_context else None
-                ):
+                stream_kwargs = {
+                    "messages": call_messages,
+                    "system_prompt": sys_prompt,
+                    "max_tokens": token_budget,
+                    "model_id": model_id,
+                    "multimodal_parts": document_context.get("multimodal_parts") if document_context else None
+                }
+                thinking_lvl = None
+                if provider_name == "gemini":
+                    thinking_lvl = registry.get_model_thinking_level(model_id, resolved_complexity)
+                    if thinking_lvl:
+                        stream_kwargs["thinking_level"] = thinking_lvl
+
+                for token in provider.stream(**stream_kwargs):
                     if token:
                         if not started:
                             started = True
@@ -450,13 +479,17 @@ class AIRouter:
                     first_cont_chunk = True
                     round_chunks = 0
                     try:
-                        for token in provider.stream(
-                            messages=cont_messages,
-                            system_prompt=sys_prompt,
-                            max_tokens=token_budget,
-                            model_id=model_id,
-                            multimodal_parts=None
-                        ):
+                        cont_stream_kwargs = {
+                            "messages": cont_messages,
+                            "system_prompt": sys_prompt,
+                            "max_tokens": token_budget,
+                            "model_id": model_id,
+                            "multimodal_parts": None
+                        }
+                        if provider_name == "gemini" and thinking_lvl:
+                            cont_stream_kwargs["thinking_level"] = thinking_lvl
+
+                        for token in provider.stream(**cont_stream_kwargs):
                             if token:
                                 if first_cont_chunk:
                                     first_cont_chunk = False

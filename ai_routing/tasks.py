@@ -6,7 +6,7 @@ response-depth modes, and a fast, deterministic, zero-overhead multilingual task
 
 from enum import Enum
 import re
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 class TaskType(str, Enum):
     # Core & Educational
@@ -71,6 +71,29 @@ class ResponseDepth(str, Enum):
         if v in ("DEEP", "LONG", "DETAILED", "THOROUGH", "EXTENSIVE"):
             return cls.DEEP
         return cls.BALANCED
+
+
+class TaskComplexity(str, Enum):
+    FAST     = "FAST"      # Casual greetings, acknowledgments, single-turn chit-chat -> Groq 8B
+    LIGHT    = "LIGHT"     # Short definitions, basic facts, simple translations -> Groq 8B / Gemini 3.5 Flash-Lite
+    STANDARD = "STANDARD"  # General explanations, tutoring, standard writing -> Gemini 3.8 Flash (med thinking)
+    COMPLEX  = "COMPLEX"   # Coding, debugging, DSA, SQL, Science -> Gemini 3.8 Flash (med/high thinking)
+    DEEP     = "DEEP"      # Multi-step proofs, architecture, deep reasoning -> Gemini 3.8 Flash (high thinking)
+
+    @classmethod
+    def from_str(cls, val: Optional[str]) -> "TaskComplexity":
+        if not val:
+            return cls.STANDARD
+        v = str(val).strip().upper()
+        if v in ("FAST", "INSTANT", "TRIVIAL"):
+            return cls.FAST
+        if v in ("LIGHT", "SIMPLE", "SHORT"):
+            return cls.LIGHT
+        if v in ("COMPLEX", "HARD"):
+            return cls.COMPLEX
+        if v in ("DEEP", "ADVANCED", "EXHAUSTIVE"):
+            return cls.DEEP
+        return cls.STANDARD
 
 
 # ── REGEX PATTERNS FOR DETERMINISTIC CLASSIFICATION ─────────────────────
@@ -201,6 +224,12 @@ _DEEP_KEYWORDS = re.compile(
 
 _BRIEF_KEYWORDS = re.compile(
     r"\b(briefly|short answer|in short|quick definition|in 1 line|one line|concise|tldr|only the answer|just the answer)\b",
+    re.IGNORECASE
+)
+
+# Casual greetings and quick acknowledgments (Instant Groq 8B candidate)
+_CASUAL_GREETING_KEYWORDS = re.compile(
+    r"^(hi|hello|hey|hola|namaste|sup|yo|good\s+(morning|afternoon|evening|night)|thanks|thank\s+you|thx|ok|okay|k|bye|cya|see\s+you|how\s+are\s+you|kya\s+haal|kem\s+cho|wassup)[\s\.\!\?]*$",
     re.IGNORECASE
 )
 
@@ -371,3 +400,102 @@ def classify_task(
         return TaskType.DETAILED_EXPLANATION
 
     return TaskType.SIMPLE_EXPLANATION
+
+
+def classify_task_complexity(
+    prompt: Optional[str | List[Dict[str, str]]] = None,
+    task: Optional[TaskType | str] = None,
+    depth: Optional[ResponseDepth | str] = None,
+    context: Optional[Dict[str, Any]] = None
+) -> TaskComplexity:
+    """
+    Deterministic zero-cost task complexity estimator.
+    Categorizes incoming user requests into:
+      - FAST: Casual greetings, simple acknowledgments, lightweight chat (Target: Groq 8B Instant)
+      - LIGHT: Short definitions, basic facts, simple translations (Target: Groq 8B / Gemini 3.5 Flash-Lite)
+      - STANDARD: Conceptual explanations, tutoring, writing (Target: Gemini 3.8 Flash with medium thinking)
+      - COMPLEX: Coding, debugging, algorithms, science, algebra (Target: Gemini 3.8 Flash with med/high thinking)
+      - DEEP: Mathematical proofs, architecture reviews, multi-step problem solving (Target: Gemini 3.8 Flash with high thinking)
+    """
+    text = ""
+    if isinstance(prompt, str):
+        text = prompt.strip()
+    elif isinstance(prompt, list):
+        for m in reversed(prompt):
+            if isinstance(m, dict) and m.get("role") == "user":
+                text = (m.get("content") or "").strip()
+                break
+
+    resolved_depth = ResponseDepth.from_str(str(depth)) if depth else ResponseDepth.BALANCED
+    resolved_task = None
+    if task:
+        if isinstance(task, TaskType):
+            resolved_task = task
+        else:
+            try:
+                resolved_task = TaskType(str(task).upper())
+            except ValueError:
+                pass
+
+    words = text.split()
+    word_count = len(words)
+
+    # 1. FAST: Casual greetings, single-word acknowledgments, quick conversational turns
+    if _CASUAL_GREETING_KEYWORDS.match(text) or (word_count <= 3 and _CASUAL_GREETING_KEYWORDS.search(text)):
+        return TaskComplexity.FAST
+
+    if resolved_task == TaskType.QUICK_CHAT and (word_count <= 6 or resolved_depth == ResponseDepth.FAST):
+        return TaskComplexity.FAST
+
+    if resolved_task == TaskType.CHAT_TITLE_GENERATION:
+        return TaskComplexity.FAST
+
+    # 2. DEEP: Deep reasoning, architectural reviews, multi-step math proofs, explicit deep dive requests
+    if resolved_task == TaskType.DEEP_REASONING or resolved_depth == ResponseDepth.DEEP or _DEEP_KEYWORDS.search(text):
+        return TaskComplexity.DEEP
+
+    if resolved_task in (TaskType.ADVANCED_MATHEMATICS, TaskType.CALCULUS) and (word_count > 20 or resolved_depth == ResponseDepth.DEEP):
+        return TaskComplexity.DEEP
+
+    # 3. LIGHT: Short definitions, basic facts, simple translations, brief explanations
+    if (_BRIEF_KEYWORDS.search(text) or resolved_depth == ResponseDepth.FAST) and resolved_task not in (
+        TaskType.CODING, TaskType.CODING_DEBUGGING, TaskType.DSA
+    ):
+        return TaskComplexity.LIGHT
+
+    if resolved_task in (TaskType.TRANSLATION, TaskType.SIMPLE_EXPLANATION) and word_count <= 20:
+        return TaskComplexity.LIGHT
+
+    # 4. COMPLEX: Coding, debugging, DSA, SQL, Science (Physics, Chemistry, Biology), Math
+    if resolved_task in (
+        TaskType.CODING, TaskType.CODING_DEBUGGING, TaskType.CODING_EXPLANATION,
+        TaskType.DSA, TaskType.SQL, TaskType.PHYSICS, TaskType.CHEMISTRY,
+        TaskType.BIOLOGY, TaskType.SCIENCE, TaskType.MATHEMATICS,
+        TaskType.ALGEBRA, TaskType.STATISTICS, TaskType.MATH_AND_LOGIC
+    ):
+        return TaskComplexity.COMPLEX
+
+    # Check if text strongly indicates coding or science even without resolved_task
+    if _CODE_KEYWORDS.search(text) or "```" in text or _SQL_KEYWORDS.search(text) or _DSA_KEYWORDS.search(text):
+        return TaskComplexity.COMPLEX
+    if _PHYSICS_KEYWORDS.search(text) or _CHEMISTRY_KEYWORDS.search(text) or _CALCULUS_KEYWORDS.search(text):
+        return TaskComplexity.COMPLEX
+
+    if word_count <= 8 and not any(k.search(text) for k in (_CODE_KEYWORDS, _MATH_KEYWORDS, _PHYSICS_KEYWORDS, _CHEMISTRY_KEYWORDS)):
+        return TaskComplexity.LIGHT
+
+    # 5. STANDARD: Detailed explanations, tutoring, standard composition, web research, PDF ops
+    return TaskComplexity.STANDARD
+
+
+def classify_task_with_complexity(
+    prompt: Optional[str | List[Dict[str, str]]] = None,
+    messages: Optional[List[Dict[str, str]]] = None,
+    context: Optional[Dict[str, Any]] = None,
+    explicit_task: Optional[TaskType | str] = None,
+    depth: Optional[ResponseDepth | str] = None
+) -> Tuple[TaskType, TaskComplexity]:
+    """Classifies both TaskType and TaskComplexity in a single pass."""
+    t = classify_task(prompt, messages, context, explicit_task, depth)
+    c = classify_task_complexity(prompt or messages, task=t, depth=depth, context=context)
+    return t, c

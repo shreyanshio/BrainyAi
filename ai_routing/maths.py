@@ -9,27 +9,28 @@ Zero eval(), zero unrestricted exec(), zero remote API calls.
 import re
 import math
 import logging
+import ast
+import operator
 from decimal import Decimal, InvalidOperation
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple, Union
 
 import sympy as sp
-from sympy.parsing.sympy_parser import (
-    parse_expr,
-    standard_transformations,
-    implicit_multiplication_application,
-    convert_xor,
-    factorial_notation,
-)
-
 logger = logging.getLogger("maths_engine")
 
-# Safe transformations for mathematical syntax (e.g. 2x -> 2*x, x^2 -> x**2, 5! -> factorial(5))
-_TRANSFORMATIONS = standard_transformations + (
-    implicit_multiplication_application,
-    convert_xor,
-    factorial_notation,
-)
+# User text is parsed by a deliberately small AST allowlist. Never hand raw
+# user-controlled strings to SymPy's eval-based parsing helpers.
+_MAX_EXPR_LENGTH = 400
+_MAX_AST_NODES = 96
+_MAX_AST_DEPTH = 18
+_MAX_ABS_EXPONENT = 100
+_MAX_LITERAL_DIGITS = 50
+_FUNCTIONS = {"sqrt": sp.sqrt, "sin": sp.sin, "cos": sp.cos, "tan": sp.tan,
+              "asin": sp.asin, "acos": sp.acos, "atan": sp.atan,
+              "log": sp.log, "ln": sp.log, "exp": sp.exp,
+              "Abs": sp.Abs, "abs": sp.Abs, "factorial": sp.factorial}
+_BINARY_OPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+               ast.Div: operator.truediv, ast.Pow: operator.pow}
 
 # Standard periodic table atomic weights (g/mol)
 ATOMIC_WEIGHTS: Dict[str, float] = {
@@ -100,14 +101,49 @@ def _sanitize_math_input(raw: str) -> str:
 
 
 def safe_parse_expression(expr_str: str) -> sp.Expr:
-    """Parses mathematical expression using SymPy parser with restricted transformations."""
+    """Parse a small mathematical grammar without eval/sympify/parse_expr."""
     clean = _sanitize_math_input(expr_str)
-    # Parse with restricted globals
-    return parse_expr(
-        clean,
-        transformations=_TRANSFORMATIONS,
-        evaluate=False
-    )
+    if not clean or len(clean) > _MAX_EXPR_LENGTH:
+        raise ValueError("Expression is empty or exceeds the supported length.")
+    clean = clean.replace("^", "**")
+    # Convert postfix factorial n! -> factorial(n) while guarding against !=
+    while re.search(r"(\b\w+|\([^()]+\))!(?!=)", clean):
+        clean = re.sub(r"(\b\w+|\([^()]+\))!(?!=)", r"factorial(\1)", clean)
+    tree = ast.parse(clean, mode="eval")
+    nodes = list(ast.walk(tree))
+    if len(nodes) > _MAX_AST_NODES:
+        raise ValueError("Expression is too complex.")
+    def depth(node, level=0):
+        if level > _MAX_AST_DEPTH:
+            raise ValueError("Expression nesting is too deep.")
+        for child in ast.iter_child_nodes(node):
+            depth(child, level + 1)
+    depth(tree)
+    symbols = {}
+    def build(node):
+        if isinstance(node, ast.Expression): return build(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
+            if len(str(node.value)) > _MAX_LITERAL_DIGITS: raise ValueError("Numeric literal is too large.")
+            return sp.Rational(str(node.value))
+        if isinstance(node, ast.Name):
+            if node.id == "pi": return sp.pi
+            if node.id == "E": return sp.E
+            if node.id not in symbols:
+                if len(symbols) >= 8: raise ValueError("Too many variables.")
+                symbols[node.id] = sp.Symbol(node.id)
+            return symbols[node.id]
+        if isinstance(node, ast.BinOp) and type(node.op) in _BINARY_OPS:
+            left, right = build(node.left), build(node.right)
+            if isinstance(node.op, ast.Pow):
+                if right.is_number and (abs(float(right)) > _MAX_ABS_EXPONENT): raise ValueError("Exponent exceeds the supported limit.")
+            return _BINARY_OPS[type(node.op)](left, right)
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            value = build(node.operand)
+            return value if isinstance(node.op, ast.UAdd) else -value
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _FUNCTIONS and not node.keywords:
+            return _FUNCTIONS[node.func.id](*(build(arg) for arg in node.args))
+        raise ValueError("Expression contains unsupported syntax.")
+    return build(tree)
 
 
 # ── CHEMISTRY PARSER ────────────────────────────────────────────────────

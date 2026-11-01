@@ -20,14 +20,15 @@ class GeminiProvider(BaseProvider):
         max_tokens: int,
         model_id: Optional[str] = None,
         json_output: bool = False,
-        multimodal_parts: Optional[List[Dict[str, Any]]] = None
+        multimodal_parts: Optional[List[Dict[str, Any]]] = None,
+        thinking_level: Optional[str] = None
     ) -> ProviderResult:
         rot = registry.get_rotator("gemini")
         if not rot or rot.key_count == 0:
             raise RuntimeError("NO_KEYS: gemini")
 
         primary_model = model_id or registry.gemini_reasoning_model
-        model_chain = [primary_model, "gemini-3.5-flash", "gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash-lite"]
+        model_chain = [primary_model, "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
         model_chain = list(dict.fromkeys(model_chain))
 
         start_t = time.perf_counter()
@@ -62,8 +63,21 @@ class GeminiProvider(BaseProvider):
             key = rot.get_key()
             for model in model_chain:
                 try:
+                    # Construct per-model payload with thinking config for Gemini 3.x+
+                    req_payload = json.loads(json.dumps(payload))
+                    if thinking_level and model.startswith(("gemini-3.", "gemini-4")):
+                        tl_str = thinking_level.strip().upper()
+                        if tl_str in ("LOW", "MEDIUM", "HIGH", "MINIMAL"):
+                            req_payload["generationConfig"]["thinkingConfig"] = {
+                                "thinkingLevel": tl_str
+                            }
+
                     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-                    resp = requests.post(url, json=payload, timeout=30)
+                    resp = requests.post(url, json=req_payload, timeout=30)
+                    if resp.status_code == 429:
+                        rot.quarantine_key(key, cooldown_seconds=60.0)
+                        logger.warning("Gemini 429 rate limit on key %s...; quarantined for 60s", key[:8] if key else "")
+                        break
                     resp.raise_for_status()
                     data = resp.json()
                     candidate = data["candidates"][0]
@@ -96,7 +110,8 @@ class GeminiProvider(BaseProvider):
         system_prompt: str,
         max_tokens: int,
         model_id: Optional[str] = None,
-        multimodal_parts: Optional[List[Dict[str, Any]]] = None
+        multimodal_parts: Optional[List[Dict[str, Any]]] = None,
+        thinking_level: Optional[str] = None
     ) -> Iterator[str]:
         self.last_stream_finish_reason = None
         rot = registry.get_rotator("gemini")
@@ -104,7 +119,7 @@ class GeminiProvider(BaseProvider):
             raise RuntimeError("NO_KEYS: gemini")
 
         primary_model = model_id or registry.gemini_reasoning_model
-        model_chain = [primary_model, "gemini-3.5-flash", "gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash-lite"]
+        model_chain = [primary_model, "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
         model_chain = list(dict.fromkeys(model_chain))
 
         contents = []
@@ -133,8 +148,20 @@ class GeminiProvider(BaseProvider):
             key = rot.get_key()
             for model in model_chain:
                 try:
+                    req_payload = json.loads(json.dumps(payload))
+                    if thinking_level and model.startswith(("gemini-3.", "gemini-4")):
+                        tl_str = thinking_level.strip().upper()
+                        if tl_str in ("LOW", "MEDIUM", "HIGH", "MINIMAL"):
+                            req_payload["generationConfig"]["thinkingConfig"] = {
+                                "thinkingLevel": tl_str
+                            }
+
                     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse&key={key}"
-                    resp = requests.post(url, json=payload, stream=True, timeout=25)
+                    resp = requests.post(url, json=req_payload, stream=True, timeout=25)
+                    if resp.status_code == 429:
+                        rot.quarantine_key(key, cooldown_seconds=60.0)
+                        logger.warning("Gemini 429 rate limit during stream on key %s...", key[:8] if key else "")
+                        break
                     resp.raise_for_status()
                     for line in resp.iter_lines():
                         if line:

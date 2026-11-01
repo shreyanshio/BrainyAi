@@ -18,9 +18,14 @@ MODEL_PRICING_REGISTRY: Dict[str, Dict[str, float]] = {
 
     # Google Gemini Models
     "gemini-3.8-flash": {"input": 0.75, "output": 3.75},
-    "gemini-3.5-flash": {"input": 0.15, "output": 0.60},
+    "gemini-3.6-flash": {"input": 0.25, "output": 1.00},
     "gemini-3.5-flash-lite": {"input": 0.075, "output": 0.30},
+    "gemini-3.1-flash-lite": {"input": 0.075, "output": 0.30},
+    "gemini-3.1-pro-preview": {"input": 1.25, "output": 5.00},
+    "gemini-4-argon": {"input": 2.50, "output": 10.00},
+    "gemini-3.5-flash": {"input": 0.15, "output": 0.60},
     "gemini-2.5-flash": {"input": 0.15, "output": 0.60},
+    "gemini-2.5-pro": {"input": 1.25, "output": 5.00},
     "gemini-2.0-flash": {"input": 0.10, "output": 0.40},
     "gemini-2.5-flash-lite": {"input": 0.075, "output": 0.30},
 
