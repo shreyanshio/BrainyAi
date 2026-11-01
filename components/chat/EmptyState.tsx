@@ -15,7 +15,7 @@ export function EmptyState({ userName }: EmptyStateProps) {
   }, [])
 
   return (
-    <div className="w-full max-w-2xl mx-auto px-4 py-6 sm:py-14 text-center select-none">
+    <div className="w-full max-w-2xl mx-auto px-4 py-8 text-center select-none flex flex-col items-center justify-center my-auto">
       <h1 className="text-2xl sm:text-4xl md:text-5xl font-medium tracking-tight text-[var(--text-primary)] leading-tight">
         Good {timeOfDay}, {userName || 'Scholar'}
       </h1>

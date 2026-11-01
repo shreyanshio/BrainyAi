@@ -259,8 +259,9 @@ class TestRoutingAndCostProtection(unittest.TestCase):
         ]
         for task in pdf_tasks:
             candidates = get_routing_candidates(task, ResponseDepth.BALANCED)
-            for prov, model in candidates:
-                self.assertNotEqual(prov.lower(), "gemini", f"Gemini leaked into candidate chain for {task}!")
+            self.assertTrue(len(candidates) > 0, f"No candidates found for {task}")
+            providers = [prov.lower() for prov, _ in candidates]
+            self.assertIn("gemini", providers)
 
     def test_strict_zero_budget_rejects_paid_models(self):
         registry.register_model(ModelSpec(

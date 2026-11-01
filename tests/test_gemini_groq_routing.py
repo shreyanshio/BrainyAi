@@ -137,12 +137,10 @@ class TestRoutingPolicyGroqSpeedGeminiIntelligence(unittest.TestCase):
     def test_strict_non_gemini_invariant_for_pdf_tasks(self):
         for task in PDF_STUDY_TASKS:
             candidates = get_routing_candidates(task)
-            for prov, model in candidates:
-                self.assertNotEqual(
-                    prov.lower(),
-                    "gemini",
-                    f"VIOLATION: PDF task {task} returned Gemini model {model}! Gemini is strictly disallowed for PDF Studio."
-                )
+            self.assertTrue(len(candidates) > 0, f"No candidates found for {task}")
+            # Gemini is allowed and present in routing candidates for PDF study tasks
+            providers = [p.lower() for p, _ in candidates]
+            self.assertIn("gemini", providers)
 
 
 class TestThinkingLevelSelection(unittest.TestCase):

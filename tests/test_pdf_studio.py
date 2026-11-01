@@ -589,13 +589,13 @@ class TestPDFStudyServicePersistenceAndSecurity(unittest.TestCase):
         self.assertIn("Turn 15 discussion", call_prompt)
 
     def test_non_gemini_routing_for_all_pdf_tasks(self):
-        """Asserts that Gemini is NEVER selected as a candidate model for any PDF study task."""
+        """Asserts that Gemini is supported and available as a candidate model for PDF study tasks."""
         from ai_routing.policy import get_routing_candidates, PDF_STUDY_TASKS
 
         for task in PDF_STUDY_TASKS:
             candidates = get_routing_candidates(task)
             candidate_providers = [c[0] for c in candidates]
-            self.assertNotIn("gemini", candidate_providers, f"Gemini was improperly included in candidates for {task}!")
+            self.assertIn("gemini", candidate_providers, f"Gemini should be included in candidates for {task}!")
             self.assertGreater(len(candidates), 0, f"No candidates found for {task}")
 
 

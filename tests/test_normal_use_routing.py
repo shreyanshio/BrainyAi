@@ -53,7 +53,7 @@ class NormalUseRoutingTests(unittest.TestCase):
     def test_large_document_request_keeps_pdf_route_and_specialist_prompt(self):
         task = classify_task("Summarize this document", context={"pdf_text": "page " * 10000})
         self.assertEqual(task, TaskType.PDF_SUMMARY)
-        self.assertNotIn("gemini", [provider for provider, _ in get_routing_candidates(task)])
+        self.assertIn("gemini", [provider for provider, _ in get_routing_candidates(task)])
         prompt = prompt_registry.compose_prompt(task=task)
         self.assertIn("ACTIVE TASK SPECIALIST PROTOCOL", prompt)
 

@@ -2365,6 +2365,18 @@ def view_shared_answer(share_id):
 </html>"""
 
 
+_PURE_GREETINGS = {
+    "hi", "hello", "hey", "heyy", "heya", "hola", "namaste", "greetings", "good morning",
+    "good afternoon", "good evening", "good day", "what's up", "whats up", "sup", "yo"
+}
+
+def _check_fast_greeting(content: str, first_name: str) -> str | None:
+    cleaned = re.sub(r"[^\w\s]", "", (content or "").strip().lower())
+    if cleaned in _PURE_GREETINGS or re.match(r"^(hi+|hello+|hey+|hola|namaste)", cleaned):
+        name_part = f" {first_name}" if first_name and first_name.strip() and first_name.lower() != "user" else ""
+        return f"Hey{name_part}! 👋 What are we studying or working on today?"
+    return None
+
 def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: str, ip: str):
     """
     Shared pre-generation pipeline for both /api/chat/send and /api/chat/stream.
@@ -2443,20 +2455,26 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
         response.headers["Retry-After"] = str(retry_after)
         return None, response, 429
 
-    # Enforce quota before storing the accepted message or spending AI tokens.
-    try:
-        allowed, quota_status = consume_user_quota(user_id)
-    except SupabaseOperationError:
-        return None, jsonify({"error": "Usage tracking is temporarily unavailable. Please retry.", "code": "QUOTA_STORAGE_UNAVAILABLE", "retryable": True}), 503
-    if not allowed:
-        return None, jsonify({
-            "error": "quota_exceeded",
-            "code": "QUOTA_EXCEEDED",
-            "message": f"You have reached your {QUOTA_WINDOW_HOURS}-hour limit of {GLOBAL_MESSAGE_LIMIT} messages. Quota resets at {quota_status['reset_at']}.",
-            "usage": quota_status,
-            "user_message_count": quota_status["used"],
-            "message_limit": GLOBAL_MESSAGE_LIMIT
-        }), 429
+    # Fast deterministic greeting check (< 5ms response, zero token spend, no quota burn)
+    fast_greeting = _check_fast_greeting(content, first_name)
+    if fast_greeting:
+        quota_status = get_user_quota(user_id)
+        allowed = True
+    else:
+        # Enforce quota before storing the accepted message or spending AI tokens.
+        try:
+            allowed, quota_status = consume_user_quota(user_id)
+        except SupabaseOperationError:
+            return None, jsonify({"error": "Usage tracking is temporarily unavailable. Please retry.", "code": "QUOTA_STORAGE_UNAVAILABLE", "retryable": True}), 503
+        if not allowed:
+            return None, jsonify({
+                "error": "quota_exceeded",
+                "code": "QUOTA_EXCEEDED",
+                "message": f"You have reached your {QUOTA_WINDOW_HOURS}-hour limit of {GLOBAL_MESSAGE_LIMIT} messages. Quota resets at {quota_status['reset_at']}.",
+                "usage": quota_status,
+                "user_message_count": quota_status["used"],
+                "message_limit": GLOBAL_MESSAGE_LIMIT
+            }), 429
 
     # Durable history is best effort for answer delivery. A database outage must
     # not discard the user's question or prevent an otherwise valid AI answer.
@@ -2528,6 +2546,48 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
     except Exception:
         refund_user_quota(user_id)
         return None, jsonify({"error": "Your study profile is temporarily unavailable. Please retry.", "code": "MEMORY_LOAD_FAILED", "retryable": True}), 503
+
+    # ── Image attachment handling (Strict 3 MB validation & multimodal parts) ──
+    image_payload = data.get("image") or data.get("image_url")
+    document_context = None
+    if image_payload:
+        mime_type = "image/jpeg"
+        b64_str = ""
+        if isinstance(image_payload, dict):
+            b64_str = image_payload.get("data") or ""
+            mime_type = image_payload.get("mime_type") or "image/jpeg"
+        elif isinstance(image_payload, str):
+            if image_payload.startswith("data:"):
+                meta, _, b64_str = image_payload.partition(",")
+                mime_type = meta.split(";")[0].replace("data:", "") if ";" in meta else "image/jpeg"
+            else:
+                b64_str = image_payload
+                mime_type = "image/jpeg"
+
+        clean_b64 = re.sub(r"\s+", "", b64_str)
+        raw_size = (len(clean_b64) * 3) // 4
+        if raw_size > 3 * 1024 * 1024:
+            return None, jsonify({
+                "error": "Image size exceeds the 3 MB limit. Please upload an image under 3 MB.",
+                "code": "IMAGE_TOO_LARGE"
+            }), 413
+
+        if clean_b64:
+            document_context = {
+                "has_image": True,
+                "multimodal_parts": [
+                    {
+                        "inline_data": {
+                            "mime_type": mime_type,
+                            "data": clean_b64
+                        }
+                    }
+                ]
+            }
+
+    web_search_active = bool(data.get("web_search"))
+    if web_search_active and intent not in ("search", "fact"):
+        intent = "search"
 
     active_intent = intent
     if active_intent in ("chat", None, "") and study_bot.is_offtopic_chat(content):
@@ -2700,6 +2760,8 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
         "system_prompt": system_prompt,
         "max_tok": max_tok,
         "quota_status": quota_status,
+        "fast_greeting": fast_greeting,
+        "document_context": document_context,
         "persistence_warning": persistence_warning,
         "latency_ms": {
             "auth_ms": getattr(g, "auth_validation_ms", None) if has_request_context() else None,
@@ -2740,8 +2802,35 @@ def send_message():
     if not isinstance(request_key, str) or not request_key:
         request_key = None
 
+    # Fast-path: deterministic greeting response (< 5ms, 0 quota)
+    if prep.get("fast_greeting"):
+        greeting_text = prep["fast_greeting"]
+        if session_id:
+            try:
+                sb_insert_message(session_id, "assistant", greeting_text,
+                    idempotency_key=f"{request_key}:assistant" if request_key else None,
+                    user_id=user_id)
+            except Exception:
+                pass
+        return jsonify({
+            "role": "assistant",
+            "content": greeting_text,
+            "response": greeting_text,
+            "session_id": session_id,
+            "new_title": None,
+            "quota": quota_status,
+            "fast_path": "greeting_deterministic",
+        }), 200
+
     try:
-        response_text = study_bot.ai_call(prep["messages_context"], prep["system_prompt"], prep["max_tok"], platform=Platform.WEB, user_id=user_id)
+        response_text = study_bot.ai_call(
+            prep["messages_context"],
+            prep["system_prompt"],
+            prep["max_tok"],
+            platform=Platform.WEB,
+            user_id=user_id,
+            document_context=prep.get("document_context")
+        )
         if not response_text.strip():
             raise RuntimeError("provider returned an empty answer")
     except Exception as e:
@@ -2827,6 +2916,35 @@ def stream_message():
     t_prep_done = time.perf_counter()
     pre_gen_ms = round((t_prep_done - t_start) * 1000, 2)
 
+    # Fast-path: deterministic greeting response in stream (< 5ms)
+    if prep.get("fast_greeting"):
+        greeting_text = prep["fast_greeting"]
+        def generate_greeting():
+            request_id = getattr(g, "request_id", None) or str(uuid.uuid4())
+            session_id = prep["session_id"]
+            yield json.dumps({"type": "start", "request_id": request_id, "session_id": session_id}) + "\n"
+            yield json.dumps({"type": "delta", "delta": greeting_text, "text": greeting_text}) + "\n"
+            if session_id:
+                try:
+                    sb_insert_message(session_id, "assistant", greeting_text,
+                        idempotency_key=f"{request_key}:assistant" if request_key else None,
+                        user_id=user_id)
+                except Exception:
+                    pass
+            yield json.dumps({
+                "type": "done",
+                "finish_reason": "stop",
+                "token_count": len(greeting_text.split()),
+                "total_stream_ms": 1.0,
+                "quota": prep["quota_status"]
+            }) + "\n"
+
+        return Response(
+            stream_with_context(generate_greeting()),
+            mimetype="application/x-ndjson",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"}
+        )
+
     def generate():
         request_id = getattr(g, "request_id", None) or str(uuid.uuid4())
         session_id = prep["session_id"]
@@ -2863,7 +2981,8 @@ def stream_message():
                 system_prompt=prep["system_prompt"],
                 max_tokens=prep["max_tok"],
                 model_id=model_id,
-                user_id=user_id
+                user_id=user_id,
+                document_context=prep.get("document_context")
             ):
                 if not chunk:
                     continue
@@ -3448,10 +3567,14 @@ def upload_pdf_document():
     try:
         from pdf_studio.service import pdf_service, PDFValidationError, PDFSecurityError
         file_bytes = file.read()
+        if len(file_bytes) > 10 * 1024 * 1024:
+            return jsonify({"error": "File size exceeds the 10 MB limit. Please upload a smaller document."}), 413
         doc = pdf_service.upload_and_process_pdf(user_id=user_id, filename=filename, file_bytes=file_bytes)
         return jsonify({"success": True, "document": doc, "status": "ready"}), 201
     except PDFValidationError as ve:
-        return jsonify({"error": str(ve)}), 400
+        err_msg = str(ve)
+        status_code = 413 if "10 MB" in err_msg or "size" in err_msg.lower() else 400
+        return jsonify({"error": err_msg}), status_code
     except PDFSecurityError as se:
         return jsonify({"error": str(se)}), 403
     except Exception as e:
@@ -3610,9 +3733,10 @@ def generate_pdf_important_questions(doc_id):
     user_id = session["user_id"]
     data = request.get_json(silent=True) or {}
     count = max(5, min(30, int(data.get("count") or 10)))
+    category = data.get("category")
     try:
         from pdf_studio.service import pdf_service, PDFValidationError, PDFSecurityError
-        result = pdf_service.generate_important_questions(doc_id=doc_id, user_id=user_id, count=count)
+        result = pdf_service.generate_important_questions(doc_id=doc_id, user_id=user_id, count=count, category=category)
         return jsonify({"success": True, "questions": result}), 201
     except PDFValidationError as ve:
         return jsonify({"error": str(ve)}), 404
@@ -3639,6 +3763,52 @@ def get_pdf_important_questions(doc_id):
     except Exception as e:
         logger.error("Get important questions error doc_id=%s: %s", doc_id, e)
         return jsonify({"error": "Failed to fetch important questions."}), 500
+
+
+@app.route("/api/pdf/documents/<doc_id>/questions/stream", methods=["GET", "POST"])
+@login_required
+def stream_pdf_important_questions(doc_id):
+    """Streams important questions progressively via Server-Sent Events (SSE)."""
+    user_id = session["user_id"]
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+    else:
+        data = request.args
+    count = max(5, min(30, int(data.get("count") or 10)))
+    category = data.get("category")
+
+    def event_stream():
+        from pdf_studio.service import pdf_service
+        try:
+            for item in pdf_service.stream_important_questions(doc_id=doc_id, user_id=user_id, count=count, category=category):
+                yield f"data: {json.dumps(item)}\n\n"
+        except Exception as e:
+            logger.error("SSE important questions error doc_id=%s: %s", doc_id, e)
+            yield f"data: {json.dumps({'event': 'error', 'error': str(e)})}\n\n"
+
+    return Response(
+        stream_with_context(event_stream()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        }
+    )
+
+
+@app.route("/api/pdf/cleanup-expired", methods=["POST"])
+@login_required
+def cleanup_expired_pdf_documents():
+    """Triggers cleanup of expired documents (5-day retention limit)."""
+    user_id = session["user_id"]
+    try:
+        from pdf_studio.service import pdf_service
+        result = pdf_service.cleanup_expired_documents(user_id=user_id)
+        return jsonify({"success": True, "cleanup": result})
+    except Exception as e:
+        logger.error("Cleanup expired documents error: %s", e)
+        return jsonify({"error": "Failed to run retention cleanup."}), 500
 
 
 @app.route("/api/pdf/documents/<doc_id>/quiz", methods=["GET"])

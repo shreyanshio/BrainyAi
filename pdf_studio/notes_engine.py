@@ -414,11 +414,11 @@ class LocalNotesEngine:
             "detailed": "Detailed Study Notes"
         }.get(self.mode, "Standard Notes")
 
-        md.append(f"# 📚 {self.doc_title}\n")
-        md.append(f"> **Mode:** `{mode_label}` | **Pages:** {total_pages} | **Extracted Words:** ~{total_words:,} | **Engine:** Local Deterministic Core (0 Tokens)\n")
+        md.append(f"# {self.doc_title}\n")
+        md.append(f"> **Mode:** {mode_label} | **Pages:** {total_pages} | **Extracted Words:** ~{total_words:,}\n")
 
         # ── Table of Contents ──
-        md.append("## 📑 Table of Contents")
+        md.append("## Table of Contents")
         md.append("- [1. Document Overview](#1-document-overview)")
         md.append("- [2. Quick Summary](#2-quick-summary)")
         md.append("- [3. Chapter-wise Notes](#3-chapter-wise-notes)")
@@ -475,7 +475,7 @@ class LocalNotesEngine:
                     break
 
         for s, p_num in chosen_summary:
-            md.append(f"• **{s}** `[Page {p_num}]`")
+            md.append(f"- **{s}** *(Page {p_num})*")
         md.append("")
 
         # ── 3. Chapter-wise Notes ──
@@ -502,20 +502,16 @@ class LocalNotesEngine:
             top_chap_sents.sort(key=lambda x: chap_sents.index((x[1], x[2])) if (x[1], x[2]) in chap_sents else 0)
 
             for _, s, p_num in top_chap_sents:
-                md.append(f"- {s} `[Page {p_num}]`")
+                md.append(f"- {s} *(Page {p_num})*")
             md.append("")
 
         # ── 4. Key Concepts ──
         md.append("## 4. Key Concepts\n")
         top_terms = [word.capitalize() for word, cnt in self.word_freqs.most_common(12) if len(word) >= 4]
         if top_terms:
-            concept_cols = []
-            for i in range(0, min(8 if self.mode == "quick" else 12, len(top_terms)), 2):
-                pair = top_terms[i:i+2]
-                concept_cols.append(" • " + " | ".join(pair))
-            md.append("High-frequency conceptual pillars identified in this document:")
-            for row in concept_cols:
-                md.append(f"- **{row}**")
+            md.append("Core conceptual terms established in this document:")
+            for term in top_terms[:8 if self.mode == "quick" else 12]:
+                md.append(f"- **{term}**")
         else:
             md.append("Fundamental principles established across the text.")
         md.append("")
@@ -525,7 +521,7 @@ class LocalNotesEngine:
         if defs:
             md.append("## 5. Important Definitions\n")
             for d in defs:
-                md.append(f"> **📌 {d['term']}** `[Page {d['page']}]`  \n> {d['definition']}\n")
+                md.append(f"> **{d['term']}** *(Page {d['page']})*  \n> {d['definition']}\n")
         else:
             md.append("## 5. Important Definitions\n")
             md.append("*Definitions are woven throughout the chapter notes above.*\n")
@@ -535,7 +531,7 @@ class LocalNotesEngine:
         if forms:
             md.append("## 6. Formulas and Equations\n")
             for f in forms:
-                md.append(f"- **Equation:** {f['formula']} `[Page {f['page']}]`")
+                md.append(f"- **Equation:** {f['formula']} *(Page {f['page']})*")
                 if f['context'] and f['context'] != "Governing formulation":
                     md.append(f"  *Notes:* {f['context']}")
             md.append("")
@@ -548,7 +544,7 @@ class LocalNotesEngine:
         if procs:
             md.append("## 7. Procedures and Working Steps\n")
             for i, p in enumerate(procs, 1):
-                md.append(f"{i}. {p['step']} `[Page {p['page']}]`")
+                md.append(f"{i}. {p['step']} *(Page {p['page']})*")
             md.append("")
 
         # ── 8. Examples and Applications ──
@@ -556,7 +552,7 @@ class LocalNotesEngine:
         if exs:
             md.append("## 8. Examples and Applications\n")
             for e in exs:
-                md.append(f"- **Example:** {e['example']} `[Page {e['page']}]`")
+                md.append(f"- **Example:** {e['example']} *(Page {e['page']})*")
             md.append("")
 
         # ── 9. Important Facts and Quantities ──
@@ -564,7 +560,7 @@ class LocalNotesEngine:
         if facts:
             md.append("## 9. Important Facts and Quantities\n")
             for f in facts:
-                md.append(f"- ⏱️ {f['fact']} `[Page {f['page']}]`")
+                md.append(f"- {f['fact']} *(Page {f['page']})*")
             md.append("")
 
         # ── 10. Comparisons and Differences ──
@@ -572,7 +568,7 @@ class LocalNotesEngine:
         if comps:
             md.append("## 10. Comparisons and Differences\n")
             for c in comps:
-                md.append(f"- ⚖️ **Contrast:** {c['contrast']} `[Page {c['page']}]`")
+                md.append(f"- **Comparison:** {c['contrast']} *(Page {c['page']})*")
             md.append("")
 
         # ── 11. High-Yield Revision Points ──
@@ -587,16 +583,16 @@ class LocalNotesEngine:
                 selected_points.append((s, p_num))
 
         for idx, (s, p_num) in enumerate(selected_points, 1):
-            md.append(f"{idx}. **{s}** `[Page {p_num}]`")
+            md.append(f"{idx}. **{s}** *(Page {p_num})*")
         md.append("")
 
         # ── 12. Final Quick Revision Checklist ──
         md.append("## 12. Final Quick Revision Checklist\n")
         checklist_items = []
         for d in defs[:4]:
-            checklist_items.append(f"Can you define **{d['term']}** in your own words? `[Page {d['page']}]`")
+            checklist_items.append(f"Can you define **{d['term']}** in your own words? *(Page {d['page']})*")
         for f in forms[:3]:
-            checklist_items.append(f"Can you write down and derive **{f['formula']}**? `[Page {f['page']}]`")
+            checklist_items.append(f"Can you write down and derive **{f['formula']}**? *(Page {f['page']})*")
         for c in chapters[:4]:
             checklist_items.append(f"Do you understand the core takeaway of **{c['title']}**?")
 

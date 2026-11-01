@@ -136,11 +136,21 @@ def get_routing_candidates(
     openrouter_code = registry.openrouter_coding_model
     openrouter_free = registry.openrouter_free_model
 
-    # ── 1. PDF Study Studio Tasks (STRICTLY NON-GEMINI GUARANTEE) ──
+    # ── 1. PDF Study Studio Tasks (Gemini-Powered Academic Intelligence & High-Quota Failover) ──
     if task in PDF_STUDY_TASKS:
-        # Candidate chain order: Groq -> Cerebras -> SambaNova -> OpenRouter
-        if task in (TaskType.QUIZ_GENERATION, TaskType.IMPORTANT_QUESTION_GENERATION):
+        gemini_pdf = getattr(registry, "gemini_pdf_model", "gemini-2.5-flash")
+        if task == TaskType.PDF_QUESTION_ANSWERING:
+            # Notes Assistant & Document Q&A: Gemini first for long-context grounding, followed by Groq / Cerebras / SambaNova
             candidates = [
+                ("gemini", gemini_pdf),
+                ("groq", groq_balanced),
+                ("cerebras", "gpt-oss-120b"),
+                ("sambanova", samba_reason),
+                ("openrouter", openrouter_free)
+            ]
+        elif task in (TaskType.QUIZ_GENERATION, TaskType.IMPORTANT_QUESTION_GENERATION):
+            candidates = [
+                ("gemini", gemini_pdf),
                 ("groq", groq_balanced),
                 ("cerebras", "gpt-oss-120b"),
                 ("sambanova", samba_reason),
@@ -149,6 +159,7 @@ def get_routing_candidates(
             ]
         elif task == TaskType.FLASHCARD_GENERATION:
             candidates = [
+                ("gemini", gemini_pdf),
                 ("groq", groq_fast),
                 ("cerebras", "llama3.1-8b"),
                 ("sambanova", samba_fast),
@@ -156,13 +167,13 @@ def get_routing_candidates(
             ]
         else:
             candidates = [
+                ("gemini", gemini_pdf),
                 ("groq", groq_balanced),
                 ("cerebras", "gpt-oss-120b"),
                 ("sambanova", samba_reason),
                 ("openrouter", openrouter_free)
             ]
-        filtered = _filter_eligible(candidates, disallow_gemini=True)
-        return filtered
+        return _filter_eligible(candidates, disallow_gemini=False)
 
     # ── 2. Fast Speed Tier: Greetings, Casual Chat, Simple Turn (Groq 8B First) ──
     if complexity == TaskComplexity.FAST or task in (TaskType.QUICK_CHAT, TaskType.CHAT_TITLE_GENERATION):

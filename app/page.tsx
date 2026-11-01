@@ -482,9 +482,9 @@ export default function BrainyApp() {
   }
 
   // ── Message Operations ────────────────────────────────────
-  const handleSendMessage = async (customPrompt?: string) => {
+  const handleSendMessage = async (customPrompt?: string, imagePayload?: string | null, webSearch?: boolean) => {
     const textToSend = (customPrompt || inputMessage).trim()
-    if (!textToSend || isThinking || historyLoading || historyError) return
+    if ((!textToSend && !imagePayload) || isThinking || historyLoading || historyError) return
     const sendViewGeneration = viewGenerationRef.current
     const belongsToCurrentView = () => sendViewGeneration === viewGenerationRef.current
 
@@ -528,10 +528,12 @@ export default function BrainyApp() {
       await streamChatMessage(
         {
           session_id: activeSessionId,
-          message: textToSend,
+          message: textToSend || (imagePayload ? 'Analyze this attached image.' : ''),
           model: activeModel,
           answer_length: activeLength,
           idempotency_key: idempotencyKey,
+          image: imagePayload || undefined,
+          web_search: webSearch || undefined,
         },
         {
           onStart: (sessionId, requestId) => {
@@ -810,7 +812,8 @@ export default function BrainyApp() {
         ) : (
           /* View 2: Focused Chat Workspace */
           <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
-            <main className="flex-1 overflow-y-auto scrollbar-thin">
+            <main className={`flex-1 overflow-y-auto scrollbar-thin ${messages.length === 0 ? "flex flex-col justify-center" : ""}`}>
+
               {historyLoading ? (
                 <div className="h-full flex items-center justify-center text-sm text-[var(--text-muted)]">
                   Restoring your chat…
@@ -844,7 +847,7 @@ export default function BrainyApp() {
             <Composer
               inputMessage={inputMessage}
               onInputChange={setInputMessage}
-              onSendMessage={() => handleSendMessage()}
+              onSendMessage={(img, ws) => handleSendMessage(undefined, img, ws)}
               onStop={handleStopGeneration}
               isThinking={isThinking}
               disabled={historyLoading || Boolean(historyError)}

@@ -62,7 +62,8 @@ import {
   fetchPdfFlashcards,
   fetchPdfStudyProgress,
   generatePdfImportantQuestions,
-  fetchPdfImportantQuestions
+  fetchPdfImportantQuestions,
+  streamPdfImportantQuestions
 } from '@/lib/api'
 
 interface PdfStudioViewProps {
@@ -98,7 +99,7 @@ function parseNoteSections(markdown: string): NoteSection[] {
       }
       currentTitle = line.replace(/^##\s+/, '').trim()
       currentId = `section-${sections.length + 1}`
-      currentLines = [line]
+      currentLines = []
     } else {
       currentLines.push(line)
     }
@@ -149,6 +150,8 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
   const [questionsSets, setQuestionsSets] = useState<DocumentImportantQuestions[]>([])
   const [currentQuestionsSet, setCurrentQuestionsSet] = useState<DocumentImportantQuestions | null>(null)
   const [generatingQuestions, setGeneratingQuestions] = useState<boolean>(false)
+  const [targetQuestionCategory, setTargetQuestionCategory] = useState<string>('ALL')
+  const [progressError, setProgressError] = useState<string | null>(null)
   const [targetQuestionCount, setTargetQuestionCount] = useState<number>(10)
   const [priorityFilter, setPriorityFilter] = useState<'ALL' | 'HIGH' | 'MEDIUM' | 'LOW'>('ALL')
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL')
@@ -253,9 +256,10 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
         .catch(() => {})
     } else if (activeTab === 'progress') {
       setLoadingProgress(true)
+      setProgressError(null)
       fetchPdfStudyProgress(selectedDocId)
         .then((p) => setProgress(p))
-        .catch(() => {})
+        .catch((err) => setProgressError(err.message || 'Failed to load study progress.'))
         .finally(() => setLoadingProgress(false))
     }
   }, [selectedDocId, activeTab])
@@ -278,8 +282,8 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
       return
     }
 
-    if (file.size > 25 * 1024 * 1024) {
-      setErrorMsg('File size exceeds the 25MB limit.')
+    if (file.size > 10 * 1024 * 1024) {
+      setErrorMsg('File size exceeds the 10 MB limit. Please select a smaller document.')
       return
     }
 
@@ -389,21 +393,72 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
     }
   }
 
-  // Generate Important Questions Action (Non-Gemini Router)
+  // Generate Important Questions Action (AI Question Bank)
   const handleGenerateImportantQuestions = async () => {
     if (!selectedDocId) return
     setGeneratingQuestions(true)
     setErrorMsg(null)
     setExpandedQuestions({})
 
+    const streamingSet: DocumentImportantQuestions = {
+      id: `streaming-${Date.now()}`,
+      document_id: selectedDocId,
+      user_id: 0,
+      title: 'Important Questions',
+      created_at: new Date().toISOString(),
+      count: targetQuestionCount,
+      questions: [],
+    }
+    setCurrentQuestionsSet(streamingSet)
+
+    const catParam = targetQuestionCategory === 'ALL' ? undefined : targetQuestionCategory
     try {
-      const res = await generatePdfImportantQuestions(selectedDocId, targetQuestionCount)
-      setQuestionsSets((prev) => [res, ...prev])
-      setCurrentQuestionsSet(res)
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to generate important questions.')
-    } finally {
-      setGeneratingQuestions(false)
+      streamPdfImportantQuestions(
+        selectedDocId,
+        targetQuestionCount,
+        catParam,
+        {
+          onQuestion: (q) => {
+            streamingSet.questions.push(q)
+            setCurrentQuestionsSet({
+              ...streamingSet,
+              questions: [...streamingSet.questions],
+            })
+          },
+          onDone: () => {
+            setGeneratingQuestions(false)
+            fetchPdfImportantQuestions(selectedDocId).then((qs) => {
+              if (qs.length > 0) {
+                setQuestionsSets(qs)
+                setCurrentQuestionsSet(qs[0])
+              }
+            }).catch(() => {})
+          },
+          onError: () => {
+            generatePdfImportantQuestions(selectedDocId, targetQuestionCount, catParam)
+              .then((res) => {
+                setQuestionsSets((prev) => [res, ...prev])
+                setCurrentQuestionsSet(res)
+              })
+              .catch((err: any) => {
+                setErrorMsg(err.message || 'Failed to generate important questions.')
+              })
+              .finally(() => {
+                setGeneratingQuestions(false)
+              })
+          }
+        }
+      )
+    } catch {
+      try {
+        const res = await generatePdfImportantQuestions(selectedDocId, targetQuestionCount, catParam)
+        setQuestionsSets((prev) => [res, ...prev])
+        setCurrentQuestionsSet(res)
+      } catch (err: any) {
+        setErrorMsg(err.message || 'Failed to generate important questions.')
+      } finally {
+        setGeneratingQuestions(false)
+      }
     }
   }
 
@@ -439,7 +494,7 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
     setTimeout(() => setCopiedAllQuestions(false), 2000)
   }
 
-  // Generate Quiz Action (Non-Gemini Router, Strictly 4 Options)
+  // Generate Quiz Action (AI Question Bank, Strictly 4 Options)
   const handleGenerateQuiz = async () => {
     if (!selectedDocId) return
     setGeneratingQuiz(true)
@@ -475,7 +530,7 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
     }
   }
 
-  // Generate Flashcards Action (Non-Gemini Router)
+  // Generate Flashcards Action (AI Question Bank)
   const handleGenerateFlashcards = async () => {
     if (!selectedDocId) return
     setGeneratingCards(true)
@@ -597,7 +652,7 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
               <FileText className="w-8 h-8 text-[var(--text-muted)] mx-auto mb-2 opacity-50" />
               <p className="text-xs font-semibold text-[var(--text-secondary)]">No documents uploaded</p>
               <p className="text-[11px] text-[var(--text-muted)] mt-1">
-                Upload class notes, textbooks, or research papers up to 25MB.
+                Upload class notes, textbooks, or research papers up to 10 MB (5-day retention).
               </p>
             </div>
           ) : (
@@ -1031,7 +1086,7 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
                                 <span>Notes Assistant</span>
                               </h4>
                               <p className="text-[10px] text-[var(--text-muted)]">
-                                Grounded Q&A • Non-Gemini
+                                Grounded Q&A • Gemini 2.5 Flash
                               </p>
                             </div>
                             <div className="flex items-center gap-1.5">
@@ -1137,7 +1192,7 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
                       <h3 className="text-base font-bold text-[var(--text-primary)] flex items-center gap-2">
                         <span>Examination & Revision Question Bank</span>
                         <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 font-semibold">
-                          Non-Gemini Router
+                          AI Question Bank
                         </span>
                       </h3>
                       <p className="text-xs text-[var(--text-muted)] mt-1">
@@ -1146,6 +1201,23 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
                     </div>
 
                     <div className="flex items-center gap-2.5">
+                      {/* Category Selector */}
+                      <select
+                        value={targetQuestionCategory}
+                        onChange={(e) => setTargetQuestionCategory(e.target.value)}
+                        className="bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] text-xs font-semibold rounded-xl px-2.5 py-1.5 text-[var(--text-primary)] focus:outline-none cursor-pointer"
+                      >
+                        <option value="ALL">All Categories</option>
+                        <option value="DEFINITION">Definition</option>
+                        <option value="CONCEPTUAL">Conceptual</option>
+                        <option value="COMPARATIVE">Comparative</option>
+                        <option value="PROCEDURAL">Procedural</option>
+                        <option value="NUMERICAL">Numerical</option>
+                        <option value="ANALYTICAL">Analytical</option>
+                        <option value="EVALUATIVE">Evaluative</option>
+                        <option value="SCENARIO">Scenario</option>
+                      </select>
+
                       {/* Count Selector */}
                       <div className="flex items-center bg-[var(--bg-surface-elevated)] p-1 rounded-xl text-xs border border-[var(--border-subtle)]">
                         {[10, 20, 30].map((cnt) => (
@@ -1352,7 +1424,7 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
                         Grounded Document Q&A
                       </h3>
                       <p className="text-xs text-[var(--text-muted)]">
-                        Ask questions about this PDF. strictly non-Gemini routing with 10-message conversational context.
+                        Ask questions about this PDF with exact page citations and conversational memory.
                       </p>
                     </div>
 
@@ -1712,11 +1784,13 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
                           <span className="text-[10px] uppercase tracking-wider font-semibold text-pink-500 mb-2 block">
                             {isFlipped ? 'Answer / Concept' : 'Term / Prompt'}
                           </span>
-                          <h3 className="font-bold text-base sm:text-lg text-[var(--text-primary)] leading-snug">
-                            {isFlipped
-                              ? currentDeck.cards[cardIndex].back
-                              : currentDeck.cards[cardIndex].front}
-                          </h3>
+                          <div className="font-bold text-base sm:text-lg text-[var(--text-primary)] leading-snug text-left sm:text-center max-w-full overflow-hidden">
+                            <MarkdownRenderer
+                              content={isFlipped
+                                ? currentDeck.cards[cardIndex].back
+                                : currentDeck.cards[cardIndex].front}
+                            />
+                          </div>
                         </div>
 
                         <div className="flex items-center justify-between text-[11px] text-[var(--text-muted)] border-t border-[var(--border-subtle)] pt-3">
@@ -1788,56 +1862,88 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
                       <span>Loading metrics...</span>
                     </div>
                   ) : progress ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {/* 1. Revision Notes */}
                       <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-2">
                         <div className="flex items-center gap-2 text-blue-500">
                           <BookOpen size={16} />
                           <h4 className="font-semibold text-xs text-[var(--text-secondary)]">Revision Notes</h4>
                         </div>
                         <div className="text-2xl font-bold text-[var(--text-primary)]">
-                          {progress.notes_generated ? 'Generated' : 'Not Generated'}
+                          {progress.notes_count ?? (progress.notes_generated ? 1 : 0)} Note{(progress.notes_count ?? 1) !== 1 ? 's' : ''}
                         </div>
                         <p className="text-[11px] text-[var(--text-muted)]">
-                          {progress.notes_generated ? 'Local revision notes are ready for review.' : 'Synthesize notes to begin studying.'}
+                          Structured study notes available for review
                         </p>
                       </div>
 
+                      {/* 2. Quizzes & Attempts */}
                       <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-2">
                         <div className="flex items-center gap-2 text-purple-500">
                           <Award size={16} />
-                          <h4 className="font-semibold text-xs text-[var(--text-secondary)]">Quizzes Taken</h4>
+                          <h4 className="font-semibold text-xs text-[var(--text-secondary)]">Quizzes & Attempts</h4>
                         </div>
                         <div className="text-2xl font-bold text-[var(--text-primary)]">
-                          {progress.quizzes_taken}
+                          {progress.quiz_attempts_count ?? progress.quizzes_taken} Attempt{(progress.quiz_attempts_count ?? progress.quizzes_taken) !== 1 ? 's' : ''}
                         </div>
                         <p className="text-[11px] text-[var(--text-muted)]">
-                          Best Score: {progress.best_quiz_score} correct questions
+                          Best score: {progress.best_quiz_score} correct | {progress.quizzes_count ?? progress.quizzes_taken} quizzes created
                         </p>
                       </div>
 
+                      {/* 3. Important Questions Bank */}
+                      <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-2">
+                        <div className="flex items-center gap-2 text-amber-500">
+                          <FileQuestion size={16} />
+                          <h4 className="font-semibold text-xs text-[var(--text-secondary)]">Question Bank</h4>
+                        </div>
+                        <div className="text-2xl font-bold text-[var(--text-primary)]">
+                          {progress.questions_count ?? 0} Question{(progress.questions_count ?? 0) !== 1 ? 's' : ''}
+                        </div>
+                        <p className="text-[11px] text-[var(--text-muted)]">
+                          High-yield exam & revision questions generated
+                        </p>
+                      </div>
+
+                      {/* 4. Flashcard Decks */}
                       <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-2">
                         <div className="flex items-center gap-2 text-pink-500">
                           <Layers size={16} />
-                          <h4 className="font-semibold text-xs text-[var(--text-secondary)]">Flashcards Reviewed</h4>
+                          <h4 className="font-semibold text-xs text-[var(--text-secondary)]">Flashcards</h4>
                         </div>
                         <div className="text-2xl font-bold text-[var(--text-primary)]">
-                          {progress.cards_reviewed}
+                          {progress.flashcards_count ?? 0} Deck{(progress.flashcards_count ?? 0) !== 1 ? 's' : ''}
                         </div>
                         <p className="text-[11px] text-[var(--text-muted)]">
-                          Active recall flashcards completed
+                          {progress.cards_reviewed} cards reviewed across decks
                         </p>
                       </div>
 
+                      {/* 5. Last Studied */}
                       <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-2">
                         <div className="flex items-center gap-2 text-emerald-500">
                           <Clock size={16} />
                           <h4 className="font-semibold text-xs text-[var(--text-secondary)]">Last Studied</h4>
                         </div>
                         <div className="text-sm font-semibold text-[var(--text-primary)] mt-1">
-                          {new Date(progress.last_studied_at).toLocaleString()}
+                          {progress.last_studied_at ? new Date(progress.last_studied_at).toLocaleString() : 'Just now'}
                         </div>
                         <p className="text-[11px] text-[var(--text-muted)]">
                           Synced with Supabase study progress
+                        </p>
+                      </div>
+
+                      {/* 6. Document Retention Status */}
+                      <div className="p-5 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-subtle)] space-y-2">
+                        <div className="flex items-center gap-2 text-teal-500">
+                          <ShieldCheck size={16} />
+                          <h4 className="font-semibold text-xs text-[var(--text-secondary)]">Retention Policy</h4>
+                        </div>
+                        <div className="text-sm font-semibold text-[var(--text-primary)] mt-1">
+                          5-Day Storage Retention
+                        </div>
+                        <p className="text-[11px] text-[var(--text-muted)]">
+                          Derived study assets are preserved permanently
                         </p>
                       </div>
                     </div>

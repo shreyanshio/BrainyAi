@@ -51,7 +51,9 @@ class PDFNotFoundError(PDFValidationError, KeyError):
     """Raised when a document, quiz, or note is not found."""
 
 
-def validate_pdf_file(file_bytes: bytes, filename: str, max_size_mb: int = 25) -> Tuple[str, int]:
+MAX_PDF_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB strict limit
+
+def validate_pdf_file(file_bytes: bytes, filename: str, max_size_mb: int = 10) -> Tuple[str, int]:
     """
     Validates PDF file signature, extension, and file size.
     """
@@ -98,10 +100,9 @@ class PDFStudyService:
         headers = {
             "apikey": self._supabase_key,
             "Content-Type": content_type,
-            "x-upsert": "true"
+            "x-upsert": "true",
+            "Authorization": f"Bearer {self._supabase_key}"
         }
-        if not self._supabase_key.startswith("sb_secret_"):
-            headers["Authorization"] = f"Bearer {self._supabase_key}"
         return headers
 
     def _upload_to_supabase_storage(self, user_id: int, doc_id: str, file_bytes: bytes) -> Optional[str]:
@@ -162,9 +163,12 @@ class PDFStudyService:
         Validates, persists, extracts text page-by-page locally, and indexes metadata.
         Zero AI calls are made during ingestion.
         """
-        clean_name, size = validate_pdf_file(file_bytes, filename)
+        clean_name, size = validate_pdf_file(file_bytes, filename, max_size_mb=10)
         doc_id = str(uuid.uuid4())
-        created_at = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(timezone.utc)
+        created_at = now.isoformat()
+        from datetime import timedelta
+        expires_at = (now + timedelta(days=5)).isoformat()
 
         # 1. Local disk persistence
         local_path = self._persist_file_locally(user_id, doc_id, file_bytes)
@@ -209,10 +213,16 @@ class PDFStudyService:
             "filename": clean_name,
             "file_size": size,
             "page_count": total_pages,
+            "storage_bucket": "study-pdfs",
             "storage_path": storage_path,
+            "mime_type": "application/pdf",
             "processing_status": "ready",
+            "status": "ready",
             "error_message": None,
             "ocr_status": ocr_status,
+            "uploaded_at": created_at,
+            "last_accessed_at": created_at,
+            "expires_at": expires_at,
             "created_at": created_at,
             "updated_at": created_at
         }
@@ -349,7 +359,85 @@ class PDFStudyService:
         if str(doc.get("user_id")) != str(user_id):
             raise PDFSecurityError("Access denied: You do not own this document.")
 
+        # Check retention expiration
+        exp_str = doc.get("expires_at")
+        if exp_str:
+            try:
+                exp_dt = datetime.fromisoformat(exp_str)
+                if exp_dt < datetime.now(timezone.utc):
+                    doc["status"] = "expired"
+            except Exception:
+                pass
+
         return doc
+
+    def cleanup_expired_documents(self) -> Dict[str, Any]:
+        """
+        Deletes original source PDF files for documents whose 5-day retention period has passed.
+        Preserves generated notes, flashcards, questions, quizzes, and progress records.
+        """
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        expired_count = 0
+        cleaned_docs = []
+
+        # 1. Check in-memory & local storage
+        for doc_id, doc in list(_DOCUMENTS_STORE.items()):
+            if doc.get("status") == "expired":
+                continue
+            exp_str = doc.get("expires_at")
+            if exp_str:
+                try:
+                    exp_dt = datetime.fromisoformat(exp_str)
+                    if exp_dt < now:
+                        doc["status"] = "expired"
+                        doc["deleted_at"] = now_iso
+                        storage_path = doc.get("storage_path")
+                        if storage_path and not os.path.isabs(storage_path):
+                            self._delete_from_supabase_storage(storage_path)
+                        local_path = os.path.join(DATA_DIR, str(doc.get("user_id")), f"{doc_id}.pdf")
+                        if os.path.exists(local_path):
+                            try:
+                                os.remove(local_path)
+                            except Exception:
+                                pass
+                        expired_count += 1
+                        cleaned_docs.append(doc_id)
+                except Exception as e:
+                    logger.warning("Error evaluating expiry for doc %s: %s", doc_id, e)
+
+        # 2. Check Supabase user_documents if available
+        if self._is_supabase_available():
+            try:
+                resp = self._sb_req(
+                    "GET",
+                    "user_documents",
+                    params=f"?status=neq.expired&expires_at=lt.{now_iso}&select=id,user_id,storage_path,expires_at"
+                )
+                rows = resp.json() if hasattr(resp, "json") else []
+                if isinstance(rows, list):
+                    for r in rows:
+                        d_id = r["id"]
+                        s_path = r.get("storage_path")
+                        if s_path and not os.path.isabs(s_path):
+                            self._delete_from_supabase_storage(s_path)
+                        try:
+                            self._sb_req(
+                                "PATCH",
+                                "user_documents",
+                                params=f"?id=eq.{d_id}",
+                                json_body={"status": "expired", "deleted_at": now_iso}
+                            )
+                        except Exception:
+                            pass
+                        if d_id not in cleaned_docs:
+                            cleaned_docs.append(d_id)
+                            expired_count += 1
+            except Exception as e:
+                logger.warning("Supabase cleanup query failed: %s", e)
+
+        logger.info("5-Day Retention Cleanup completed: %d documents expired.", expired_count)
+        return {"expired_count": expired_count, "document_ids": cleaned_docs, "cleaned_at": now_iso}
 
     def delete_document(self, doc_id: str, user_id: Any) -> bool:
         """Securely deletes document, files from Supabase Storage and all derived records."""
@@ -479,7 +567,7 @@ class PDFStudyService:
             "id": note_id,
             "document_id": doc_id,
             "user_id": user_id,
-            "title": f"Study Notes: {doc['filename']}",
+            "title": f"Study Notes: {(doc.get('filename') or doc.get('title') or 'Document')}",
             "depth": depth_label,
             "content": final_content,
             "citations": cited_pages,
@@ -541,7 +629,12 @@ class PDFStudyService:
         Routes strictly to non-Gemini AI providers (Groq, Cerebras, SambaNova, OpenRouter).
         """
         doc = self.get_document(doc_id, user_id)
+        if doc.get("status") == "expired":
+            raise PDFValidationError("This document has expired under the 5-day retention policy. Please re-upload the PDF to ask questions. Existing notes and quiz materials remain accessible.")
+
         pages = self.get_document_pages(doc_id, user_id)
+        if not pages or not any(bool((p.get("text_content") or "").strip()) for p in pages):
+            raise PDFValidationError("Document contains no readable text to answer questions.")
 
         q_clean = question.strip()
         if not q_clean:
@@ -591,7 +684,7 @@ class PDFStudyService:
             history_context = f"\n\nRecent Conversation (Last {len(history_lines)} turns):\n" + "\n".join(history_lines)
 
         user_prompt = (
-            f"Document: {doc['filename']}\n\n"
+            f"Document: {(doc.get('filename') or doc.get('title') or 'Document')}\n\n"
             f"Document Context:\n{context_block}{history_context}\n\n"
             f"User Question: {q_clean}"
         )
@@ -647,7 +740,7 @@ class PDFStudyService:
         clean_diff = difficulty.upper() if difficulty and difficulty.upper() in ("EASY", "MEDIUM", "HARD") else "MEDIUM"
 
         prompt = (
-            f"Document: {doc['filename']}\n"
+            f"Document: {(doc.get('filename') or doc.get('title') or 'Document')}\n"
             f"Target Difficulty: {clean_diff}\n"
             f"Generate a {num_questions}-question multiple choice quiz with {clean_diff} difficulty from the following document text.\n"
             f"Every question MUST have exactly 4 distinct options, exactly 1 correct option index (0 to 3), "
@@ -700,7 +793,7 @@ class PDFStudyService:
             "id": quiz_id,
             "document_id": doc_id,
             "user_id": user_id,
-            "title": str(quiz_data.get("title") or f"Quiz: {doc['filename']}")[:100],
+            "title": str(quiz_data.get("title") or f"Quiz: {(doc.get('filename') or doc.get('title') or 'Document')}")[:100],
             "difficulty": clean_diff,
             "questions": validated_questions,
             "created_at": created_at
@@ -852,13 +945,17 @@ class PDFStudyService:
         doc_id: str,
         user_id: int,
         count: int = 10,
+        category: str = "ALL",
         depth: str = "balanced"
     ) -> Dict[str, Any]:
         """
-        Generates high-yield exam and revision questions across 8 categories with priority ratings
-        and expected answer outlines. Uses non-Gemini AI routing.
+        Generates high-yield exam and revision questions across 8 categories (or a targeted category)
+        with priority ratings and expected answer outlines. Uses AI routing.
         """
         doc = self.get_document(doc_id, user_id)
+        if doc.get("status") == "expired":
+            raise PDFValidationError("This document has expired under the 5-day retention policy. Please re-upload the PDF to generate new questions.")
+
         pages = self.get_document_pages(doc_id, user_id)
 
         # Sample pages evenly across the document
@@ -872,13 +969,18 @@ class PDFStudyService:
             raise ValueError("Document contains no readable text to generate important questions.")
 
         sys_prompt = prompt_registry.get_template("pdf_important_questions_prompt.txt")
+        clean_cat = str(category or "ALL").strip()
+        if clean_cat != "ALL":
+            cat_instruction = f"All generated questions MUST strictly belong to the '{clean_cat}' category."
+        else:
+            cat_instruction = "Distribute them across categories (Short Answer, Long Answer, Definition, Conceptual, Derivation/Proof, Numerical/Formula, Comparison, Application)."
 
         prompt = (
-            f"Document Title: {doc['filename']}\n"
-            f"Target Question Count: {count}\n\n"
+            f"Document Title: {(doc.get('filename') or doc.get('title') or 'Document')}\n"
+            f"Target Question Count: {count}\n"
+            f"Requested Category: {clean_cat}\n\n"
             f"Analyze the document text below and generate {count} high-yield examination and revision questions.\n"
-            f"Distribute them across categories (Short Answer, Long Answer, Definition, Conceptual, "
-            f"Derivation/Proof, Numerical/Formula, Comparison, Application).\n"
+            f"{cat_instruction}\n"
             f"Assign priority (HIGH, MEDIUM, LOW) based on exam significance and include a concise bulleted answer outline.\n\n"
             f"{sample_text}"
         )
@@ -908,7 +1010,7 @@ class PDFStudyService:
                 priority = "HIGH"
 
             raw_cat = str(q.get("category") or "Conceptual").strip()
-            cat = raw_cat if raw_cat in valid_categories else "Conceptual"
+            cat = clean_cat if clean_cat != 'ALL' and clean_cat in valid_categories else (raw_cat if raw_cat in valid_categories else 'Conceptual')
 
             chapter = str(q.get("chapter") or "General").strip()
             page_ref = str(q.get("page_ref") or "Page 1").strip()
@@ -939,7 +1041,7 @@ class PDFStudyService:
             "id": set_id,
             "document_id": doc_id,
             "user_id": user_id,
-            "title": str(res.get("title") or f"Important Questions: {doc['filename']}")[:100],
+            "title": str(res.get("title") or f"Important Questions: {(doc.get('filename') or doc.get('title') or 'Document')}")[:100],
             "count": len(validated_questions),
             "questions": validated_questions,
             "created_at": created_at
@@ -954,6 +1056,45 @@ class PDFStudyService:
 
         _QUESTIONS_STORE.setdefault(doc_id, []).append(questions_record)
         return questions_record
+
+    def stream_important_questions(
+        self,
+        doc_id: str,
+        user_id: int,
+        count: int = 10,
+        category: str = "ALL",
+        depth: str = "balanced"
+    ):
+        """
+        Incrementally generates and yields validated important questions one by one.
+        """
+        result = self.generate_important_questions(
+            doc_id=doc_id,
+            user_id=user_id,
+            count=count,
+            category=category,
+            depth=depth
+        )
+        questions = result.get("questions", [])
+        for idx, q in enumerate(questions, 1):
+            yield {
+                "event": "question",
+                "data": {
+                    "index": idx,
+                    "total": len(questions),
+                    "set_id": result["id"],
+                    **q
+                }
+            }
+        yield {
+            "event": "complete",
+            "data": {
+                "total": len(questions),
+                "set_id": result["id"],
+                "status": "completed",
+                "questions": questions
+            }
+        }
 
     def get_important_questions(self, doc_id: str, user_id: int) -> List[Dict[str, Any]]:
         """Retrieves all generated important question sets for the document."""
@@ -999,7 +1140,7 @@ class PDFStudyService:
         sys_prompt = prompt_registry.get_template("pdf_flashcards_prompt.txt")
 
         prompt = (
-            f"Document: {doc['filename']}\n"
+            f"Document: {(doc.get('filename') or doc.get('title') or 'Document')}\n"
             f"Create {count} distinct study flashcards from the text below.\n"
             f"Each card must contain front (term/concept/question), back (concise answer/definition), "
             f"page_ref (e.g. Page 1), and difficulty (Easy, Medium, or Hard):\n\n{sample_text}"
@@ -1072,28 +1213,57 @@ class PDFStudyService:
     # ── PROGRESS TRACKING ──
 
     def get_study_progress(self, doc_id: str, user_id: int) -> Dict[str, Any]:
-        """Retrieves user study progress for the document."""
-        self.get_document(doc_id, user_id)
+        """Retrieves comprehensive user study progress for the document."""
+        doc = self.get_document(doc_id, user_id)
 
-        if self._is_supabase_available():
-            try:
-                resp = self._sb_req("GET", "document_study_progress", params=f"?user_id=eq.{user_id}&document_id=eq.{doc_id}&limit=1")
-                rows = resp.json() if hasattr(resp, "json") else []
-                if isinstance(rows, list) and rows:
-                    return rows[0]
-            except Exception as e:
-                logger.warning("Failed to fetch progress from Supabase: %s", e)
+        notes = self.get_notes(doc_id, user_id)
+        quizzes = self.get_quizzes(doc_id, user_id)
+        flashcards = self.get_flashcards(doc_id, user_id)
+        questions = self.get_important_questions(doc_id, user_id)
+
+        total_q_count = sum(q.get("count", len(q.get("questions", []))) for q in questions)
+        total_cards_count = sum(len(d.get("cards", [])) for d in flashcards)
+
+        best_score = 0
+        total_quiz_attempts = 0
+        for qz in quizzes:
+            q_id = qz.get("id")
+            attempts = _ATTEMPTS_STORE.get(q_id, [])
+            if self._is_supabase_available():
+                try:
+                    resp = self._sb_req("GET", "document_quiz_attempts", params=f"?quiz_id=eq.{q_id}&order=score.desc")
+                    db_att = resp.json() if hasattr(resp, "json") else []
+                    if isinstance(db_att, list) and db_att:
+                        attempts = db_att
+                except Exception:
+                    pass
+            for att in attempts:
+                total_quiz_attempts += 1
+                best_score = max(best_score, att.get("score", 0))
 
         prog_key = f"{user_id}_{doc_id}"
-        return _PROGRESS_STORE.get(prog_key, {
+        cached = _PROGRESS_STORE.get(prog_key, {})
+        last_studied = cached.get("last_studied_at") or doc.get("created_at") or datetime.now(timezone.utc).isoformat()
+        if notes:
+            last_studied = notes[0].get("created_at", last_studied)
+
+        progress_data = {
             "user_id": user_id,
             "document_id": doc_id,
-            "notes_generated": False,
-            "quizzes_taken": 0,
-            "best_quiz_score": 0,
-            "cards_reviewed": 0,
-            "last_studied_at": datetime.now(timezone.utc).isoformat()
-        })
+            "notes_generated": len(notes) > 0,
+            "notes_count": len(notes),
+            "quizzes_taken": len(quizzes),
+            "quiz_attempts": total_quiz_attempts,
+            "best_quiz_score": best_score,
+            "questions_generated": total_q_count,
+            "flashcard_decks": len(flashcards),
+            "cards_reviewed": total_cards_count or cached.get("cards_reviewed", 0),
+            "last_studied_at": last_studied,
+            "status": doc.get("status", "ready")
+        }
+
+        _PROGRESS_STORE[prog_key] = progress_data
+        return progress_data
 
 
 # Global singleton service
