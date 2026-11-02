@@ -1,0 +1,349 @@
+# BrainyAi Domain Glossary
+# Distinguishes Topic Terminology, Action Terminology, Tool Terminology, and Output Terminology.
+# Enables Brainy to distinguish WHAT the subject is vs WHAT the user wants done.
+
+# ============================================================================
+# 1. TOPIC TERMINOLOGY (The Subject Matter)
+# ============================================================================
+topics:
+  machine_learning:
+    terms:
+      - machine learning
+      - deep learning
+      - neural network
+      - cnn
+      - rnn
+      - transformer
+      - attention mechanism
+      - gradient descent
+      - backpropagation
+      - supervised learning
+      - unsupervised learning
+      - reinforcement learning
+      - random forest
+      - decision tree
+      - support vector machine
+      - svm
+      - clustering
+      - k-means
+      - overfitting
+      - underfitting
+      - cross validation
+      - hyperparameter tuning
+      - llm
+      - fine tuning
+      - rag
+      - embeddings
+      - vector database
+      - diffusion model
+    category: ai_and_data_science
+
+  programming_languages:
+    terms:
+      - python
+      - javascript
+      - typescript
+      - java
+      - c++
+      - c#
+      - rust
+      - golang
+      - go
+      - swift
+      - kotlin
+      - ruby
+      - php
+      - sql
+      - bash
+      - powershell
+      - html
+      - css
+    category: computer_science
+
+  computer_science_dsa:
+    terms:
+      - binary search tree
+      - binary search
+      - linear search
+      - bst
+      - red black tree
+      - avl tree
+      - graph
+      - linked list
+      - stack
+      - queue
+      - heap
+      - priority queue
+      - hash map
+      - hash table
+      - recursion
+      - dynamic programming
+      - memoization
+      - sorting algorithm
+      - quicksort
+      - mergesort
+      - dijkstra
+      - breadth first search
+      - bfs
+      - depth first search
+      - dfs
+      - time complexity
+      - space complexity
+      - big o notation
+      - polymorphism
+      - inheritance
+      - encapsulation
+      - abstraction
+    category: computer_science
+
+  mathematics:
+    terms:
+      - calculus
+      - derivative
+      - differentiation
+      - integral
+      - integration
+      - definite integral
+      - differential equation
+      - linear algebra
+      - matrix
+      - matrices
+      - determinant
+      - eigenvalue
+      - eigenvector
+      - probability
+      - bayes theorem
+      - statistics
+      - normal distribution
+      - hypothesis testing
+      - trigonometry
+      - geometry
+      - polynomial
+      - quadratic equation
+      - logarithm
+      - vector space
+    category: mathematics
+
+  physics_and_chemistry:
+    terms:
+      - quantum mechanics
+      - special relativity
+      - thermodynamics
+      - entropy
+      - newton laws
+      - electromagnetic induction
+      - gravity
+      - wave particle duality
+      - photosynthesis
+      - प्रकाश संश्लेषण
+      - પ્રકાશસંશ્લેષણ
+      - cellular respiration
+      - mitosis
+      - meiosis
+      - dna replication
+      - crispr
+      - chemical bonding
+      - periodic table
+      - organic chemistry
+      - kinetics
+      - equilibrium
+    category: natural_sciences
+
+  web_and_cloud:
+    terms:
+      - react
+      - next.js
+      - vue
+      - angular
+      - node.js
+      - express
+      - django
+      - flask
+      - fastapi
+      - docker
+      - kubernetes
+      - aws
+      - gcp
+      - azure
+      - cloudflare
+      - postgresql
+      - mongodb
+      - redis
+      - supabase
+      - rest api
+      - graphql
+      - websocket
+      - authentication
+      - jwt
+      - oauth
+    category: software_engineering
+
+# ============================================================================
+# 2. ACTION TERMINOLOGY (What the user wants to do with the subject)
+# ============================================================================
+actions:
+  explain:
+    verbs:
+      - explain
+      - describe
+      - clarify
+      - teach
+      - understand
+      - samjhao
+      - samjavo
+    maps_to_intent: explain_concept
+
+  learn:
+    verbs:
+      - learn
+      - study
+      - master
+      - grasp
+      - sikhna
+      - shikhvu
+    maps_to_intent: learn_from_zero
+
+  write_code:
+    verbs:
+      - write
+      - code
+      - implement
+      - create
+      - build
+      - construct
+      - likho
+      - lakho
+    maps_to_intent: generate_code
+
+  debug:
+    verbs:
+      - fix
+      - debug
+      - repair
+      - solve error
+      - resolve
+      - troubleshoot
+      - sudharo
+    maps_to_intent: debug_code
+
+  solve_math:
+    verbs:
+      - solve
+      - calculate
+      - compute
+      - evaluate
+      - derive
+      - prove
+      - hisab karo
+    maps_to_intent: solve_problem
+
+  compare:
+    verbs:
+      - compare
+      - contrast
+      - distinguish
+      - differentiate
+      - compare karo
+    maps_to_intent: compare_concepts
+
+  summarize:
+    verbs:
+      - summarize
+      - condense
+      - shorten
+      - recap
+      - saransh aapo
+    maps_to_intent: generate_summary
+
+  test_quiz:
+    verbs:
+      - test
+      - quiz
+      - examine
+      - evaluate me
+      - pariksha lo
+    maps_to_intent: generate_quiz
+
+# ============================================================================
+# 3. TOOL TERMINOLOGY (Explicit or implicit tool triggers)
+# ============================================================================
+tools:
+  web_search:
+    triggers:
+      - web search
+      - search online
+      - google it
+      - look up
+      - latest 2026
+      - right now
+      - fresh news
+      - find online
+    tool_name: web_search
+    providers:
+      - tavily
+      - duckduckgo
+
+  document_pdf:
+    triggers:
+      - in this pdf
+      - uploaded file
+      - document says
+      - according to notes
+      - from my book
+    tool_name: pdf_retrieval
+    providers:
+      - pymupdf_local
+
+  math_computation:
+    triggers:
+      - symbolic calculation
+      - matrix inversion
+      - evaluate integral
+      - sympy
+    tool_name: math_engine
+    providers:
+      - sympy_local
+
+# ============================================================================
+# 4. OUTPUT TERMINOLOGY (The shape of the deliverable)
+# ============================================================================
+outputs:
+  structured_notes:
+    markers:
+      - notes
+      - bullet points
+      - study sheet
+      - cheat sheet
+      - revision notes
+  quiz_mcq:
+    markers:
+      - mcq
+      - mcqs
+      - quiz
+      - multiple choice
+      - options
+  code_snippet:
+    markers:
+      - code
+      - script
+      - function
+      - class
+      - snippet
+  table:
+    markers:
+      - table
+      - tabular form
+      - columns
+      - comparison table
+  flashcard:
+    markers:
+      - flashcard
+      - flashcards
+      - anki
+      - q&a cards
+  step_solution:
+    markers:
+      - step by step
+      - derivation
+      - working
+      - proof

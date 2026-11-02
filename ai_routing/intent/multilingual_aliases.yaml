@@ -1,0 +1,145 @@
+# BrainyAi Multilingual Aliases & Natural Phrasing Patterns
+# Supports English, Hinglish, Hindi (Devanagari), and Gujarati (Gujarati script & Romanized).
+
+languages:
+  hinglish:
+    markers:
+      - \b(?:samjhao|samjha|batao|karo|banao|sikhao|dikhao|chahiye|hai|hain|kya|kyun|kaise|mujhe|isko|iske|isme|mera|meri|nahi|mat|aur|bhai|yaar|dono|antar)\b
+    phrases:
+      explain_concept:
+        - samjhao
+        - samjha do
+        - mujhe samjhao
+        - isko samjhao
+        - explain karo
+        - dhang se samjhao
+        - simple bhasha mein samjhao
+        - aasan shabdo mein batao
+      learn_from_zero:
+        - zero se sikhao
+        - scratch se batao
+        - shuru se padhao
+        - pehli baar padh raha hu
+      generate_notes:
+        - notes bana do
+        - notes chahiye
+        - short notes banao
+        - revision notes do
+        - iske notes banao
+      generate_quiz:
+        - mcq bana do
+        - 5 mcq banao
+        - quiz banao
+        - questions puchho
+        - test lo mera
+      debug_code:
+        - ye code fix karo
+        - bug theek karo
+        - error aa raha hai
+        - code nahi chal raha
+        - error solve karo
+      solve_problem:
+        - isko solve karo
+        - solution nikal do
+        - math problem solve karo
+        - steps ke sath solve karo
+      simplify_content:
+        - simple language mein batao
+        - aasan bhasha mein
+        - thoda easy karke samjhao
+      request_shorter_answer:
+        - thoda chota karo
+        - short mein batao
+        - 2 line mein samjhao
+        - summary bana do
+
+  hindi_devanagari:
+    markers:
+      - [\u0900-\u097F]
+    phrases:
+      explain_concept:
+        - समझाओ
+        - मुझे समझाओ
+        - विस्तार से समझाओ
+        - यह क्या है
+        - का क्या अर्थ है
+      learn_from_zero:
+        - शुरू से सिखाओ
+        - बुनियादी बातें बताओ
+      generate_notes:
+        - नोट्स बनाओ
+        - संक्षिप्त नोट्स दो
+        - अध्ययन नोट्स
+      generate_quiz:
+        - बहुविकल्पीय प्रश्न बनाओ
+        - प्रश्नोत्तरी बनाओ
+        - ५ प्रश्न पूछो
+      debug_code:
+        - त्रुटि ठीक करो
+        - यह कोड ठीक करो
+        - बग ढूंढो
+      solve_problem:
+        - हल करो
+        - इसका हल निकालो
+        - समीकरण हल करो
+      simplify_content:
+        - सरल भाषा में समझाओ
+        - आसान शब्दों में बताओ
+
+  gujarati:
+    markers:
+      - [\u0A80-\u0AFF]
+      - \b(?:samjavo|sikhavo|banavo|aapo|kem|shu|chhe|hata|mane|aama|banne|farak|saransh|tunk|tunkma|khabar|pachi|aagad)\b
+    phrases:
+      explain_concept:
+        - સમજાવો
+        - આ કન્સેપ્ટ સમજાવો
+        - મને સમજાવો
+        - વિગતવાર સમજાવો
+        - શું છે
+        - કહો
+        - સરળ શબ્દોમાં કહો
+        - samjavo
+        - aa concept samjavo
+        - mane samjavo
+        - sari rite samjavo
+      learn_from_zero:
+        - શૂન્યથી શીખવો
+        - શરૂઆતથી શીખવો
+        - zero thi sikhavo
+        - sharuat thi sikhavo
+      generate_notes:
+        - નોટ્સ બનાવી આપો
+        - અભ્યાસ નોટ્સ આપો
+        - notes banavi aapo
+        - notes aapo
+        - short notes banavo
+      generate_quiz:
+        - પ્રશ્નોત્તરી બનાવો
+        - એમસીક્યુ બનાવો
+        - mcq banavi aapo
+        - quiz banavo
+        - prashno puchho
+      debug_code:
+        - કોડ ફિક્સ કરો
+        - એરર સોલ્વ કરો
+        - ભૂલ સુધારો
+        - code fix karo
+        - error ave chhe
+        - bug sudharo
+      solve_problem:
+        - આ ગણો
+        - સમીકરણ ઉકેલો
+        - જવાબ શોધો
+        - ganatri darshavo
+        - javab shodho
+      simplify_content:
+        - સરળ ભાષામાં સમજાવો
+        - ટૂંકમાં કહો
+        - saral bhasha ma samjavo
+        - tunk ma kaho
+      compare_concepts:
+        - શું ફરક છે
+        - બંને વચ્ચેનો તફાવત
+        - shu farak chhe
+        - banne vachhe shu farak chhe

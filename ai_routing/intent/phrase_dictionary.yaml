@@ -1,0 +1,547 @@
+# BrainyAi Phrase Dictionary & Intent Signal Map
+# Maps natural phrases, synonyms, informal expressions, Hinglish/Hindi/Gujarati terms,
+# and contextual signals to intent hypotheses.
+
+intents:
+  explain_concept:
+    phrases:
+      - explain
+      - teach me
+      - help me understand
+      - break this down
+      - how does it work
+      - what does it mean
+      - walk me through
+      - give me intuition
+      - what is the concept of
+      - samjhao
+      - samjha do
+      - mujhe samjhao
+      - isko samjhao
+      - explain karo
+      - samjav
+      - samjavo
+      - mane samjavo
+      - aa concept samjavo
+    signals:
+      - conceptual_query
+      - educational_topic
+    negative_signals:
+      - generate_code
+      - generate_quiz
+      - fix_error
+      - search_latest
+
+  learn_from_zero:
+    phrases:
+      - teach me from zero
+      - learn from scratch
+      - from zero to hero
+      - absolute beginner
+      - i know nothing about
+      - start from the basics
+      - start from ground zero
+      - zero se sikhao
+      - zero thi sikhavo
+      - bilkul shuru se
+      - scratch se batao
+    signals:
+      - beginner_level
+      - prerequisite_free
+    negative_signals:
+      - advanced_theory
+      - code_optimization
+
+  simplify_content:
+    phrases:
+      - make it easier
+      - make this simpler
+      - explain like i am 5
+      - eli5
+      - in simple words
+      - in laymans terms
+      - too complicated
+      - simplify this
+      - simple language mein
+      - aasan bhasha mein
+      - saral bhasha ma
+      - saral rite samjavo
+      - halka phulka samjhao
+    signals:
+      - simplification_needed
+      - lower_reading_level
+    negative_signals:
+      - formal_rigorous_proof
+
+  step_by_step_learning:
+    phrases:
+      - step by step
+      - step by step guide
+      - procedural steps
+      - ordered steps
+      - step by step batao
+      - step by step samjhao
+      - dhere dhere samjhao
+      - pagle pagle samjavo
+    signals:
+      - sequential_flow
+    negative_signals:
+      - quick_summary
+
+  solve_problem:
+    phrases:
+      - solve this
+      - solve for x
+      - find the solution
+      - calculate
+      - evaluate
+      - solve the equation
+      - compute the value
+      - find the roots
+      - integrate
+      - differentiate
+      - isko solve karo
+      - solve kar do
+      - javab shodho
+      - equation solve karo
+    signals:
+      - mathematical_equation
+      - numeric_problem
+    negative_signals:
+      - theoretical_essay
+
+  show_working:
+    phrases:
+      - show working
+      - show your steps
+      - show intermediate steps
+      - show all calculations
+      - step by step derivation
+      - prove this
+      - working dikhao
+      - steps ke sath solve karo
+      - ganatri darshavo
+    signals:
+      - algebraic_derivation
+      - proof_steps
+
+  compare_concepts:
+    phrases:
+      - compare
+      - difference between
+      - versus
+      - vs
+      - how is it different from
+      - pros and cons of
+      - trade offs between
+      - compare and contrast
+      - kya difference hai
+      - dono mein kya antar hai
+      - banne ma shu farak chhe
+      - compare karo
+    signals:
+      - dual_entities
+      - contrastive_evaluation
+
+  define_term:
+    phrases:
+      - define
+      - definition of
+      - what is
+      - who is
+      - meaning of
+      - short definition
+      - kya hota hai
+      - ka matlab
+      - no arth shu
+      - define karo
+    signals:
+      - short_query
+      - dictionary_lookup
+
+  give_examples:
+    phrases:
+      - give examples
+      - show me an example
+      - real world examples
+      - illustrative examples
+      - practical example
+      - example do
+      - udaharan aapo
+      - udaharan ke sath
+    signals:
+      - demonstration_needed
+
+  prepare_for_exam:
+    phrases:
+      - exam preparation
+      - exam revision
+      - revise for my test
+      - important for exam
+      - high yield topics
+      - cheat sheet
+      - exam ke liye
+      - pariksha mate
+      - test preparation
+    signals:
+      - exam_oriented
+
+  generate_notes:
+    phrases:
+      - make notes
+      - give me notes
+      - study notes
+      - revision notes
+      - create notes
+      - structured notes
+      - notes bana do
+      - notes chahiye
+      - notes banavi aapo
+      - notes aapo
+      - iske notes banao
+    signals:
+      - note_structuring
+    negative_signals:
+      - write_code
+      - fix_error
+
+  generate_summary:
+    phrases:
+      - summarize
+      - summary of
+      - give me a summary
+      - executive summary
+      - recap
+      - tldr
+      - short summary
+      - summary bana do
+      - short ma saransh
+      - saransh aapo
+    signals:
+      - condensation
+
+  generate_quiz:
+    phrases:
+      - make mcqs
+      - create a quiz
+      - 5 mcqs
+      - 10 mcqs
+      - multiple choice questions
+      - practice quiz
+      - quiz me
+      - mcq bana do
+      - mcq banavo
+      - quiz banao
+      - prashnottari
+    signals:
+      - multiple_choice_format
+    negative_signals:
+      - explain_only
+
+  generate_flashcards:
+    phrases:
+      - make flashcards
+      - generate flashcards
+      - create flashcards
+      - study cards
+      - anki cards
+      - flashcards bana do
+      - flashcards banavo
+    signals:
+      - flashcard_structure
+
+  generate_questions:
+    phrases:
+      - practice questions
+      - test questions
+      - generate questions
+      - ask me questions
+      - important questions
+      - sawal pucho
+      - prashno banavo
+      - questions do
+    signals:
+      - problem_set
+
+  generate_code:
+    phrases:
+      - write code
+      - implement in
+      - write a python script
+      - write a function
+      - create a class
+      - code for this
+      - generate code
+      - code likho
+      - python code banao
+      - code lakho
+      - program banao
+    signals:
+      - programming_request
+      - language_specified
+    negative_signals:
+      - no_code_constraint
+      - debug_existing
+
+  debug_code:
+    phrases:
+      - fix this code
+      - debug this
+      - why is this failing
+      - find the bug
+      - resolve this error
+      - code is not working
+      - error aa raha hai
+      - bug fix karo
+      - code kam nahi kar raha
+      - aa code fix karo
+      - error ave chhe
+    signals:
+      - existing_code_present
+      - error_traceback_present
+
+  explain_code:
+    phrases:
+      - explain this code
+      - how does this code work
+      - break down this function
+      - explain what this script does
+      - code samjhao
+      - ye code kya karta hai
+      - aa code samjavo
+    signals:
+      - code_snippet_provided
+
+  optimize_code:
+    phrases:
+      - optimize this
+      - make this faster
+      - reduce time complexity
+      - reduce memory usage
+      - improve performance of this code
+      - optimize karo
+      - fast banao
+    signals:
+      - performance_metric
+
+  review_code:
+    phrases:
+      - review my code
+      - code review
+      - clean this code up
+      - refactor this
+      - best practices for this code
+      - code review karo
+    signals:
+      - code_quality
+
+  write_tests:
+    phrases:
+      - write tests
+      - write unit tests
+      - pytest for this
+      - jest tests
+      - test cases for this code
+      - tests likho
+    signals:
+      - test_framework
+
+  understand_error:
+    phrases:
+      - what does this error mean
+      - explain this traceback
+      - why am i getting this error
+      - error meaning
+      - ye error kyu aaya
+      - aa error kem aavi
+    signals:
+      - error_string
+
+  web_research:
+    phrases:
+      - search online
+      - look up on the web
+      - find information about
+      - check google
+      - web search
+      - search the internet
+      - browse for
+      - internet pe dekho
+      - online search karo
+      - net par check karo
+    signals:
+      - web_lookup
+
+  find_latest_information:
+    phrases:
+      - latest
+      - recent
+      - today
+      - current status
+      - new release
+      - 2025
+      - 2026
+      - right now
+      - news about
+      - taja khabar
+      - navi mahiti
+      - abhi kya chal raha hai
+    signals:
+      - temporal_recency
+      - news_trigger
+
+  verify_information:
+    phrases:
+      - is this true
+      - verify this
+      - fact check
+      - is it legitimate
+      - is this safe
+      - really happened
+      - sach hai kya
+      - verify karo
+      - shu aa sachu chhe
+    signals:
+      - verification_target
+
+  find_documentation:
+    phrases:
+      - official docs
+      - documentation for
+      - api reference
+      - sdk docs
+      - official website
+      - docs dekho
+    signals:
+      - library_name
+
+  pdf_question_answering:
+    phrases:
+      - from the pdf
+      - according to this document
+      - what does the pdf say about
+      - in the uploaded file
+      - document ke anusar
+      - pdf ma shu chhe
+    signals:
+      - pdf_document_present
+
+  pdf_summary:
+    phrases:
+      - summarize this pdf
+      - pdf summary
+      - summarize the document
+      - is pdf ka summary
+      - aa pdf no saransh
+    signals:
+      - pdf_document_present
+      - summary_intent
+
+  pdf_notes:
+    phrases:
+      - notes from this pdf
+      - pdf notes
+      - make notes from document
+      - pdf ke notes
+      - pdf mathi notes
+    signals:
+      - pdf_document_present
+      - note_intent
+
+  pdf_quiz:
+    phrases:
+      - quiz from pdf
+      - mcqs from document
+      - pdf mcq
+      - pdf se quiz banao
+      - pdf mathi quiz
+    signals:
+      - pdf_document_present
+      - quiz_intent
+
+  pdf_flashcards:
+    phrases:
+      - flashcards from pdf
+      - cards from document
+      - pdf flashcards
+      - pdf se flashcards
+    signals:
+      - pdf_document_present
+      - flashcard_intent
+
+  pdf_important_questions:
+    phrases:
+      - important questions from pdf
+      - exam questions from document
+      - high yield pdf questions
+      - pdf ke important questions
+    signals:
+      - pdf_document_present
+      - exam_intent
+
+  general_conversation:
+    phrases:
+      - hi
+      - hello
+      - hey
+      - good morning
+      - good evening
+      - who are you
+      - how are you
+      - namaste
+      - kem chho
+      - kya haal hai
+      - whats up
+      - sup
+    signals:
+      - greeting
+      - smalltalk
+
+  follow_up_question:
+    phrases:
+      - what about
+      - how about
+      - and then
+      - why so
+      - what else
+      - aur batao
+      - pachi shu
+    signals:
+      - contextual_pronoun
+
+  request_shorter_answer:
+    phrases:
+      - make it shorter
+      - keep it short
+      - too long
+      - summarize that
+      - short me batao
+      - thoda chota karo
+      - tunk ma samjavo
+      - briefly
+      - in 2 lines
+      - in 3 bullets
+    signals:
+      - brevity_request
+
+  request_detailed_answer:
+    phrases:
+      - explain in detail
+      - more details
+      - expand on that
+      - in depth
+      - detail me samjhao
+      - vistrut rite samjavo
+    signals:
+      - depth_request
+
+  continue_previous_task:
+    phrases:
+      - continue
+      - go on
+      - keep going
+      - next step
+      - aage batao
+      - aagad vadho
+    signals:
+      - continuation

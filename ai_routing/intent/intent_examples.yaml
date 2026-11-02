@@ -1,0 +1,711 @@
+examples:
+- query: Explain Python
+  expected_primary_intent: explain_concept
+  expected_topic: python
+  expected_workflow: educational
+  expected_search: false
+  constraints: []
+- query: Teach me Python from zero
+  expected_primary_intent: learn_from_zero
+  expected_topic: python
+  expected_workflow: educational
+  expected_search: false
+  constraints:
+  - beginner
+- query: Write Python code for quicksort
+  expected_primary_intent: generate_code
+  expected_topic: python
+  expected_workflow: coding
+  expected_search: false
+  constraints:
+  - language:python
+- query: 'Fix this Python code: def add(a, b) return a + b'
+  expected_primary_intent: debug_code
+  expected_topic: python
+  expected_workflow: coding
+  expected_search: false
+  constraints:
+  - language:python
+- query: Give me notes on Python data structures
+  expected_primary_intent: generate_notes
+  expected_topic: python
+  expected_workflow: educational
+  expected_search: false
+  constraints: []
+- query: Compare Python and Java
+  expected_primary_intent: compare_concepts
+  expected_topic: python
+  expected_workflow: educational
+  expected_search: false
+  constraints: []
+- query: Check the latest official Python 3.13 documentation
+  expected_primary_intent: find_documentation
+  expected_topic: python
+  expected_workflow: coding_search
+  expected_search: true
+  constraints: []
+- query: Why does this Python code raise IndexError?
+  expected_primary_intent: understand_error
+  expected_topic: python
+  expected_workflow: coding
+  expected_search: false
+  constraints: []
+- query: Explain transformer architecture
+  expected_primary_intent: explain_concept
+  expected_topic: transformer
+  expected_workflow: educational
+  expected_search: false
+  constraints: []
+- query: Help me understand attention mechanism
+  expected_primary_intent: explain_concept
+  expected_topic: attention mechanism
+  expected_workflow: educational
+  expected_search: false
+  constraints: []
+- query: Break down backpropagation for me
+  expected_primary_intent: explain_concept
+  expected_topic: backpropagation
+  expected_workflow: educational
+  expected_search: false
+  constraints: []
+- query: How does gradient descent work?
+  expected_primary_intent: explain_concept
+  expected_topic: gradient descent
+  expected_workflow: educational
+  expected_search: false
+  constraints: []
+- query: Samjhao binary search tree kya hota hai
+  expected_primary_intent: explain_concept
+  expected_topic: binary search tree
+  expected_workflow: educational
+  expected_search: false
+  constraints: []
+- query: 'Aa concept samjavo: photosynthesis'
+  expected_primary_intent: explain_concept
+  expected_topic: photosynthesis
+  expected_workflow: educational
+  expected_search: false
+  constraints: []
+- query: 'Solve for x: 3x + 12 = 45'
+  expected_primary_intent: solve_problem
+  expected_topic: algebra
+  expected_workflow: mathematics
+  expected_search: false
+  constraints: []
+- query: Evaluate the integral of x^2 * sin(x) dx
+  expected_primary_intent: solve_problem
+  expected_topic: calculus
+  expected_workflow: mathematics
+  expected_search: false
+  constraints: []
+- query: Show working for finding eigenvalues of [[2, 1], [1, 2]]
+  expected_primary_intent: show_working
+  expected_topic: linear algebra
+  expected_workflow: mathematics
+  expected_search: false
+  constraints:
+  - show_steps
+- query: Find the roots of 2x^2 - 5x + 3 = 0 with intermediate steps
+  expected_primary_intent: show_working
+  expected_topic: quadratic equation
+  expected_workflow: mathematics
+  expected_search: false
+  constraints:
+  - show_steps
+- query: Calculate derivative of f(x) = e^(3x) * cos(x)
+  expected_primary_intent: solve_problem
+  expected_topic: calculus
+  expected_workflow: mathematics
+  expected_search: false
+  constraints: []
+- query: Make 5 MCQs on machine learning
+  expected_primary_intent: generate_quiz
+  expected_topic: machine learning
+  expected_workflow: educational
+  expected_search: false
+  constraints:
+  - count:5
+  - format:mcq
+- query: Test my knowledge of dynamic programming
+  expected_primary_intent: test_knowledge
+  expected_topic: dynamic programming
+  expected_workflow: educational
+  expected_search: false
+  constraints: []
+- query: Create 10 multiple choice questions on thermodynamics with answers
+  expected_primary_intent: generate_quiz
+  expected_topic: thermodynamics
+  expected_workflow: educational
+  expected_search: false
+  constraints:
+  - count:10
+  - format:mcq
+- query: Generate flashcards for biology cell organelles
+  expected_primary_intent: generate_flashcards
+  expected_topic: biology
+  expected_workflow: educational
+  expected_search: false
+  constraints:
+  - format:flashcard
+- query: Practice questions for calculus exam
+  expected_primary_intent: generate_questions
+  expected_topic: calculus
+  expected_workflow: educational
+  expected_search: false
+  constraints: []
+- query: Explain recursion, show Python code, and give me 5 questions
+  expected_primary_intent: explain_concept
+  expected_secondary_intents:
+  - generate_code
+  - generate_questions
+  expected_topic: recursion
+  expected_workflow: coding
+  expected_search: false
+  constraints:
+  - language:python
+  - count:5
+- query: Explain neural networks and make 5 MCQs
+  expected_primary_intent: explain_concept
+  expected_secondary_intents:
+  - generate_quiz
+  expected_topic: neural network
+  expected_workflow: educational
+  expected_search: false
+  constraints:
+  - count:5
+  - format:mcq
+- query: Summarize supervised learning and convert it into a comparison table
+  expected_primary_intent: generate_summary
+  expected_secondary_intents:
+  - compare_concepts
+  expected_topic: supervised learning
+  expected_workflow: educational
+  expected_search: false
+  constraints:
+  - format:table
+- query: Debug this code and write 3 unit tests for it
+  expected_primary_intent: debug_code
+  expected_secondary_intents:
+  - write_tests
+  expected_topic: programming
+  expected_workflow: coding
+  expected_search: false
+  constraints:
+  - count:3
+- query: Explain Dijkstra algorithm, give time complexity, and implement in C++
+  expected_primary_intent: explain_concept
+  expected_secondary_intents:
+  - generate_code
+  expected_topic: dijkstra
+  expected_workflow: coding
+  expected_search: false
+  constraints:
+  - language:c++
+- query: Explain quantum mechanics without using Google
+  expected_primary_intent: explain_concept
+  expected_topic: quantum mechanics
+  expected_workflow: educational
+  expected_search: false
+  constraints:
+  - no_web_search
+- query: Don't give me code, just explain the logic of merge sort
+  expected_primary_intent: explain_concept
+  expected_topic: mergesort
+  expected_workflow: educational
+  expected_search: false
+  constraints:
+  - no_code
+- query: Explain gradient descent in 3 bullet points
+  expected_primary_intent: explain_concept
+  expected_topic: gradient descent
+  expected_workflow: educational
+  expected_search: false
+  constraints:
+  - concise
+  - format:bullets
+- query: Write a script in Python not JavaScript to scrape quotes
+  expected_primary_intent: generate_code
+  expected_topic: python
+  expected_workflow: coding
+  expected_search: false
+  constraints:
+  - language:python
+  - exclude:javascript
+- query: Make notes on mitosis but keep it short
+  expected_primary_intent: generate_notes
+  expected_topic: mitosis
+  expected_workflow: educational
+  expected_search: false
+  constraints:
+  - concise
+- query: Find the latest Gemini 3.8 model changes announced today
+  expected_primary_intent: find_latest_information
+  expected_topic: gemini
+  expected_workflow: web_search
+  expected_search: true
+  constraints: []
+- query: Search online for recent research in fusion energy 2026
+  expected_primary_intent: web_research
+  expected_topic: physics
+  expected_workflow: web_search
+  expected_search: true
+  constraints: []
+- query: 'Is this website legitimate: fake-phishing-url.com?'
+  expected_primary_intent: verify_information
+  expected_topic: security
+  expected_workflow: web_search
+  expected_search: true
+  constraints: []
+- query: Check official documentation for Next.js App Router cookies
+  expected_primary_intent: find_documentation
+  expected_topic: next.js
+  expected_workflow: coding_search
+  expected_search: true
+  constraints: []
+- query: Make it shorter
+  expected_primary_intent: request_shorter_answer
+  expected_workflow: normal_chat
+  expected_search: false
+  context_required: true
+  constraints:
+  - concise
+- query: Now optimize it
+  expected_primary_intent: optimize_code
+  expected_workflow: coding
+  expected_search: false
+  context_required: true
+  constraints: []
+- query: Explain the second result you found earlier
+  expected_primary_intent: explain_concept
+  expected_workflow: web_search
+  expected_search: false
+  context_required: true
+  constraints:
+  - reuse_search
+- query: Give me more examples
+  expected_primary_intent: give_examples
+  expected_workflow: educational
+  expected_search: false
+  context_required: true
+  constraints: []
+- query: Convert it into a table
+  expected_primary_intent: rewrite_content
+  expected_workflow: normal_chat
+  expected_search: false
+  context_required: true
+  constraints:
+  - format:table
+- query: Continue
+  expected_primary_intent: continue_previous_task
+  expected_workflow: educational
+  expected_search: false
+  context_required: true
+  constraints: []
+- query: What does this PDF say about Newton's third law?
+  expected_primary_intent: pdf_question_answering
+  expected_topic: physics
+  expected_workflow: pdf_qa
+  expected_search: false
+  document_present: true
+  constraints:
+  - doc_only
+- query: Make study notes from this PDF
+  expected_primary_intent: pdf_notes
+  expected_workflow: pdf_notes
+  expected_search: false
+  document_present: true
+  constraints:
+  - doc_only
+- query: Generate a 10 question quiz from the uploaded document
+  expected_primary_intent: pdf_quiz
+  expected_workflow: pdf_quiz
+  expected_search: false
+  document_present: true
+  constraints:
+  - doc_only
+  - count:10
+- query: Extract flashcards from this PDF
+  expected_primary_intent: pdf_flashcards
+  expected_workflow: pdf_flashcards
+  expected_search: false
+  document_present: true
+  constraints:
+  - doc_only
+- query: Give me the most important exam questions from this syllabus PDF
+  expected_primary_intent: pdf_important_questions
+  expected_workflow: pdf_important_questions
+  expected_search: false
+  document_present: true
+  constraints:
+  - doc_only
+- query: 'Mujhe ye topic samjhao: Machine learning'
+  expected_primary_intent: explain_concept
+  expected_topic: machine learning
+  expected_workflow: educational
+  expected_search: false
+  language: hinglish
+  constraints: []
+- query: Is code ko fix karo please
+  expected_primary_intent: debug_code
+  expected_workflow: coding
+  expected_search: false
+  language: hinglish
+  constraints: []
+- query: Machine learning ke short notes bana do
+  expected_primary_intent: generate_notes
+  expected_topic: machine learning
+  expected_workflow: educational
+  expected_search: false
+  language: hinglish
+  constraints: []
+- query: Iske 5 mcq bana do
+  expected_primary_intent: generate_quiz
+  expected_workflow: educational
+  expected_search: false
+  language: hinglish
+  constraints:
+  - count:5
+- query: प्रकाश संश्लेषण क्या है? सरल भाषा में समझाओ
+  expected_primary_intent: explain_concept
+  expected_topic: photosynthesis
+  expected_workflow: educational
+  expected_search: false
+  language: hi
+  constraints:
+  - simple_language
+- query: 'આ કન્સેપ્ટ સમજાવો: Binary Search Tree'
+  expected_primary_intent: explain_concept
+  expected_topic: binary search tree
+  expected_workflow: educational
+  expected_search: false
+  language: gu
+  constraints: []
+- query: 'Mane notes banavi aapo: Thermodynamics'
+  expected_primary_intent: generate_notes
+  expected_topic: thermodynamics
+  expected_workflow: educational
+  expected_search: false
+  language: gu
+  constraints: []
+- query: Aa code fix karo error ave chhe
+  expected_primary_intent: debug_code
+  expected_workflow: coding
+  expected_search: false
+  language: gu
+  constraints: []
+- query: Supervised ane unsupervised learning ma shu farak chhe?
+  expected_primary_intent: compare_concepts
+  expected_topic: supervised learning
+  expected_workflow: educational
+  expected_search: false
+  language: gu
+  constraints: []
+- query: Hi
+  expected_primary_intent: general_conversation
+  expected_workflow: normal_chat
+  expected_search: false
+  constraints: []
+- query: Good morning Brainy!
+  expected_primary_intent: general_conversation
+  expected_workflow: normal_chat
+  expected_search: false
+  constraints: []
+- query: Who are you?
+  expected_primary_intent: general_conversation
+  expected_workflow: normal_chat
+  expected_search: false
+  constraints: []
+- query: What is an atom?
+  expected_primary_intent: define_term
+  expected_workflow: normal_chat
+  expected_search: false
+  constraints: []
+- query: Define gravity
+  expected_primary_intent: define_term
+  expected_workflow: normal_chat
+  expected_search: false
+  constraints: []
+- query: Write unit tests for this sorting function using pytest
+  expected_primary_intent: write_tests
+  expected_topic: programming
+  expected_workflow: coding
+  expected_search: false
+  constraints: []
+- query: Review this code for security vulnerabilities and memory leaks
+  expected_primary_intent: review_code
+  expected_topic: programming
+  expected_workflow: coding
+  expected_search: false
+  constraints: []
+- query: Design software architecture for a real-time chat application
+  expected_primary_intent: design_software_architecture
+  expected_topic: software_engineering
+  expected_workflow: coding
+  expected_search: false
+  constraints: []
+- query: Why is my React component re-rendering infinitely?
+  expected_primary_intent: understand_error
+  expected_topic: react
+  expected_workflow: coding
+  expected_search: false
+  constraints: []
+- query: Refactor this JavaScript function to use async await
+  expected_primary_intent: optimize_code
+  expected_topic: javascript
+  expected_workflow: coding
+  expected_search: false
+  constraints: []
+- query: Write a SQL query to find second highest salary
+  expected_primary_intent: generate_code
+  expected_topic: sql
+  expected_workflow: coding
+  expected_search: false
+  constraints:
+  - language:sql
+- query: Explain time complexity of Red-Black tree insertion
+  expected_primary_intent: explain_concept
+  expected_topic: red black tree
+  expected_workflow: educational
+  expected_search: false
+  constraints: []
+- query: How to implement a Priority Queue using a Min Heap in C++?
+  expected_primary_intent: generate_code
+  expected_topic: priority queue
+  expected_workflow: coding
+  expected_search: false
+  constraints:
+  - language:c++
+- query: Debug this Django database migration error
+  expected_primary_intent: debug_code
+  expected_topic: django
+  expected_workflow: coding
+  expected_search: false
+  constraints: []
+- query: Explain difference between process and thread in operating systems
+  expected_primary_intent: compare_concepts
+  expected_topic: computer_science
+  expected_workflow: educational
+  expected_search: false
+  constraints: []
+- query: Compute the determinant of a 3x3 matrix [[1,2,3],[0,1,4],[5,6,0]]
+  expected_primary_intent: solve_problem
+  expected_topic: matrix
+  expected_workflow: mathematics
+  expected_search: false
+  constraints: []
+- query: Show step by step calculation for Bayes theorem probability
+  expected_primary_intent: show_working
+  expected_topic: bayes theorem
+  expected_workflow: mathematics
+  expected_search: false
+  constraints:
+  - show_steps
+- query: Derive the formula for kinetic energy from work energy theorem
+  expected_primary_intent: show_working
+  expected_topic: physics
+  expected_workflow: mathematics
+  expected_search: false
+  constraints:
+  - show_steps
+- query: Calculate the standard deviation of [12, 15, 18, 20, 25]
+  expected_primary_intent: solve_problem
+  expected_topic: statistics
+  expected_workflow: mathematics
+  expected_search: false
+  constraints: []
+- query: Explain the second law of thermodynamics in plain English
+  expected_primary_intent: explain_concept
+  expected_topic: thermodynamics
+  expected_workflow: educational
+  expected_search: false
+  constraints:
+  - simple_language
+- query: Solve the quadratic equation x^2 - 7x + 12 = 0
+  expected_primary_intent: solve_problem
+  expected_topic: quadratic equation
+  expected_workflow: mathematics
+  expected_search: false
+  constraints: []
+- query: What is CRISPR gene editing and how does Cas9 work?
+  expected_primary_intent: explain_concept
+  expected_topic: crispr
+  expected_workflow: educational
+  expected_search: false
+  constraints: []
+- query: Explain chemical equilibrium and Le Chatelier principle
+  expected_primary_intent: explain_concept
+  expected_topic: chemistry
+  expected_workflow: educational
+  expected_search: false
+  constraints: []
+- query: What is the current stock price of Google today?
+  expected_primary_intent: find_latest_information
+  expected_topic: finance
+  expected_workflow: web_search
+  expected_search: true
+  constraints: []
+- query: Find recent developments in quantum computing announced in 2026
+  expected_primary_intent: web_research
+  expected_topic: quantum mechanics
+  expected_workflow: web_search
+  expected_search: true
+  constraints: []
+- query: Verify if this health claim about raw milk is factually accurate
+  expected_primary_intent: verify_information
+  expected_topic: biology
+  expected_workflow: web_search
+  expected_search: true
+  constraints: []
+- query: Check the latest FastAPI release notes and breaking changes
+  expected_primary_intent: find_documentation
+  expected_topic: fastapi
+  expected_workflow: coding_search
+  expected_search: true
+  constraints: []
+- query: Search the web for upcoming AI conferences in late 2026
+  expected_primary_intent: web_research
+  expected_topic: ai
+  expected_workflow: web_search
+  expected_search: true
+  constraints: []
+- query: 'Is math problem ko solve karo steps ke sath: 2x + 5 = 15'
+  expected_primary_intent: show_working
+  expected_topic: algebra
+  expected_workflow: mathematics
+  expected_search: false
+  language: hinglish
+  constraints:
+  - show_steps
+- query: Python mein inheritance kaise kaam karta hai samjhao
+  expected_primary_intent: explain_concept
+  expected_topic: inheritance
+  expected_workflow: educational
+  expected_search: false
+  language: hinglish
+  constraints: []
+- query: Mujhe calculus shuru se sikhna hai zero level se
+  expected_primary_intent: learn_from_zero
+  expected_topic: calculus
+  expected_workflow: educational
+  expected_search: false
+  language: hinglish
+  constraints:
+  - beginner
+- query: Bhai is code mein syntax error aa raha hai sudharo
+  expected_primary_intent: debug_code
+  expected_topic: programming
+  expected_workflow: coding
+  expected_search: false
+  language: hinglish
+  constraints: []
+- query: डेटा संरचना और एल्गोरिदम क्या हैं? विस्तार से समझाओ
+  expected_primary_intent: explain_concept
+  expected_topic: computer_science
+  expected_workflow: educational
+  expected_search: false
+  language: hi
+  constraints: []
+- query: समीकरण 5x - 10 = 0 का हल निकालो
+  expected_primary_intent: solve_problem
+  expected_topic: algebra
+  expected_workflow: mathematics
+  expected_search: false
+  language: hi
+  constraints: []
+- query: આલ્ગોરિધમ શું છે? સરળ શબ્દોમાં કહો
+  expected_primary_intent: explain_concept
+  expected_topic: computer_science
+  expected_workflow: educational
+  expected_search: false
+  language: gu
+  constraints:
+  - simple_language
+- query: મને મશીન લર્નિંગના શોર્ટ નોટ્સ બનાવી આપો
+  expected_primary_intent: generate_notes
+  expected_topic: machine learning
+  expected_workflow: educational
+  expected_search: false
+  language: gu
+  constraints: []
+- query: SQL query lakho to find employees in IT department
+  expected_primary_intent: generate_code
+  expected_topic: sql
+  expected_workflow: coding
+  expected_search: false
+  language: gu
+  constraints:
+  - language:sql
+- query: Kem chho Brainy, tame mane madad kari shako?
+  expected_primary_intent: general_conversation
+  expected_workflow: normal_chat
+  expected_search: false
+  language: gu
+  constraints: []
+- query: Summarize chapter 4 from this uploaded textbook
+  expected_primary_intent: pdf_notes
+  expected_workflow: pdf_notes
+  expected_search: false
+  document_present: true
+  constraints:
+  - doc_only
+- query: Give me 10 flashcards from this PDF file
+  expected_primary_intent: pdf_flashcards
+  expected_workflow: pdf_flashcards
+  expected_search: false
+  document_present: true
+  constraints:
+  - doc_only
+  - count:10
+- query: What is the conclusion of the research paper in this PDF?
+  expected_primary_intent: pdf_question_answering
+  expected_workflow: pdf_qa
+  expected_search: false
+  document_present: true
+  constraints:
+  - doc_only
+- query: Extract the most high-yield exam questions from this syllabus
+  expected_primary_intent: pdf_important_questions
+  expected_workflow: pdf_important_questions
+  expected_search: false
+  document_present: true
+  constraints:
+  - doc_only
+- query: Explain convolutional neural networks without code and keep it short
+  expected_primary_intent: explain_concept
+  expected_topic: cnn
+  expected_workflow: educational
+  expected_search: false
+  constraints:
+  - no_code
+  - concise
+- query: Write a Python function for DFS but do not use external libraries
+  expected_primary_intent: generate_code
+  expected_topic: dfs
+  expected_workflow: coding
+  expected_search: false
+  constraints:
+  - language:python
+- query: Make 5 practice questions on organic chemistry without searching online
+  expected_primary_intent: generate_questions
+  expected_topic: chemistry
+  expected_workflow: educational
+  expected_search: false
+  constraints:
+  - no_web_search
+  - count:5
+- query: Teach me React Hooks from zero and give me a cheat sheet
+  expected_primary_intent: learn_from_zero
+  expected_secondary_intents:
+  - generate_notes
+  expected_topic: react
+  expected_workflow: educational
+  expected_search: false
+  constraints:
+  - beginner
+- query: Compare REST and GraphQL APIs with pros and cons in a table
+  expected_primary_intent: compare_concepts
+  expected_topic: rest api
+  expected_workflow: educational
+  expected_search: false
+  constraints:
+  - format:table

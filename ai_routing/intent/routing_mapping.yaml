@@ -1,0 +1,471 @@
+# BrainyAi Intent to Workflow & Prompt Registry Mapping
+# Authoritatively connects recognized intentions to workflows, prompts, and model policies.
+
+mappings:
+  # ── Learning and Education ──
+  explain_concept:
+    workflow: educational
+    prompt_id: brainy_comprehensive
+    prompt_file: brainy_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  learn_from_zero:
+    workflow: educational
+    prompt_id: brainy_comprehensive
+    prompt_file: brainy_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  simplify_content:
+    workflow: educational
+    prompt_id: brainy_comprehensive
+    prompt_file: brainy_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: true
+
+  step_by_step_learning:
+    workflow: educational
+    prompt_id: brainy_comprehensive
+    prompt_file: brainy_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  solve_problem:
+    workflow: mathematics
+    prompt_id: mathematics
+    prompt_file: maths.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: true
+
+  show_working:
+    workflow: mathematics
+    prompt_id: mathematics
+    prompt_file: maths.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: true
+
+  compare_concepts:
+    workflow: educational
+    prompt_id: brainy_comprehensive
+    prompt_file: brainy_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  define_term:
+    workflow: normal_chat
+    prompt_id: normal_chat
+    prompt_file: normal_use.txt
+    primary_provider: gemini
+    primary_model: gemini-3.5-flash-lite
+    fallback_provider: groq
+    fallback_model: llama-3.1-8b-instant
+    search_required: false
+    is_fast_path: true
+
+  give_examples:
+    workflow: educational
+    prompt_id: brainy_comprehensive
+    prompt_file: brainy_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  prepare_for_exam:
+    workflow: educational
+    prompt_id: brainy_comprehensive
+    prompt_file: brainy_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  generate_study_plan:
+    workflow: educational
+    prompt_id: brainy_comprehensive
+    prompt_file: brainy_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  test_knowledge:
+    workflow: educational
+    prompt_id: brainy_comprehensive
+    prompt_file: brainy_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  # ── Content Generation ──
+  generate_notes:
+    workflow: educational
+    prompt_id: brainy_comprehensive
+    prompt_file: brainy_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  generate_summary:
+    workflow: educational
+    prompt_id: brainy_comprehensive
+    prompt_file: brainy_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  generate_quiz:
+    workflow: educational
+    prompt_id: brainy_comprehensive
+    prompt_file: brainy_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  generate_flashcards:
+    workflow: educational
+    prompt_id: brainy_comprehensive
+    prompt_file: brainy_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  generate_questions:
+    workflow: educational
+    prompt_id: brainy_comprehensive
+    prompt_file: brainy_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  rewrite_content:
+    workflow: normal_chat
+    prompt_id: normal_chat
+    prompt_file: normal_use.txt
+    primary_provider: gemini
+    primary_model: gemini-3.5-flash-lite
+    fallback_provider: groq
+    fallback_model: llama-3.1-8b-instant
+    search_required: false
+    is_fast_path: true
+
+  translate_content:
+    workflow: normal_chat
+    prompt_id: normal_chat
+    prompt_file: normal_use.txt
+    primary_provider: gemini
+    primary_model: gemini-3.5-flash-lite
+    fallback_provider: groq
+    fallback_model: llama-3.1-8b-instant
+    search_required: false
+    is_fast_path: true
+
+  # ── Programming ──
+  generate_code:
+    workflow: coding
+    prompt_id: coding
+    prompt_file: coding_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: true
+
+  debug_code:
+    workflow: coding
+    prompt_id: coding
+    prompt_file: coding_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: true
+
+  explain_code:
+    workflow: coding
+    prompt_id: coding
+    prompt_file: coding_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: true
+
+  optimize_code:
+    workflow: coding
+    prompt_id: coding
+    prompt_file: coding_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: true
+
+  review_code:
+    workflow: coding
+    prompt_id: coding
+    prompt_file: coding_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: true
+
+  write_tests:
+    workflow: coding
+    prompt_id: coding
+    prompt_file: coding_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: true
+
+  understand_error:
+    workflow: coding
+    prompt_id: coding
+    prompt_file: coding_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: true
+
+  design_software_architecture:
+    workflow: coding
+    prompt_id: coding
+    prompt_file: coding_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  # ── Research & Verification ──
+  web_research:
+    workflow: web_search
+    prompt_id: web_search
+    prompt_file: search_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: true
+    is_fast_path: false
+
+  find_latest_information:
+    workflow: web_search
+    prompt_id: web_search
+    prompt_file: search_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: true
+    is_fast_path: false
+
+  verify_information:
+    workflow: web_search
+    prompt_id: web_search
+    prompt_file: search_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: true
+    is_fast_path: false
+
+  find_documentation:
+    workflow: coding_search
+    prompt_id: coding
+    prompt_file: coding_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: true
+    is_fast_path: false
+
+  # ── Document & PDF Studio ──
+  pdf_question_answering:
+    workflow: pdf_qa
+    prompt_id: pdf_qa
+    prompt_file: pdf_qa_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  pdf_summary:
+    workflow: pdf_qa
+    prompt_id: pdf_qa
+    prompt_file: pdf_qa_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  pdf_notes:
+    workflow: pdf_notes
+    prompt_id: pdf_notes
+    prompt_file: pdf_notes_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  pdf_quiz:
+    workflow: pdf_quiz
+    prompt_id: pdf_quiz
+    prompt_file: pdf_quiz_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  pdf_flashcards:
+    workflow: pdf_flashcards
+    prompt_id: pdf_flashcards
+    prompt_file: pdf_flashcards_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  pdf_important_questions:
+    workflow: pdf_important_questions
+    prompt_id: pdf_important_questions
+    prompt_file: pdf_important_questions_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  # ── Conversation & Continuity ──
+  general_conversation:
+    workflow: normal_chat
+    prompt_id: normal_chat
+    prompt_file: normal_use.txt
+    primary_provider: gemini
+    primary_model: gemini-3.5-flash-lite
+    fallback_provider: groq
+    fallback_model: llama-3.1-8b-instant
+    search_required: false
+    is_fast_path: true
+
+  follow_up_question:
+    workflow: educational
+    prompt_id: brainy_comprehensive
+    prompt_file: brainy_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  request_shorter_answer:
+    workflow: normal_chat
+    prompt_id: normal_chat
+    prompt_file: normal_use.txt
+    primary_provider: gemini
+    primary_model: gemini-3.5-flash-lite
+    fallback_provider: groq
+    fallback_model: llama-3.1-8b-instant
+    search_required: false
+    is_fast_path: true
+
+  request_detailed_answer:
+    workflow: educational
+    prompt_id: brainy_comprehensive
+    prompt_file: brainy_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false
+
+  continue_previous_task:
+    workflow: educational
+    prompt_id: brainy_comprehensive
+    prompt_file: brainy_prompt.txt
+    primary_provider: gemini
+    primary_model: gemini-3.8-flash
+    fallback_provider: groq
+    fallback_model: llama-3.3-70b-versatile
+    search_required: false
+    is_fast_path: false

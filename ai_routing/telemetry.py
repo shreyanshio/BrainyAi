@@ -53,6 +53,13 @@ class TelemetryRecord:
     search_providers_succeeded: List[str] = field(default_factory=list)
     search_result_count: int = 0
     search_latency_ms: Optional[float] = None
+    primary_intent: Optional[str] = None
+    secondary_intents: List[str] = field(default_factory=list)
+    intent_topic: Optional[str] = None
+    intent_confidence: Optional[float] = None
+    intent_reason_codes: List[str] = field(default_factory=list)
+    intent_latency_ms: Optional[float] = None
+    intent_constraints: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)

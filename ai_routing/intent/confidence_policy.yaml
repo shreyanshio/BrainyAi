@@ -1,0 +1,41 @@
+# BrainyAi Confidence Scoring Policy & Ambiguity Handling
+# Formulates deterministic, evidence-based confidence calculations and fallback policies.
+
+thresholds:
+  high: 0.85
+  medium: 0.60
+  low: 0.00
+
+weights:
+  exact_phrase_match: 0.45
+  multilingual_alias_match: 0.40
+  action_verb_match: 0.25
+  domain_topic_match: 0.20
+  contextual_pronoun_resolution: 0.25
+  document_signal_present: 0.30
+  search_signal_present: 0.35
+  explicit_intent_override: 0.50
+  negative_signal_penalty: -0.40
+  ambiguity_penalty: -0.20
+
+policy_actions:
+  high_confidence:
+    action: proceed_immediately
+    ask_clarification: false
+    description: Execute mapped workflow with full confidence.
+
+  medium_confidence:
+    action: proceed_with_context
+    ask_clarification: false
+    description: >
+      Select strongest candidate workflow using conversation history and contextual cues.
+      Do not interrupt user with unnecessary clarification unless required parameters are missing.
+
+  low_confidence:
+    action: fallback_with_optional_clarification
+    default_workflow: normal_chat
+    default_prompt_id: normal_chat
+    ask_clarification: false
+    description: >
+      Fallback to token-efficient normal conversation or educational overview.
+      Provide a helpful initial answer and append a polite non-blocking suggestion if needed.

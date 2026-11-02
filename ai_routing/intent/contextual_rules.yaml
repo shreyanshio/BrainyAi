@@ -1,0 +1,79 @@
+# BrainyAi Contextual Understanding & Follow-up Resolution Rules
+# Directs how pronouns ("it", "that"), elliptical phrases ("make it shorter"),
+# and multi-turn workflows inherit or clear conversation state.
+
+rules:
+  # ============================================================================
+  # 1. PRONOUN & ELLIPTICAL RESOLUTION
+  # ============================================================================
+  pronoun_resolution:
+    markers:
+      - \b(?:make\s+it|turn\s+it|convert\s+it|explain\s+it|optimize\s+it|debug\s+it|fix\s+it)\b
+      - \b(?:make\s+this|turn\s+this|convert\s+this|explain\s+this|optimize\s+this)\b
+      - \b(?:that|this|it|the\s+above|same\s+thing)\b
+    actions:
+      - if_last_turn_was_code_and_action_is_optimize:
+          resolve_intent: optimize_code
+          inherit_topic: from_previous_turn
+          target_reference: previous_code
+      - if_last_turn_was_code_and_action_is_debug:
+          resolve_intent: debug_code
+          inherit_topic: from_previous_turn
+          target_reference: previous_code
+      - if_last_turn_was_code_and_action_is_explain:
+          resolve_intent: explain_code
+          inherit_topic: from_previous_turn
+          target_reference: previous_code
+      - if_action_is_shorten:
+          resolve_intent: request_shorter_answer
+          inherit_topic: from_previous_turn
+          target_reference: previous_answer
+      - if_action_is_expand:
+          resolve_intent: request_detailed_answer
+          inherit_topic: from_previous_turn
+          target_reference: previous_answer
+      - if_action_is_convert_table:
+          resolve_intent: change_output_format
+          inherit_topic: from_previous_turn
+          desired_output: table
+          target_reference: previous_answer
+
+  # ============================================================================
+  # 2. SEARCH RESULT REFERENCE & REUSE
+  # ============================================================================
+  search_result_reuse:
+    markers:
+      - \b(?:the\s+)?(?:first|second|third|fourth|1st|2nd|3rd|4th|last)\s+(?:result|source|link|article|point)\b
+    condition: prior_turn_contains_search_evidence
+    action:
+      search_required: false
+      reuse_prior_search: true
+      target_reference: search_result_item
+      intent: explain_concept
+
+  # ============================================================================
+  # 3. TOPIC PRESERVATION VS SHIFT
+  # ============================================================================
+  topic_management:
+    preserve_topic_if:
+      - query_is_pure_followup: true
+      - query_contains_referential_pronoun: true
+      - query_requests_different_format_of_prior: true
+    topic_shift_triggers:
+      - query_contains_new_domain_term: true
+      - query_starts_with_unrelated_definition: true
+      - query_is_greeting: true
+    on_topic_shift:
+      clear_inherited_topic: true
+      reset_constraints: true
+
+  # ============================================================================
+  # 4. SIBLING TASK CONTINUATION
+  # ============================================================================
+  sibling_continuation:
+    markers:
+      - \b(?:now|also|next|and)\s+(?:give\s+me|make|create|generate)\s+(?:questions|quiz|mcqs|notes|flashcards)\b
+      - \b(?:ab|phir|aur|have)\s+(?:sawal|notes|mcq)\s+(?:banao|banavo|aapo)\b
+    action:
+      inherit_topic: from_previous_turn
+      resolve_intent_from_request: true

@@ -1,0 +1,827 @@
+# Master Catalogue of BrainyAi User Intention Definitions
+# Version: 1.0.0
+# Description: Defines all structured intentions, capabilities, default workflows, and policies.
+
+intents:
+  # ============================================================================
+  # A. LEARNING AND EDUCATION
+  # ============================================================================
+  - id: explain_concept
+    name: Explain a Concept
+    category: learning_and_education
+    description: >
+      User wants to understand a subject, theory, algorithm, biological process,
+      or academic concept.
+    user_objective: Conceptual understanding and learning.
+    expected_output:
+      - clear_explanation
+      - intuitive_analogies
+      - illustrative_examples
+    capabilities:
+      - educational_synthesis
+    default_workflow: educational
+    search_policy: only_when_needed
+    context_required: conditional
+    document_required: false
+    related_intents:
+      - learn_from_zero
+      - simplify_content
+      - define_term
+
+  - id: learn_from_zero
+    name: Learn from Scratch / Zero
+    category: learning_and_education
+    description: >
+      User is a complete beginner asking to start learning a subject with no prerequisites.
+    user_objective: Foundational, beginner-friendly instruction.
+    expected_output:
+      - foundational_concepts
+      - real_world_analogies
+      - progressive_steps
+    capabilities:
+      - educational_synthesis
+    default_workflow: educational
+    search_policy: not_required
+    context_required: false
+    document_required: false
+    related_intents:
+      - explain_concept
+      - step_by_step_learning
+
+  - id: simplify_content
+    name: Simplify Content (ELI5)
+    category: learning_and_education
+    description: >
+      User finds an explanation too difficult and wants it broken down into plain words.
+    user_objective: Simplification of complex topics.
+    expected_output:
+      - simplified_breakdown
+      - everyday_analogies
+    capabilities:
+      - text_simplification
+    default_workflow: educational
+    search_policy: not_required
+    context_required: true
+    document_required: false
+    related_intents:
+      - explain_concept
+      - request_shorter_answer
+
+  - id: step_by_step_learning
+    name: Step-by-Step Tutorial
+    category: learning_and_education
+    description: >
+      User wants an ordered, step-by-step walkthrough of a concept, derivation, or process.
+    user_objective: Sequential, structured learning.
+    expected_output:
+      - numbered_steps
+      - milestone_checkpoints
+    capabilities:
+      - procedural_instruction
+    default_workflow: educational
+    search_policy: not_required
+    context_required: conditional
+    document_required: false
+    related_intents:
+      - solve_problem
+      - show_working
+
+  - id: solve_problem
+    name: Solve STEM Problem
+    category: learning_and_education
+    description: >
+      User presents a math, physics, or algorithmic problem and wants the correct solution.
+    user_objective: Accurate answer with solution method.
+    expected_output:
+      - step_by_step_solution
+      - final_verified_answer
+    capabilities:
+      - mathematical_computation
+      - symbolic_math
+    default_workflow: mathematics
+    search_policy: not_required
+    context_required: conditional
+    document_required: false
+    related_intents:
+      - show_working
+      - solve_equation
+
+  - id: show_working
+    name: Show Step-by-Step Working
+    category: learning_and_education
+    description: >
+      User explicitly asks to see intermediate algebra, calculus steps, or derivation details.
+    user_objective: Inspect mathematical working and proof.
+    expected_output:
+      - intermediate_derivations
+      - latex_equations
+    capabilities:
+      - symbolic_math
+    default_workflow: mathematics
+    search_policy: not_required
+    context_required: true
+    document_required: false
+    related_intents:
+      - solve_problem
+      - derive_formula
+
+  - id: compare_concepts
+    name: Compare Concepts
+    category: learning_and_education
+    description: >
+      User asks to compare two or more ideas, technologies, algorithms, or theories.
+    user_objective: Highlighting differences, similarities, trade-offs, and use cases.
+    expected_output:
+      - comparison_table
+      - key_distinctions
+      - pros_and_cons
+    capabilities:
+      - analytical_comparison
+    default_workflow: educational
+    search_policy: conditional
+    context_required: conditional
+    document_required: false
+    related_intents:
+      - explain_concept
+
+  - id: define_term
+    name: Define Term
+    category: learning_and_education
+    description: >
+      User asks for a concise, authoritative definition of a single word or acronym.
+    user_objective: Quick, accurate dictionary-style definition.
+    expected_output:
+      - crisp_definition
+      - brief_example
+    capabilities:
+      - concise_definition
+    default_workflow: normal_chat
+    search_policy: not_required
+    context_required: false
+    document_required: false
+    related_intents:
+      - explain_concept
+
+  - id: give_examples
+    name: Provide Examples
+    category: learning_and_education
+    description: >
+      User asks for practical, real-world examples illustrating a concept.
+    user_objective: Concrete demonstrations.
+    expected_output:
+      - concrete_examples
+      - case_studies
+    capabilities:
+      - example_generation
+    default_workflow: educational
+    search_policy: not_required
+    context_required: true
+    document_required: false
+    related_intents:
+      - explain_concept
+
+  - id: prepare_for_exam
+    name: Prepare for Exam / Revision
+    category: learning_and_education
+    description: >
+      User is revising for a test, exam, or interview and needs high-yield focus areas.
+    user_objective: Exam readiness and syllabus mastery.
+    expected_output:
+      - high_yield_topics
+      - frequently_tested_points
+      - mnemonic_rules
+    capabilities:
+      - exam_coaching
+    default_workflow: educational
+    search_policy: not_required
+    context_required: conditional
+    document_required: false
+    related_intents:
+      - generate_notes
+      - test_knowledge
+
+  - id: generate_study_plan
+    name: Generate Study Plan
+    category: learning_and_education
+    description: >
+      User wants a structured timeline (e.g. 7-day, 30-day) to master a topic.
+    user_objective: Time-tabled learning roadmap.
+    expected_output:
+      - day_by_day_breakdown
+      - milestone_goals
+      - recommended_resources
+    capabilities:
+      - curriculum_planning
+    default_workflow: educational
+    search_policy: not_required
+    context_required: false
+    document_required: false
+    related_intents:
+      - prepare_for_exam
+
+  - id: test_knowledge
+    name: Test Knowledge / Assessment
+    category: learning_and_education
+    description: >
+      User wants Brainy to quiz them interactively or test their understanding.
+    user_objective: Self-assessment and diagnostics.
+    expected_output:
+      - diagnostic_questions
+      - immediate_feedback
+    capabilities:
+      - question_generation
+    default_workflow: educational
+    search_policy: not_required
+    context_required: conditional
+    document_required: false
+    related_intents:
+      - generate_quiz
+
+  # ============================================================================
+  # B. CONTENT GENERATION
+  # ============================================================================
+  - id: generate_notes
+    name: Generate Revision Notes
+    category: content_generation
+    description: >
+      User wants structured, bulleted, hierarchical revision notes on a topic or document.
+    user_objective: Synthesized study notes.
+    expected_output:
+      - markdown_headers
+      - bullet_points
+      - key_definitions
+      - formulas_or_rules
+    capabilities:
+      - note_structuring
+    default_workflow: educational
+    search_policy: only_when_needed
+    context_required: conditional
+    document_required: false
+    related_intents:
+      - generate_summary
+      - pdf_notes
+
+  - id: generate_summary
+    name: Generate Executive Summary
+    category: content_generation
+    description: >
+      User wants a dense, concise summary extracting main themes and takeaways.
+    user_objective: Quick overview without fluff.
+    expected_output:
+      - executive_summary
+      - core_takeaways
+    capabilities:
+      - summarization
+    default_workflow: educational
+    search_policy: not_required
+    context_required: conditional
+    document_required: false
+    related_intents:
+      - generate_notes
+      - request_shorter_answer
+
+  - id: generate_quiz
+    name: Generate Quiz / MCQs
+    category: content_generation
+    description: >
+      User requests Multiple Choice Questions (MCQs) or quiz questions with answer keys.
+    user_objective: Practice questions with answers and explanations.
+    expected_output:
+      - mcq_options
+      - correct_answer_key
+      - explanation_for_choices
+    capabilities:
+      - quiz_generation
+    default_workflow: educational
+    search_policy: not_required
+    context_required: conditional
+    document_required: false
+    related_intents:
+      - test_knowledge
+      - pdf_quiz
+
+  - id: generate_flashcards
+    name: Generate Flashcards
+    category: content_generation
+    description: >
+      User wants active recall front/back flashcards for memorization.
+    user_objective: Spaced repetition cards.
+    expected_output:
+      - front_prompt
+      - back_answer
+    capabilities:
+      - flashcard_generation
+    default_workflow: educational
+    search_policy: not_required
+    context_required: conditional
+    document_required: false
+    related_intents:
+      - generate_quiz
+      - pdf_flashcards
+
+  - id: generate_questions
+    name: Generate Practice Questions
+    category: content_generation
+    description: >
+      User wants short-answer, conceptual, or long-form exam questions.
+    user_objective: Practice problem set.
+    expected_output:
+      - question_list
+      - difficulty_indicators
+    capabilities:
+      - question_generation
+    default_workflow: educational
+    search_policy: not_required
+    context_required: conditional
+    document_required: false
+    related_intents:
+      - generate_quiz
+
+  - id: rewrite_content
+    name: Rewrite / Polish Content
+    category: content_generation
+    description: >
+      User supplies text and wants it rephrased, improved, or formatted differently.
+    user_objective: Enhanced text quality.
+    expected_output:
+      - revised_text
+      - explanation_of_improvements
+    capabilities:
+      - text_editing
+    default_workflow: normal_chat
+    search_policy: not_required
+    context_required: true
+    document_required: false
+    related_intents:
+      - simplify_content
+
+  - id: translate_content
+    name: Translate Content
+    category: content_generation
+    description: >
+      User asks to translate a specific piece of text into Hindi, Gujarati, English, etc.
+    user_objective: Language translation.
+    expected_output:
+      - translated_text
+    capabilities:
+      - multilingual_translation
+    default_workflow: normal_chat
+    search_policy: not_required
+    context_required: conditional
+    document_required: false
+    related_intents:
+      - rewrite_content
+
+  # ============================================================================
+  # C. PROGRAMMING AND SOFTWARE ENGINEERING
+  # ============================================================================
+  - id: generate_code
+    name: Generate Code Implementation
+    category: programming
+    description: >
+      User asks Brainy to write a script, function, algorithm, or class in a programming language.
+    user_objective: Executable, clean code implementation.
+    expected_output:
+      - formatted_code_block
+      - setup_or_run_instructions
+      - brief_explanation
+    capabilities:
+      - code_generation
+    default_workflow: coding
+    search_policy: not_required
+    context_required: conditional
+    document_required: false
+    related_intents:
+      - implement_feature
+      - debug_code
+
+  - id: debug_code
+    name: Debug Existing Code / Fix Error
+    category: programming
+    description: >
+      User has an error, traceback, or broken code and needs it repaired.
+    user_objective: Root cause diagnosis and working bug fix.
+    expected_output:
+      - bug_explanation
+      - fixed_code_block
+      - prevention_tip
+    capabilities:
+      - code_debugging
+    default_workflow: coding
+    search_policy: conditional
+    context_required: true
+    document_required: false
+    related_intents:
+      - understand_error
+      - explain_code
+
+  - id: explain_code
+    name: Explain Code Logic
+    category: programming
+    description: >
+      User provides a snippet and asks how it works, line by line or conceptually.
+    user_objective: Understanding existing code.
+    expected_output:
+      - line_by_line_explanation
+      - time_complexity
+      - space_complexity
+    capabilities:
+      - code_analysis
+    default_workflow: coding
+    search_policy: not_required
+    context_required: true
+    document_required: false
+    related_intents:
+      - debug_code
+      - review_code
+
+  - id: optimize_code
+    name: Optimize Code Performance
+    category: programming
+    description: >
+      User wants to reduce time/space complexity or improve efficiency of existing code.
+    user_objective: Higher performance and cleaner code.
+    expected_output:
+      - optimized_code
+      - complexity_comparison
+    capabilities:
+      - performance_optimization
+    default_workflow: coding
+    search_policy: not_required
+    context_required: true
+    document_required: false
+    related_intents:
+      - review_code
+      - generate_code
+
+  - id: review_code
+    name: Review Code / Best Practices
+    category: programming
+    description: >
+      User requests code review for readability, maintainability, and security.
+    user_objective: Code quality feedback.
+    expected_output:
+      - strengths
+      - suggested_refactors
+      - security_or_edge_cases
+    capabilities:
+      - code_review
+    default_workflow: coding
+    search_policy: not_required
+    context_required: true
+    document_required: false
+    related_intents:
+      - optimize_code
+
+  - id: write_tests
+    name: Write Unit Tests
+    category: programming
+    description: >
+      User asks to generate unit tests (pytest, unittest, jest, etc.) for existing code.
+    user_objective: Comprehensive test coverage.
+    expected_output:
+      - test_suite_code
+      - edge_case_assertions
+    capabilities:
+      - test_engineering
+    default_workflow: coding
+    search_policy: not_required
+    context_required: true
+    document_required: false
+    related_intents:
+      - generate_code
+
+  - id: understand_error
+    name: Understand Error Message / Traceback
+    category: programming
+    description: >
+      User shares a compiler, runtime, or framework error and wants to know what it means.
+    user_objective: Error message deciphering.
+    expected_output:
+      - error_meaning
+      - probable_triggers
+      - steps_to_resolve
+    capabilities:
+      - error_diagnosis
+    default_workflow: coding
+    search_policy: conditional
+    context_required: true
+    document_required: false
+    related_intents:
+      - debug_code
+
+  - id: design_software_architecture
+    name: Design Software Architecture
+    category: programming
+    description: >
+      User asks for architectural design, database schema, or system diagrams.
+    user_objective: System design and structural layout.
+    expected_output:
+      - component_architecture
+      - data_flow
+      - api_contracts
+    capabilities:
+      - system_design
+    default_workflow: coding
+    search_policy: not_required
+    context_required: conditional
+    document_required: false
+    related_intents:
+      - implement_feature
+
+  - id: implement_feature
+    name: Implement New Feature
+    category: programming
+    description: >
+      User wants a complete feature added to a project.
+    user_objective: Production-ready feature implementation.
+    expected_output:
+      - full_code_changes
+      - integration_instructions
+    capabilities:
+      - feature_development
+    default_workflow: coding
+    search_policy: not_required
+    context_required: true
+    document_required: false
+    related_intents:
+      - generate_code
+
+  # ============================================================================
+  # D. RESEARCH AND CURRENT INFORMATION
+  # ============================================================================
+  - id: web_research
+    name: Live Web Research
+    category: research_and_verification
+    description: >
+      User seeks current information, recent events, release notes, or external web data.
+    user_objective: Fact-checked, grounded information with web sources.
+    expected_output:
+      - research_synthesis
+      - markdown_citations
+      - domain_sources
+    capabilities:
+      - search_orchestration
+    default_workflow: web_search
+    search_policy: mandatory
+    context_required: conditional
+    document_required: false
+    related_intents:
+      - find_latest_information
+      - verify_information
+
+  - id: find_latest_information
+    name: Find Latest Updates / News
+    category: research_and_verification
+    description: >
+      User specifically asks about today's events, recent 2025/2026 releases, or fresh news.
+    user_objective: Current up-to-date facts.
+    expected_output:
+      - timeline_of_events
+      - primary_source_links
+    capabilities:
+      - search_orchestration
+    default_workflow: web_search
+    search_policy: mandatory
+    context_required: conditional
+    document_required: false
+    related_intents:
+      - web_research
+
+  - id: verify_information
+    name: Verify Information / Fact Check
+    category: research_and_verification
+    description: >
+      User asks whether a claim, website, rumor, or statement is true or legitimate.
+    user_objective: Objective fact verification with source evidence.
+    expected_output:
+      - verification_verdict
+      - supporting_evidence
+      - reference_links
+    capabilities:
+      - fact_checking
+    default_workflow: web_search
+    search_policy: mandatory
+    context_required: conditional
+    document_required: false
+    related_intents:
+      - web_research
+
+  - id: find_documentation
+    name: Find Official Documentation
+    category: research_and_verification
+    description: >
+      User seeks official syntax, API methods, or documentation for an evolving library.
+    user_objective: Official library documentation.
+    expected_output:
+      - official_syntax
+      - documentation_links
+    capabilities:
+      - search_orchestration
+    default_workflow: coding_search
+    search_policy: mandatory
+    context_required: conditional
+    document_required: false
+    related_intents:
+      - web_research
+      - generate_code
+
+  # ============================================================================
+  # E. DOCUMENT AND PDF STUDIO OPERATIONS
+  # ============================================================================
+  - id: pdf_question_answering
+    name: PDF Question Answering
+    category: document_and_pdf
+    description: >
+      User asks a question grounded strictly in an uploaded PDF document.
+    user_objective: Accurate answer from document content.
+    expected_output:
+      - grounded_answer
+      - document_citation
+    capabilities:
+      - pdf_extraction
+    default_workflow: pdf_qa
+    search_policy: forbidden
+    context_required: true
+    document_required: true
+    related_intents:
+      - pdf_summary
+      - pdf_notes
+
+  - id: pdf_summary
+    name: PDF Executive Summary
+    category: document_and_pdf
+    description: >
+      User wants a synthesized summary of an entire uploaded PDF or chapter.
+    user_objective: High-level overview of document.
+    expected_output:
+      - chapter_summary
+      - key_findings
+    capabilities:
+      - pdf_extraction
+    default_workflow: pdf_qa
+    search_policy: forbidden
+    context_required: true
+    document_required: true
+    related_intents:
+      - pdf_notes
+
+  - id: pdf_notes
+    name: PDF Structured Study Notes
+    category: document_and_pdf
+    description: >
+      User requests study notes extracted from uploaded PDF lecture slides or textbooks.
+    user_objective: Comprehensive notes from file.
+    expected_output:
+      - structured_notes
+      - key_takeaways
+    capabilities:
+      - pdf_extraction
+    default_workflow: pdf_notes
+    search_policy: forbidden
+    context_required: true
+    document_required: true
+    related_intents:
+      - generate_notes
+
+  - id: pdf_quiz
+    name: PDF Quiz Generation
+    category: document_and_pdf
+    description: >
+      User requests MCQs or quiz questions based exclusively on the uploaded document.
+    user_objective: Practice quiz grounded in document text.
+    expected_output:
+      - mcq_questions
+      - answer_key
+    capabilities:
+      - pdf_extraction
+    default_workflow: pdf_quiz
+    search_policy: forbidden
+    context_required: true
+    document_required: true
+    related_intents:
+      - generate_quiz
+
+  - id: pdf_flashcards
+    name: PDF Flashcard Generation
+    category: document_and_pdf
+    description: >
+      User wants flashcards generated from definitions and formulas in the PDF.
+    user_objective: Document-based flashcard cards.
+    expected_output:
+      - flashcards
+    capabilities:
+      - pdf_extraction
+    default_workflow: pdf_flashcards
+    search_policy: forbidden
+    context_required: true
+    document_required: true
+    related_intents:
+      - generate_flashcards
+
+  - id: pdf_important_questions
+    name: PDF Important Exam Questions
+    category: document_and_pdf
+    description: >
+      User asks for high-probability, high-yield exam questions from the uploaded material.
+    user_objective: Exam prep from PDF.
+    expected_output:
+      - high_yield_questions
+      - marks_allocation
+    capabilities:
+      - pdf_extraction
+    default_workflow: pdf_important_questions
+    search_policy: forbidden
+    context_required: true
+    document_required: true
+    related_intents:
+      - pdf_quiz
+
+  # ============================================================================
+  # F. CONVERSATION AND CONTINUITY
+  # ============================================================================
+  - id: general_conversation
+    name: General Conversation / Chit-Chat
+    category: conversation_and_continuity
+    description: >
+      Greetings, polite banter, bot identity queries ("hi", "who are you", "good morning").
+    user_objective: Casual friendly conversation.
+    expected_output:
+      - friendly_concise_response
+    capabilities:
+      - conversational_fluency
+    default_workflow: normal_chat
+    search_policy: not_required
+    context_required: false
+    document_required: false
+    related_intents:
+      - define_term
+
+  - id: follow_up_question
+    name: Conversational Follow-Up
+    category: conversation_and_continuity
+    description: >
+      User asks a natural follow-up referring to the immediately preceding exchange.
+    user_objective: Continuity on existing topic.
+    expected_output:
+      - contextual_answer
+    capabilities:
+      - conversational_fluency
+    default_workflow: educational
+    search_policy: conditional
+    context_required: true
+    document_required: false
+    related_intents:
+      - ask_for_expansion
+
+  - id: request_shorter_answer
+    name: Request Shorter / Concise Answer
+    category: conversation_and_continuity
+    description: >
+      User says "make it shorter", "summarize that in 2 lines", "too long", "tldr".
+    user_objective: Brevity and conciseness.
+    expected_output:
+      - compact_summary
+    capabilities:
+      - text_condensation
+    default_workflow: normal_chat
+    search_policy: not_required
+    context_required: true
+    document_required: false
+    related_intents:
+      - simplify_content
+
+  - id: request_detailed_answer
+    name: Request Detailed Expansion
+    category: conversation_and_continuity
+    description: >
+      User asks for deeper explanation, more background, or comprehensive coverage.
+    user_objective: In-depth expansion.
+    expected_output:
+      - comprehensive_expansion
+      - advanced_subtopics
+    capabilities:
+      - deep_explanation
+    default_workflow: educational
+    search_policy: conditional
+    context_required: true
+    document_required: false
+    related_intents:
+      - explain_concept
+
+  - id: continue_previous_task
+    name: Continue Previous Task
+    category: conversation_and_continuity
+    description: >
+      User says "continue", "go on", "what's next", or "keep going".
+    user_objective: Continuation of incomplete response.
+    expected_output:
+      - continuation_stream
+    capabilities:
+      - response_continuation
+    default_workflow: educational
+    search_policy: not_required
+    context_required: true
+    document_required: false
+    related_intents:
+      - follow_up_question
