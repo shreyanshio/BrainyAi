@@ -536,15 +536,22 @@ def _sb_load_user_memory(user_id: int) -> dict:
         raise RuntimeError("Could not load user memory") from e
 
 
+_user_memory_loaded_at = {}
+
 def load_user_into_memory(user_id: int, first_name: str = "", username: str = "", refresh: bool = False) -> None:
     """
     Called once per user on their first message/command in a session.
     Restores their conversation history + profile from Supabase into in-memory dicts.
-    ALL features (chat, /ask, /brainy) now share ONE unified history (user_conversations)
-    so context carries across every entry point — that used to be split into two silos.
+    Uses 120-second TTL cache to eliminate redundant database queries on repeated chat turns.
     """
-    if user_id in user_conversations and not refresh:
+    import time as _t
+    now = _t.time()
+    last_loaded = _user_memory_loaded_at.get(user_id, 0)
+    if user_id in user_data_store and not refresh:
         return   # already loaded this session
+    if user_id in user_data_store and refresh and (now - last_loaded < 120.0):
+        return   # profile memory is fresh (<120s), avoid blocking DB roundtrip
+    _user_memory_loaded_at[user_id] = now
     row = _sb_load_user_memory(user_id)
     
     history = row.get("history") or []
@@ -2153,12 +2160,12 @@ def ai_stream(messages, system_prompt=None, max_tokens=None, model_id=None, plat
         }
         max_tokens = TOKEN_MAP.get(q_type, 600)
 
-    # Streaming provider hierarchy: Groq is fastest (~250-700 tok/s), followed by SambaNova, Cerebras, Gemini, OpenRouter
+    # Streaming provider hierarchy: Gemini primary, Groq secondary fallback, followed by SambaNova, Cerebras, OpenRouter
     streaming_providers = [
+        ("Gemini", _stream_gemini),
         ("Groq", _stream_groq),
         ("SambaNova", _stream_sambanova),
         ("Cerebras", _stream_cerebras),
-        ("Gemini", _stream_gemini),
         ("OpenRouter", _stream_openrouter),
     ]
 

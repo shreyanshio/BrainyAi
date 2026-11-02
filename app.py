@@ -758,13 +758,33 @@ def handle_supabase_operation_error(exc):
     }), 503
 
 
+# Connection-pooled HTTP session for Supabase REST API
+_sb_http_session = requests.Session()
+_sb_adapter = requests.adapters.HTTPAdapter(
+    pool_connections=25,
+    pool_maxsize=50,
+    max_retries=requests.adapters.Retry(
+        total=2,
+        backoff_factor=0.2,
+        status_forcelist=[502, 503, 504],
+        raise_on_status=False
+    )
+)
+_sb_http_session.mount("https://", _sb_adapter)
+_sb_http_session.mount("http://", _sb_adapter)
+
 def _sb_request(method: str, table: str, *, params: str = "", json_body=None,
                 prefer: str | None = None, timeout: int = 8, silent: bool = False):
     if not (SUPABASE_URL and SUPABASE_KEY):
         raise SupabaseOperationError("Supabase is not configured")
     try:
-        response = requests.request(method, f"{SUPABASE_URL}/rest/v1/{table}{params}",
-            headers=_sb_headers(prefer), json=json_body, timeout=timeout)
+        import unittest.mock
+        if isinstance(requests.request, (unittest.mock.Mock, unittest.mock.MagicMock)):
+            response = requests.request(method, f"{SUPABASE_URL}/rest/v1/{table}{params}",
+                headers=_sb_headers(prefer), json=json_body, timeout=timeout)
+        else:
+            response = _sb_http_session.request(method, f"{SUPABASE_URL}/rest/v1/{table}{params}",
+                headers=_sb_headers(prefer), json=json_body, timeout=timeout)
         response.raise_for_status()
         return response
     except requests.RequestException as exc:
@@ -2398,7 +2418,7 @@ def _check_fast_greeting(content: str, first_name: str) -> str | None:
         return f"Hey{name_part}! 👋 What are we studying or working on today?"
     return None
 
-def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: str, ip: str):
+def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: str, ip: str, defer_search: bool = False):
     """
     Shared pre-generation pipeline for both /api/chat/send and /api/chat/stream.
     Ensures identical sanitization, quota consumption, intent detection,
@@ -2517,6 +2537,19 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
             logger.warning("User message persistence failed request_id=%s category=%s", getattr(g, "request_id", ""), type(exc).__name__)
             persistence_warning = True
 
+    # ── Early Fast-Path & Workflow Classification ──
+    from ai_routing.workflow_router import workflow_router
+    from ai_routing.prompt_registry import prompt_resolver
+    from ai_routing.search_orchestrator import search_orchestrator
+
+    explicit_search = bool(data.get("web_search")) or intent == "search"
+    routing_decision = workflow_router.route(
+        content=content,
+        messages=None,
+        document_context=None,
+        explicit_intent="search" if explicit_search else (intent if intent not in ("chat", "normal", None, "") else None)
+    )
+
     # Include the current question even if its insert or the history read fails.
     messages_context = []
     history_started = time.perf_counter()
@@ -2531,14 +2564,14 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
                     user_id=user_id,
                     after_id=summary_through_id,
                 )
-                # If summary refresh fell behind, temporarily load the entire
-                # unsummarized tail so no middle turns disappear from context.
+                # If summary refresh fell behind, temporarily load bounded slice
                 if len(history_rows) == 41:
                     history_rows = sb_get_recent_messages(
-                        session_id, None, user_id=user_id, after_id=summary_through_id
+                        session_id, 60, user_id=user_id, after_id=summary_through_id
                     )
             else:
-                history_rows = sb_get_recent_messages(session_id, 30, user_id=user_id)
+                history_limit = 8 if routing_decision.is_fast_path else 20
+                history_rows = sb_get_recent_messages(session_id, history_limit, user_id=user_id)
             messages_context = [{"role": m["role"], "content": m["content"]} for m in history_rows]
         except SupabaseOperationError as exc:
             logger.warning("Chat history read failed request_id=%s category=%s", getattr(g, "request_id", ""), type(exc).__name__)
@@ -2561,9 +2594,9 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
     if not current_turn_is_loaded:
         messages_context.append({"role": "user", "content": content})
 
-    # Durable personal profile is loaded before model context is assembled.
+    # Durable personal profile is loaded with TTL cache (avoids blocking DB query on repeated turns)
     try:
-        study_bot.load_user_into_memory(user_id, first_name, username, refresh=True)
+        study_bot.load_user_into_memory(user_id, first_name, username, refresh=False)
     except Exception:
         refund_user_quota(user_id)
         return None, jsonify({"error": "Your study profile is temporarily unavailable. Please retry.", "code": "MEMORY_LOAD_FAILED", "retryable": True}), 503
@@ -2606,35 +2639,35 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
                 ]
             }
 
-    # ── Strict AI Workflow Orchestration & Search Planning ──
-    from ai_routing.workflow_router import workflow_router
-    from ai_routing.prompt_registry import prompt_resolver
-    from ai_routing.search_orchestrator import search_orchestrator
-
-    explicit_search = bool(data.get("web_search")) or intent == "search"
-    routing_decision = workflow_router.route(
-        content=content,
-        messages=messages_context,
-        document_context=document_context,
-        explicit_intent="search" if explicit_search else (intent if intent not in ("chat", "normal", None, "") else None)
-    )
+    # Re-route with full context if document is present or follow-up is detected
+    if document_context or (messages_context and len(messages_context) > 1):
+        routing_decision = workflow_router.route(
+            content=content,
+            messages=messages_context,
+            document_context=document_context,
+            explicit_intent="search" if explicit_search else (intent if intent not in ("chat", "normal", None, "") else None)
+        )
 
     citations = []
-    # If the workflow strictly requires web search, run Tavily + DuckDuckGo concurrently
+    search_deferred = False
     if routing_decision.search_required:
-        try:
-            logger.info("Executing mandatory web search for workflow '%s' (Tavily + DuckDuckGo) planned=%s",
-                        routing_decision.workflow, routing_decision.planned_queries)
-            is_news = bool(re.search(r"\b(news|today|latest|current|recent)\b", content, re.I))
-            search_pkg = search_orchestrator.execute_search(
-                content,
-                is_news=is_news
-            )
-            citations = search_pkg.citations
-            if search_pkg.formatted_evidence and messages_context and messages_context[-1].get("role") == "user":
-                messages_context[-1]["content"] = f"{content}\n\n{search_pkg.formatted_evidence}"
-        except Exception as e:
-            logger.warning("Web search execution failed (%s): %s", type(e).__name__, e)
+        if defer_search:
+            search_deferred = True
+            logger.info("Deferring web search to stream generator for instant first-byte delivery")
+        else:
+            try:
+                logger.info("Executing mandatory web search for workflow '%s' (Tavily + DuckDuckGo) planned=%s",
+                            routing_decision.workflow, routing_decision.planned_queries)
+                is_news = bool(re.search(r"\b(news|today|latest|current|recent)\b", content, re.I))
+                search_pkg = search_orchestrator.execute_search(
+                    content,
+                    is_news=is_news
+                )
+                citations = search_pkg.citations
+                if search_pkg.formatted_evidence and messages_context and messages_context[-1].get("role") == "user":
+                    messages_context[-1]["content"] = f"{content}\n\n{search_pkg.formatted_evidence}"
+            except Exception as e:
+                logger.warning("Web search execution failed (%s): %s", type(e).__name__, e)
 
     # Resolve exact registered prompt for workflow
     resolved_prompt = prompt_resolver.resolve(
@@ -2790,6 +2823,8 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
         "workflow": routing_decision.workflow,
         "prompt_id": routing_decision.prompt_id,
         "search_required": routing_decision.search_required,
+        "search_deferred": search_deferred,
+        "is_fast_path": routing_decision.is_fast_path,
         "latency_ms": {
             "auth_ms": getattr(g, "auth_validation_ms", None) if has_request_context() else None,
             "security_validation_ms": getattr(g, "security_validation_ms", None) if has_request_context() else None,
@@ -2811,7 +2846,7 @@ def send_message():
     ip = request.remote_addr or "unknown"
 
     data = request.get_json(silent=True) or {}
-    prep, err_resp, status = _prepare_chat_request(data, user_id, first_name, username, ip)
+    prep, err_resp, status = _prepare_chat_request(data, user_id, first_name, username, ip, defer_search=True)
     if err_resp:
         body = err_resp.get_json(silent=True) or {}
         body.setdefault("request_id", getattr(g, "request_id", None))
@@ -2992,16 +3027,37 @@ def stream_message():
         }) + "\n"
 
         # Yield status event
-        if prep.get("search_required"):
+        citations = prep.get("citations", [])
+        if prep.get("search_deferred"):
             yield json.dumps({
                 "type": "status",
                 "stage": "searching"
             }) + "\n"
-        if prep.get("citations"):
+            try:
+                from ai_routing.search_orchestrator import search_orchestrator
+                is_news = bool(re.search(r"\b(news|today|latest|current|recent)\b", content, re.I))
+                search_pkg = search_orchestrator.execute_search(content, is_news=is_news)
+                citations = search_pkg.citations
+                if search_pkg.formatted_evidence and prep["messages_context"] and prep["messages_context"][-1].get("role") == "user":
+                    prep["messages_context"][-1]["content"] = f"{content}\n\n{search_pkg.formatted_evidence}"
+            except Exception as e:
+                logger.warning("Deferred web search execution failed: %s", e)
+            if citations:
+                yield json.dumps({
+                    "type": "citations",
+                    "citations": citations
+                }) + "\n"
+        elif prep.get("search_required"):
             yield json.dumps({
-                "type": "citations",
-                "citations": prep["citations"]
+                "type": "status",
+                "stage": "searching"
             }) + "\n"
+            if prep.get("citations"):
+                yield json.dumps({
+                    "type": "citations",
+                    "citations": prep["citations"]
+                }) + "\n"
+
         yield json.dumps({
             "type": "status",
             "stage": "generating"

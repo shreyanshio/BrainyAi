@@ -38,6 +38,7 @@ class WorkflowRoutingDecision:
     reason: str
     is_followup: bool = False
     reuse_prior_search: bool = False
+    is_fast_path: bool = False
     normal_use: bool = False
 
 
@@ -228,11 +229,12 @@ class WorkflowRouter:
                 fallback_provider="groq",
                 fallback_model="llama-3.3-70b-versatile",
                 reason="Programming, debugging, or algorithmic explanation requested",
+                is_fast_path=True,
                 normal_use=False
             )
 
         # 6. Mathematics & Physics Derivations
-        is_math = bool(re.search(r"\b(?:integrate|integral|derivative|derivative of|dx|dy/dx|equation|solve\s+for|algebra|calculus|matrix|matrices|eigenvalue|vector|probability|trigonometry|theorem|proof|formula)\b", clean_text, re.IGNORECASE))
+        is_math = bool(re.search(r"\b(?:solve|calculate|evaluate|integrate|integral|derivative|derivative of|dx|dy/dx|equation|solve\s+for|algebra|calculus|matrix|matrices|eigenvalue|vector|probability|trigonometry|theorem|proof|formula)\b|\d+\s*[xX\+\-\*/=]\s*\d+", clean_text, re.IGNORECASE))
         if is_math or explicit_intent in ("math", "maths"):
             return WorkflowRoutingDecision(
                 workflow="mathematics",
@@ -246,11 +248,33 @@ class WorkflowRouter:
                 fallback_provider="groq",
                 fallback_model="llama-3.3-70b-versatile",
                 reason="Mathematical working, derivations, or STEM problem solving requested",
+                is_fast_path=True,
                 normal_use=False
             )
 
-        # 7. Stable Educational STEM Concepts (Biology, Chemistry, Physics, DSA)
-        is_educational = bool(re.search(r"\b(?:explain|how\s+does|what\s+is|describe|mechanism\s+of|process\s+of)\s+(?:photosynthesis|binary\s+search(?:\s+tree)?|inheritance|gravity|mitosis|meiosis|dna|thermodynamics|polymorphism|relativity)\b", clean_text, re.IGNORECASE))
+        # 7. Lightweight Normal Chat / Greetings / Simple Queries
+        is_greeting = bool(re.search(r"^(?:hi|hello|hey|good\s+(?:morning|afternoon|evening)|namaste|hola|yo)\b|\b(?:how are you|kya haal|what\'?s up|sup|tell me about yourself)\b", clean_text, re.IGNORECASE))
+        is_short_def = bool(len(clean_text.split()) <= 6 and re.match(r"^(?:what is|who is|define|meaning of)\b", clean_text, re.IGNORECASE))
+
+        if is_greeting or is_short_def or explicit_intent in ("chat", "normal"):
+            return WorkflowRoutingDecision(
+                workflow="normal_chat",
+                prompt_id="normal_chat",
+                prompt_file="normal_use.txt",
+                search_required=False,
+                search_providers=[],
+                planned_queries=[],
+                primary_provider="gemini",
+                primary_model="gemini-3.5-flash-lite",
+                fallback_provider="groq",
+                fallback_model="llama-3.1-8b-instant",
+                reason="Lightweight normal conversation handled with token-efficient prompt",
+                is_fast_path=True,
+                normal_use=True
+            )
+
+        # 8. Stable Educational STEM Concepts (Biology, Chemistry, Physics, DSA)
+        is_educational = bool(re.search(r"\b(?:explain|how\s+does|what\s+is|describe|mechanism\s+of|process\s+of)\b.*\b(?:photosynthesis|binary\s+search(?:\s+tree)?|inheritance|gravity|mitosis|meiosis|dna|thermodynamics|polymorphism|relativity|cell|quantum)\b", clean_text, re.IGNORECASE))
         if is_educational or explicit_intent == "brainy":
             return WorkflowRoutingDecision(
                 workflow="educational",
@@ -264,27 +288,8 @@ class WorkflowRouter:
                 fallback_provider="groq",
                 fallback_model="llama-3.3-70b-versatile",
                 reason="Deep educational concept explanation from verified knowledge base",
+                is_fast_path=False,
                 normal_use=False
-            )
-
-        # 8. Lightweight Normal Chat / Greetings / Simple Queries
-        is_greeting = bool(re.match(r"^(?:hi|hello|hey|good\s+(?:morning|afternoon|evening)|namaste|hola|yo)\b[!.\s]*$", clean_text, re.IGNORECASE))
-        is_short_def = bool(len(clean_text.split()) <= 6 and re.match(r"^(?:what is|who is|define|meaning of)\b", clean_text, re.IGNORECASE))
-
-        if is_greeting or is_short_def or explicit_intent in ("chat", "normal", None, ""):
-            return WorkflowRoutingDecision(
-                workflow="normal_chat",
-                prompt_id="normal_chat",
-                prompt_file="normal_use.txt",
-                search_required=False,
-                search_providers=[],
-                planned_queries=[],
-                primary_provider="gemini",
-                primary_model="gemini-3.5-flash-lite" if is_greeting else "gemini-3.8-flash",
-                fallback_provider="groq",
-                fallback_model="llama-3.1-8b-instant" if is_greeting else "llama-3.3-70b-versatile",
-                reason="Lightweight normal conversation handled with token-efficient prompt",
-                normal_use=True
             )
 
         # Default Fallback: Educational Comprehensive
@@ -300,6 +305,7 @@ class WorkflowRouter:
             fallback_provider="groq",
             fallback_model="llama-3.3-70b-versatile",
             reason="Standard educational inquiry routed to primary intelligence",
+            is_fast_path=False,
             normal_use=False
         )
 
