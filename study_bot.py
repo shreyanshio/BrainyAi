@@ -125,10 +125,14 @@ PRIVACY_TEXT = """🔒 𝗣𝗿𝗶𝘃𝗮𝗰𝘆 & 𝗗𝗮𝘁𝗮 𝗣𝗿�
 • 🚫 No Third-Party Training: Your private study notes are never used for third-party model training."""
 
 from ai_routing.language import detect_language, apply_language_directive
+from ai_routing.idempotency import idempotency_engine
 from ai_routing.quota import (
     get_user_image_quota,
     consume_user_image_quota,
     refund_user_image_quota,
+    reserve_image_quota,
+    commit_image_quota,
+    release_image_quota,
     link_telegram_to_web_account,
     resolve_effective_identity,
     IMAGE_FREE_LIMIT,
@@ -776,11 +780,13 @@ def sync_to_web_history(user_id: int, user_msg: str, assistant_msg: str) -> None
         return
 
     def _worker():
-        session_id = get_or_create_chat_session(user_id)
+        eff_id = resolve_effective_identity(user_id)
+        target_id = int(eff_id) if isinstance(eff_id, str) and eff_id.isdigit() else (eff_id if isinstance(eff_id, int) else user_id)
+        session_id = get_or_create_chat_session(target_id)
         if not session_id:
             return
-        _sb_insert_chat_message(session_id, user_id, "user", clean_user_msg)
-        _sb_insert_chat_message(session_id, user_id, "assistant", assistant_msg)
+        _sb_insert_chat_message(session_id, target_id, "user", clean_user_msg)
+        _sb_insert_chat_message(session_id, target_id, "assistant", assistant_msg)
 
     import threading
     threading.Thread(target=_worker, daemon=True).start()
@@ -2858,9 +2864,11 @@ async def _process_image_analysis(update: Update, context: ContextTypes.DEFAULT_
     user = update.effective_user
     user_id = user.id
     
-    # 1. Enforce unified 5-image quota
-    allowed, remaining, effective_id = consume_user_image_quota(user_id)
-    if not allowed:
+    # 1. Enforce unified 5-image quota via atomic two-phase reservation
+    update_id = getattr(update, "update_id", None)
+    idem_key = f"tg_img_{update_id}" if update_id else None
+    res_id, remaining, effective_id = reserve_image_quota(user_id, idempotency_key=idem_key)
+    if not res_id:
         await send(
             update,
             "⚠️ You've used your 5 free image requests.\n\n"
@@ -2890,6 +2898,8 @@ async def _process_image_analysis(update: Update, context: ContextTypes.DEFAULT_
         result = clean_response(result)
         await loading_msg.delete()
 
+        # Commit quota reservation on successful reasoning
+        commit_image_quota(res_id)
         quota_badge = f"\n\n📊 Free image requests remaining: {remaining} of {IMAGE_FREE_LIMIT}"
         await send(update, f"📷 𝗜𝗺𝗮𝗴𝗲 𝗔𝗻𝗮𝗹𝘆𝘀𝗶𝘀:\n\n{result}{quota_badge}")
 
@@ -2901,7 +2911,7 @@ async def _process_image_analysis(update: Update, context: ContextTypes.DEFAULT_
             save_user_memory_async(user_id)
     except Exception as e:
         logger.error(f"Image analysis error: {e}")
-        refund_user_image_quota(effective_id)
+        release_image_quota(res_id)
         try:
             await loading_msg.delete()
         except Exception:
@@ -4672,6 +4682,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg:
         return
+
+    # ── Deduplicate Telegram updates using sliding-window Idempotency Engine ──
+    update_id = getattr(update, "update_id", None)
+    if update_id:
+        claimed, _ = idempotency_engine.claim(f"tg_update_{update_id}")
+        if not claimed:
+            logger.info(f"Duplicate update_id {update_id} dropped by idempotency engine.")
+            return
+
     msg_text = msg.text or ""
     _maybe_register_chat(update)
 
