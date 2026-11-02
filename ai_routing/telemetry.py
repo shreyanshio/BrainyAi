@@ -85,16 +85,28 @@ class AITelemetry:
         self._ai_request_logs_available = True
         self._local_math_count = 0
         self._ai_math_count = 0
+        self._math_workflows: Dict[str, int] = {}
         self._search_requests_count = 0
         self._http_429_count = 0
 
-    def record_math_call(self, is_local: bool):
+    def record_math_call(self, is_local: bool, workflow: Optional[str] = None):
         """Records math problem resolution pathway (local engine vs remote AI)."""
         with self._lock:
             if is_local:
                 self._local_math_count += 1
             else:
                 self._ai_math_count += 1
+            if workflow:
+                self._math_workflows[workflow] = self._math_workflows.get(workflow, 0) + 1
+
+    def get_math_stats(self) -> Dict[str, Any]:
+        """Returns breakdown of mathematics queries by execution workflow."""
+        with self._lock:
+            return {
+                "local_math_count": self._local_math_count,
+                "ai_math_count": self._ai_math_count,
+                "workflows": dict(self._math_workflows)
+            }
 
     def record_search_call(self):
         """Records search grounding or research request invocation."""
@@ -344,6 +356,7 @@ class AITelemetry:
             "http_429_count": self._http_429_count,
             "local_math_count": self._local_math_count,
             "ai_math_count": self._ai_math_count,
+            "math_workflows": dict(self._math_workflows),
             "search_requests_count": self._search_requests_count
         }
 

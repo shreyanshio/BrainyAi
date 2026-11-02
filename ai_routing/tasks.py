@@ -132,7 +132,7 @@ _STATISTICS_KEYWORDS = re.compile(
 
 # General Math (English, Hindi, Gujarati, Hinglish)
 _MATH_KEYWORDS = re.compile(
-    r"(\b(math|maths|mathematics|calculate|evaluate|solve|percentage|percent|fraction|exponent|powers?|root|sqrt|logarithm|trigonometry|geometry|matrix|matrices|determinant|vector|eigenvalue|hisab|ganit|jod|ghatav|guna|bhag|ganatri|ketla thay|pratishat)\b|[\∫\∑\∏\√\∂\±\≤\≥\≠\≈\∞\∈\∉\⊂\⊆\∪\∩]|(\d+\s*[\+\-\*\/\^]\s*\d+)|(\\d+\\s*[×÷−]\\s*\\d+))",
+    r"(\b(math|maths|mathematics|calculate|evaluate|solve|percentage|percent|fraction|exponent|powers?|root|sqrt|logarithm|trigonometry|geometry|matrix|matrices|determinant|vector|eigenvalue|hisab|ganit|jod|ghatav|guna|bhag|ganatri|ketla thay|pratishat)\b|[\∫\∑\∏\√\∂\±\≤\≥\≠\≈\∞\∈\∉\⊂\⊆\∪\∩]|(\d+\s*[\+\-\*\/\^]\s*\d+)|(\d+\s*[×÷−]\s*\d+))",
     re.IGNORECASE
 )
 
@@ -401,7 +401,7 @@ def classify_task(
 
     # Route short, plain definition questions through Normal Use even when the
     # defined term is also a specialist keyword (e.g. "What is gravity?").
-    if len(text.split()) <= 6 and re.match(r"^(?:what is|who is|define|meaning of)\b", text, re.IGNORECASE):
+    if len(text.split()) <= 6 and re.match(r"^(?:what is|who is|define|meaning of)\b", text, re.IGNORECASE) and not any(op in text for op in "+-*/^="):
         return TaskType.SIMPLE_EXPLANATION
 
     # 5. Translation

@@ -40,7 +40,7 @@ from ai_routing.continuation import (
     CONTINUATION_PROMPT,
     MAX_CONTINUATION_ROUNDS
 )
-from ai_routing.maths import can_solve_locally, solve_locally, MathResult
+from ai_routing.maths import can_solve_locally, solve_locally, needs_explanation, normalize_math_characters, MathResult
 from ai_routing.cache import response_cache
 from ai_routing.memory import detect_topic_change
 from ai_routing.rate_limiter import intelligent_rate_limiter
@@ -65,6 +65,7 @@ class RouterResponse:
     math_verified: bool = False
     verification_status: Optional[str] = None
     verification_details: Optional[str] = None
+    workflow: Optional[str] = None
 
 def _sanitize_grounding_text(text: str) -> str:
     """Sanitizes external web content to prevent prompt injection or boundary breakouts."""
@@ -205,43 +206,70 @@ class AIRouter:
             document_context.get(key)
             for key in ("pdf_text", "document_pages", "multimodal_parts", "has_image", "doc_id", "document_id")
         ))
-        # Solver capability is authoritative: a missed task label must not block
-        # supported calculations. Attached files/images remain on the multimodal path.
-        if enable_local_math and not json_output and not has_non_text_context:
+        math_solvable = enable_local_math and not json_output and not has_non_text_context and (resolved_task in MATH_TASKS or can_solve_locally(prompt_text))
+        math_hybrid_active = False
+        math_fallback_active = False
+        math_conceptual_active = bool(resolved_task in MATH_TASKS and not can_solve_locally(prompt_text))
+        hybrid_math_res = None
+
+        if math_solvable:
             if can_solve_locally(prompt_text):
                 start_math = time.perf_counter()
                 math_res = solve_locally(prompt_text, platform=resolved_plat.value)
+                math_lat = (time.perf_counter() - start_math) * 1000.0
                 if math_res.is_solved:
-                    math_lat = (time.perf_counter() - start_math) * 1000.0
-                    global_telemetry.record_math_call(is_local=True)
-                    global_telemetry.record(TelemetryRecord(
-                        request_id=req_id,
-                        user_id=user_id,
-                        task=resolved_task.value,
-                        depth=resolved_depth.value,
-                        provider="local_math_engine",
-                        model="math_engine_v1",
-                        latency_ms=math_lat,
-                        input_tokens=None,
-                        output_tokens=len(math_res.formatted_markdown) // 4,
-                        fallback_used=False,
-                        status="success",
-                        mode="local_math",
-                        selection_reason="local maths engine solved the request without a provider call",
-                        prompt_tokens=0,
-                        prompt_tokens_estimated=True
-                    ))
-                    return RouterResponse(
-                        text=math_res.formatted_markdown,
-                        task=resolved_task,
-                        depth=resolved_depth,
-                        provider="local_math_engine",
-                        model="math_engine_v1",
-                        latency_ms=math_lat,
-                        math_verified=True,
-                        verification_status=math_res.verification_status,
-                        verification_details=math_res.verification_details
-                    )
+                    user_wants_explanation = needs_explanation(prompt_text)
+                    if not user_wants_explanation:
+                        global_telemetry.record_math_call(is_local=True, workflow="sympy_only")
+                        global_telemetry.record(TelemetryRecord(
+                            request_id=req_id,
+                            user_id=user_id,
+                            task=resolved_task.value,
+                            depth=resolved_depth.value,
+                            provider="local_math_engine",
+                            model="math_engine_v1",
+                            latency_ms=math_lat,
+                            input_tokens=None,
+                            output_tokens=len(math_res.formatted_markdown) // 4,
+                            fallback_used=False,
+                            status="success",
+                            mode="local_math",
+                            workflow="sympy_only",
+                            selection_reason="SymPy deterministic engine solved pure calculation without LLM call",
+                            prompt_tokens=0,
+                            prompt_tokens_estimated=True
+                        ))
+                        return RouterResponse(
+                            text=math_res.formatted_markdown,
+                            task=resolved_task,
+                            depth=resolved_depth,
+                            provider="local_math_engine",
+                            model="math_engine_v1",
+                            latency_ms=math_lat,
+                            math_verified=True,
+                            verification_status=math_res.verification_status,
+                            verification_details=math_res.verification_details,
+                            workflow="sympy_only"
+                        )
+                    else:
+                        grounding_block = (
+                            "\n\n[VERIFIED MATHEMATICAL GROUNDING FROM SYMPY ENGINE]\n"
+                            f"Problem Type: {math_res.problem_type}\n"
+                            f"Verified Result: {math_res.latex_solution or math_res.solution}\n"
+                            f"Verification Status: {math_res.verification_status}\n"
+                            f"Deterministic Solution:\n{math_res.formatted_markdown}\n"
+                            "STRICT INSTRUCTION: The mathematical calculations above have been deterministically verified by the SymPy symbolic engine. "
+                            "Do NOT recalculate or contradict this result. Provide a clear, educational, step-by-step conceptual explanation and intuitive walkthrough explaining why and how this mathematical result is reached."
+                        )
+                        if call_messages:
+                            call_messages[-1]["content"] += grounding_block
+                        else:
+                            call_messages.append({"role": "user", "content": prompt_text + grounding_block})
+                        math_hybrid_active = True
+                        hybrid_math_res = math_res
+                else:
+                    logger.warning("Local math engine could not solve expression deterministically; falling back to LLM chain.")
+                    math_fallback_active = True
 
         # ── Fast-Path 2: Response Cache (Zero latency & token spend for static definitions) ──
         if not json_output and not (document_context and (document_context.get("pdf_text") or document_context.get("has_image"))):
@@ -361,6 +389,31 @@ class AIRouter:
                         logger.warning("Continuation round %d failed (%s): returning accumulated text so far", continuation_rounds, cont_err)
                         break
 
+                # Determine mathematics workflow labels if applicable
+                if math_hybrid_active and hybrid_math_res:
+                    workflow_val = "sympy_then_llm"
+                    math_verified_val = True
+                    verif_status_val = hybrid_math_res.verification_status
+                    verif_details_val = hybrid_math_res.verification_details
+                    global_telemetry.record_math_call(is_local=False, workflow="sympy_then_llm")
+                elif math_fallback_active:
+                    workflow_val = "sympy_fallback"
+                    math_verified_val = False
+                    verif_status_val = None
+                    verif_details_val = None
+                    global_telemetry.record_math_call(is_local=False, workflow="sympy_fallback")
+                elif math_conceptual_active or resolved_task in MATH_TASKS:
+                    workflow_val = "llm_only"
+                    math_verified_val = False
+                    verif_status_val = None
+                    verif_details_val = None
+                    global_telemetry.record_math_call(is_local=False, workflow="llm_only")
+                else:
+                    workflow_val = None
+                    math_verified_val = False
+                    verif_status_val = None
+                    verif_details_val = None
+
                 # Record successful telemetry
                 global_telemetry.record(TelemetryRecord(
                     request_id=req_id,
@@ -378,7 +431,8 @@ class AIRouter:
                     continuation_used=continuation_used,
                     continuation_rounds=continuation_rounds,
                     mode=mode,
-                    selection_reason=mode_reason,
+                    workflow=workflow_val,
+                    selection_reason="SymPy solved deterministically; LLM provided conceptual explanation" if math_hybrid_active else mode_reason,
                     escalation_reason=(f"{fallback_from} unavailable; existing fallback chain selected {provider_name}/{res.model}" if fallback_used and normal_use else None),
                     prompt_tokens=max(1, len(sys_prompt) // 4) if sys_prompt else 0,
                     prompt_tokens_estimated=True,
@@ -411,7 +465,11 @@ class AIRouter:
                     output_tokens=tot_out_tokens or None,
                     citations=citations,
                     continuation_used=continuation_used,
-                    continuation_rounds=continuation_rounds
+                    continuation_rounds=continuation_rounds,
+                    math_verified=math_verified_val,
+                    verification_status=verif_status_val,
+                    verification_details=verif_details_val,
+                    workflow=workflow_val
                 )
             except Exception as e:
                 last_exc = e
@@ -423,6 +481,21 @@ class AIRouter:
                     provider_name, model_id, req_id, str(e)[:80]
                 )
                 continue
+
+        if math_hybrid_active and hybrid_math_res:
+            logger.warning("All LLM explanation providers failed; returning verified deterministic SymPy calculation.")
+            return RouterResponse(
+                text=hybrid_math_res.formatted_markdown,
+                task=resolved_task,
+                depth=resolved_depth,
+                provider="local_math_engine",
+                model="math_engine_v1",
+                latency_ms=(time.perf_counter() - start_all) * 1000.0,
+                math_verified=True,
+                verification_status=hybrid_math_res.verification_status,
+                verification_details=hybrid_math_res.verification_details,
+                workflow="sympy_fallback"
+            )
 
         # Record failure telemetry if all candidates failed
         global_telemetry.record(TelemetryRecord(
@@ -503,30 +576,59 @@ class AIRouter:
             document_context.get(key)
             for key in ("pdf_text", "document_pages", "multimodal_parts", "has_image", "doc_id", "document_id")
         ))
-        # Keep streaming and non-streaming routing consistent; protect multimodal requests.
-        if enable_local_math and not has_non_text_context:
+        math_solvable = enable_local_math and not has_non_text_context and (resolved_task in MATH_TASKS or can_solve_locally(prompt_text))
+        math_hybrid_active = False
+        math_fallback_active = False
+        math_conceptual_active = bool(resolved_task in MATH_TASKS and not can_solve_locally(prompt_text))
+        hybrid_math_res = None
+
+        if math_solvable:
             if can_solve_locally(prompt_text):
                 start_math = time.perf_counter()
                 math_res = solve_locally(prompt_text, platform=resolved_plat.value)
+                math_lat = (time.perf_counter() - start_math) * 1000.0
                 if math_res.is_solved:
-                    math_lat = (time.perf_counter() - start_math) * 1000.0
-                    global_telemetry.record_math_call(is_local=True)
-                    global_telemetry.record(TelemetryRecord(
-                        request_id=req_id,
-                        user_id=user_id,
-                        task=resolved_task.value,
-                        depth=resolved_depth.value,
-                        provider="local_math_engine",
-                        model="math_engine_v1",
-                        latency_ms=math_lat,
-                        ttft_ms=math_lat,
-                        input_tokens=None,
-                        output_tokens=len(math_res.formatted_markdown) // 4,
-                        fallback_used=False,
-                        status="success"
-                    ))
-                    yield math_res.formatted_markdown
-                    return
+                    user_wants_explanation = needs_explanation(prompt_text)
+                    if not user_wants_explanation:
+                        global_telemetry.record_math_call(is_local=True, workflow="sympy_only")
+                        global_telemetry.record(TelemetryRecord(
+                            request_id=req_id,
+                            user_id=user_id,
+                            task=resolved_task.value,
+                            depth=resolved_depth.value,
+                            provider="local_math_engine",
+                            model="math_engine_v1",
+                            latency_ms=math_lat,
+                            ttft_ms=math_lat,
+                            input_tokens=None,
+                            output_tokens=len(math_res.formatted_markdown) // 4,
+                            fallback_used=False,
+                            status="success",
+                            mode="local_math",
+                            workflow="sympy_only",
+                            selection_reason="SymPy deterministic engine solved pure calculation without LLM call"
+                        ))
+                        yield math_res.formatted_markdown
+                        return
+                    else:
+                        grounding_block = (
+                            "\n\n[VERIFIED MATHEMATICAL GROUNDING FROM SYMPY ENGINE]\n"
+                            f"Problem Type: {math_res.problem_type}\n"
+                            f"Verified Result: {math_res.latex_solution or math_res.solution}\n"
+                            f"Verification Status: {math_res.verification_status}\n"
+                            f"Deterministic Solution:\n{math_res.formatted_markdown}\n"
+                            "STRICT INSTRUCTION: The mathematical calculations above have been deterministically verified by the SymPy symbolic engine. "
+                            "Do NOT recalculate or contradict this result. Provide a clear, educational, step-by-step conceptual explanation and intuitive walkthrough explaining why and how this mathematical result is reached."
+                        )
+                        if call_messages:
+                            call_messages[-1]["content"] += grounding_block
+                        else:
+                            call_messages.append({"role": "user", "content": prompt_text + grounding_block})
+                        math_hybrid_active = True
+                        hybrid_math_res = math_res
+                else:
+                    logger.warning("Local math engine streaming solve failed; falling back to candidate chain.")
+                    math_fallback_active = True
 
         # ── Fast-Path: Response Cache for Streaming ──
         if not (document_context and (document_context.get("pdf_text") or document_context.get("has_image"))):
@@ -657,6 +759,18 @@ class AIRouter:
                 if started:
                     # Successfully completed stream
                     total_lat = (time.perf_counter() - start_t) * 1000.0
+                    if math_hybrid_active:
+                        workflow_val = "sympy_then_llm"
+                        global_telemetry.record_math_call(is_local=False, workflow="sympy_then_llm")
+                    elif math_fallback_active:
+                        workflow_val = "sympy_fallback"
+                        global_telemetry.record_math_call(is_local=False, workflow="sympy_fallback")
+                    elif math_conceptual_active or resolved_task in MATH_TASKS:
+                        workflow_val = "llm_only"
+                        global_telemetry.record_math_call(is_local=False, workflow="llm_only")
+                    else:
+                        workflow_val = None
+
                     global_telemetry.record(TelemetryRecord(
                         request_id=req_id,
                         user_id=user_id,
@@ -669,6 +783,7 @@ class AIRouter:
                         input_tokens=est_in_tokens or None,
                         output_tokens=max(1, len(accumulated_text) // 4) if accumulated_text else None,
                         fallback_used=fallback_used,
+                        workflow=workflow_val,
                         fallback_from=fallback_from,
                         status="success" if not fallback_used else "fallback_recovered",
                         continuation_used=continuation_used,

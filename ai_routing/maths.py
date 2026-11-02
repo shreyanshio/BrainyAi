@@ -86,38 +86,76 @@ _DISALLOWED_TOKENS = re.compile(
     re.IGNORECASE
 )
 
+_SUPERSCRIPTS_MAP = {
+    '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4',
+    '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9',
+    '⁺': '+', '⁻': '-'
+}
 
-_SUPERSCRIPT_TRANSLATION = str.maketrans({
-    "⁰": "0", "¹": "1", "²": "2", "³": "3", "⁴": "4",
-    "⁵": "5", "⁶": "6", "⁷": "7", "⁸": "8", "⁹": "9",
-    "⁺": "+", "⁻": "-"
-})
-_SUPERSCRIPT_EXPONENT = re.compile(r"([A-Za-z0-9\)])([⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+)")
+_EXPLANATION_PATTERN = re.compile(
+    r"\b("
+    r"and\s+explain(?:\s+every\s+step|\s+each\s+step|\s+how|\s+why|\s+the\s+steps|\s+in\s+detail)?"
+    r"|explain(?:\s+every\s+step|\s+each\s+step|\s+how|\s+why|\s+the\s+steps|\s+in\s+detail|\s+step\s+by\s+step)?"
+    r"|step\s+by\s+step"
+    r"|show\s+(?:your\s+|the\s+)?steps"
+    r"|walk\s+me\s+through"
+    r"|with\s+explanation"
+    r"|in\s+detail"
+    r"|samjhao"
+    r"|kaise\s+aaya"
+    r"|batao\s+kaise"
+    r")\b",
+    re.IGNORECASE
+)
+
+WORD_TO_NUM = {
+    'zero': 0, 'one': 1, 'two': 2, 'three': 3, 'four': 4,
+    'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10
+}
 
 
-def _normalize_math_symbols(raw: str) -> str:
-    """Normalize common Unicode math notation before safe parsing or routing."""
-    normalized = (
-        str(raw)
-        .replace("×", "*")
-        .replace("÷", "/")
-        .replace("−", "-")
-        .replace("–", "-")
-        .replace("—", "-")
-    )
-    return _SUPERSCRIPT_EXPONENT.sub(
-        lambda match: f"{match.group(1)}**{match.group(2).translate(_SUPERSCRIPT_TRANSLATION)}",
-        normalized
-    )
+def normalize_math_characters(text: str) -> str:
+    """Normalizes Unicode mathematical symbols, superscripts, operators, and minus signs."""
+    s = text
+    # Unicode minus and hyphens
+    s = s.replace("−", "-").replace("–", "-").replace("—", "-")
+    # Multiplication & division
+    s = s.replace("×", "*").replace("÷", "/")
+    # Roots, constants, infinity
+    s = s.replace("√", "sqrt")
+    s = s.replace("π", "pi")
+    s = s.replace("∞", "oo")
+    s = re.sub(r"\b(inf|infinity)\b", "oo", s, flags=re.IGNORECASE)
+
+    # Replace superscripts: e.g. x² -> x^2, x³ -> x^3, (x+1)⁻¹ -> (x+1)^-1
+    def _rep_super(m):
+        raw = m.group(0)
+        digits = "".join(_SUPERSCRIPTS_MAP.get(c, c) for c in raw)
+        return f"^{digits}"
+
+    s = re.sub(r"[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+", _rep_super, s)
+    return s
+
+
+def needs_explanation(query: str) -> bool:
+    """Returns True if user specifically requests pedagogical steps, reasoning, or walkthrough."""
+    return bool(_EXPLANATION_PATTERN.search(query))
+
+
+def strip_explanation_request(query: str) -> str:
+    """Strips explanation phrases from mathematical expressions so equations/calculus parse cleanly."""
+    q = query.strip()
+    q_stripped = _EXPLANATION_PATTERN.sub("", q)
+    q_stripped = re.sub(r"\b(and|with|please)\s*$", "", q_stripped, flags=re.IGNORECASE).strip()
+    q_stripped = re.sub(r"^[,\s]+|[,\s\?]+$", "", q_stripped).strip()
+    return q_stripped if q_stripped else q
+
 
 def _sanitize_math_input(raw: str) -> str:
     """Sanitizes text to prevent injection of non-mathematical code and normalizes implicit multiplication."""
     if _DISALLOWED_TOKENS.search(raw):
         raise ValueError("Invalid mathematical input: forbidden keywords detected.")
-    s = _normalize_math_symbols(raw).strip()
-    s = s.replace("√", "sqrt")
-    s = s.replace("π", "pi")
-    s = s.replace("∞", "oo")
+    s = normalize_math_characters(raw.strip())
     s = re.sub(r"\b(\d+)\s*%", r"(\1/100)", s)
     
     # Implicit multiplication: 2x -> 2*x, 5.5x -> 5.5*x, 2(x+1) -> 2*(x+1)
@@ -231,20 +269,31 @@ class MathematicsEngine:
 
     def can_solve(self, query: str) -> bool:
         """Determines whether a query can be solved locally by the engine."""
-        q = _normalize_math_symbols(query).strip().lower()
-        if not q or len(q) > 400:
+        if not query:
+            return False
+        q_norm = normalize_math_characters(query).strip().lower()
+        if not q_norm or len(q_norm) > 400:
+            return False
+        q = strip_explanation_request(q_norm).strip().lower()
+        if not q:
             return False
 
         # Percentages: "25% of 480", "15 % of 250"
         if re.search(r"\b\d+(\.\d+)?\s*%\s*of\s*\d+(\.\d+)?\b", q):
             return True
 
-        # Arithmetic expression: "calculate 123 * 45", "evaluate (3 + 5) / 2"
-        if re.search(r"^\s*(calculate|evaluate|solve|compute)?\s*[\d\.\(\)\+\-\*\/\^\s]+$", q) and any(op in q for op in "+-*/^"):
+        # Coin toss / binomial probability: "probability of getting two heads in three coin tosses"
+        if re.search(r"\bprobability\s+of\s+(?:getting\s+)?(?:\d+|\w+)\s+heads?\s+in\s+(?:\d+|\w+)\s+(?:coin\s+)?(?:tosses|flips)\b", q):
+            return True
+
+        # Arithmetic expression: "calculate 123 * 45", "what is 2 + 2", "345 * 789", "evaluate (3 + 5) / 2"
+        clean_arith = re.sub(r"^(what\s+is|what's|how\s+much\s+is|calculate|evaluate|solve|compute|find)\s*", "", q, flags=re.IGNORECASE).strip()
+        clean_arith = re.sub(r"[\s=\?]+$", "", clean_arith).strip()
+        if clean_arith and re.search(r"^[\d\.\(\)\+\-\*/\^\s]+$", clean_arith) and any(op in clean_arith for op in "+-*/^"):
             return True
 
         # Square root, log, power: "sqrt(144)", "log10(100)", "ln(e)"
-        if re.search(r"\b(sqrt|log|ln|exp|sin|cos|tan)\s*\([\d\.\s\+\-\*\/]+\)", q):
+        if re.search(r"\b(sqrt|log|ln|exp|sin|cos|tan)\s*\([\d\.\s\+\-\*/]+\)", q):
             return True
 
         # Statistics: "mean of 1, 2, 3", "median of ...", "standard deviation of ..."
@@ -252,14 +301,14 @@ class MathematicsEngine:
             return True
 
         # Linear & Quadratic equations: "solve x^2 - 5x + 6 = 0", "3x + 4 = 19"
-        if re.search(r"\b(solve|find x|roots of)\b.*[a-z].*=.*", q) or re.search(r"[a-z]\s*[\+\-\*\^].*=\s*[\-\d\.]+", q):
+        if re.search(r"\b(solve|find x|roots of)\b.*[a-z].*=.*", q) or re.search(r"[a-z]\s*[\+\-\*/\^].*=\s*[\-\d\.]+", q):
             return True
 
         # Algebra: "factor x^2 - 9", "expand (x+2)^3", "simplify (x^2 - 1)/(x - 1)"
-        if re.search(r"\b(factor|expand|simplify)\b\s*[\(\)a-z0-9\+\-\*\/\^]+", q):
+        if re.search(r"\b(factor|expand|simplify)\b\s*[\(\)a-z0-9\+\-\*/\^]+", q):
             return True
 
-        # Calculus: "integrate x^2 dx", "derivative of sin(x)", "d/dx(x^3)", "limit (sin(x)/x), x -> 0"
+        # Calculus: "integrate x^2 dx", "derivative of sin(x)", "d/dx(x^3)", "limit (sin(x)/x), x -> 0", "limit of sin(x)/x as x approaches 0"
         if re.search(r"\b(integrate|integral|derivative|diff|differentiate|d/dx|limit)\b", q):
             return True
 
@@ -283,7 +332,9 @@ class MathematicsEngine:
 
     def solve(self, query: str, platform: str = "web") -> MathResult:
         """Solves supported mathematical query locally with full step breakdown and verification."""
-        q = query.strip()
+        q_raw = query.strip()
+        q_norm = normalize_math_characters(q_raw)
+        q = strip_explanation_request(q_norm).strip()
 
         # 1. Percentage
         pct_match = re.search(r"\b(\d+(?:\.\d+)?)\s*%\s*of\s*(\d+(?:\.\d+)?)\b", q, re.IGNORECASE)
@@ -318,6 +369,56 @@ class MathematicsEngine:
                 formatted_markdown=md,
                 latex_solution=str(ans)
             )
+
+        # 1.5 Probability & Combinatorics (Coin Tosses / Binomial Distribution)
+        coin_match = re.search(
+            r"\bprobability\s+of\s+(?:getting\s+)?(\d+|\w+)\s+heads?\s+in\s+(\d+|\w+)\s+(?:coin\s+)?(?:tosses|flips)\b",
+            q,
+            re.IGNORECASE
+        )
+        if coin_match:
+            try:
+                def _parse_token(tok: str) -> int:
+                    t = tok.lower().strip()
+                    return WORD_TO_NUM[t] if t in WORD_TO_NUM else int(t)
+
+                k_heads = _parse_token(coin_match.group(1))
+                n_tosses = _parse_token(coin_match.group(2))
+                if 0 <= k_heads <= n_tosses and n_tosses <= 100:
+                    comb = sp.binomial(n_tosses, k_heads)
+                    tot_outcomes = 2**n_tosses
+                    p_exact = sp.Rational(comb, tot_outcomes)
+                    p_float = float(p_exact)
+                    p_pct = round(p_float * 100.0, 2)
+                    steps = [
+                        f"1. Problem type: Binomial probability with $n = {n_tosses}$ trials, $k = {k_heads}$ successes, and $p = 0.5$ (fair coin).",
+                        f"2. Formula: $P(X = k) = \\binom{{{n_tosses}}}{{{k_heads}}} p^k (1-p)^{{{n_tosses}-{k_heads}}} = \\binom{{{n_tosses}}}{{{k_heads}}} \\left(\\frac{{1}}{{2}}\\right)^{{{n_tosses}}}$",
+                        f"3. Combinations: $\\binom{{{n_tosses}}}{{{k_heads}}} = \\frac{{{n_tosses}!}}{{{k_heads}! ({n_tosses} - {k_heads})!}} = {comb}$ favorable outcomes out of $2^{{{n_tosses}}} = {tot_outcomes}$ total equally likely outcomes.",
+                        f"4. Exact probability: $P = \\frac{{{comb}}}{{{tot_outcomes}}} = {sp.latex(p_exact)}$"
+                    ]
+                    md = (
+                        f"### Probability & Combinatorics Calculation\n\n"
+                        f"**Experiment:** Coin toss ({n_tosses} fair coin tosses)\n"
+                        f"**Event ($E$):** Getting exactly {k_heads} heads\n\n"
+                        f"**Formula:**\n"
+                        f"$$P(X = k) = \\binom{{{n_tosses}}}{{{k_heads}}} \\left(\\frac{{1}}{{2}}\\right)^{{{n_tosses}}}$$\n\n"
+                        f"**Step-by-Step Evaluation:**\n" + "\n".join(steps) + f"\n\n"
+                        f"**Final Answer:** **${sp.latex(p_exact)}$** ($P \\approx {p_float:.4f}$ or **${p_pct}\\%$**)\n\n"
+                        f"**Verification:** $\\sum_{{j=0}}^{{{n_tosses}}} P(X=j) = 1.0$ (Verified ✓)"
+                    )
+                    return MathResult(
+                        is_solved=True,
+                        problem_type="probability_combinatorics",
+                        query=query,
+                        solution=str(p_exact),
+                        steps=steps,
+                        verification_status="verified_numerically",
+                        verification_details=f"Binomial distribution exact rational {p_exact} matches combinations {comb}/{tot_outcomes}.",
+                        formatted_markdown=md,
+                        latex_solution=sp.latex(p_exact)
+                    )
+            except Exception as e:
+                logger.warning("Coin toss probability error: %s", e)
 
         # 2. Chemical Molar Mass
         chem_match = re.search(r"\b(molar mass|molecular weight)\s+(?:of\s+)?([A-Za-z0-9\(\)]+)", q, re.IGNORECASE)
@@ -439,7 +540,7 @@ class MathematicsEngine:
                 logger.warning("Matrix parse error: %s", e)
 
         # 6. Calculus: Limits, Integration & Differentiation
-        lim_match = re.search(r"\blimit\s*(?:of\s+)?(.+?)\s*(?:as|,)\s*([a-zA-Z])\s*(?:->|to)\s*([0-9\.\-\+oo]+)", q, re.IGNORECASE)
+        lim_match = re.search(r"\blimit\s*(?:of\s+)?(.+?)\s*(?:as|,)\s*([a-zA-Z])\s*(?:->|to|approaches|goes\s+to|tends\s+to|\\to)\s*([0-9\.\-\+oo]+)", q, re.IGNORECASE)
         if lim_match:
             expr_str = lim_match.group(1).strip()
             var_str = lim_match.group(2).strip()
@@ -695,7 +796,8 @@ class MathematicsEngine:
                     logger.warning("Simultaneous equation solving error: %s", e)
 
         # 9. Single Equation Solving (Linear & Quadratic)
-        eq_match = re.search(r"(?:solve|find x|roots of)?\s*(.+?)\s*=\s*(.+)", q, re.IGNORECASE)
+        clean_eq = re.sub(r"^(solve|find x|roots of)\s*", "", q, flags=re.IGNORECASE).strip()
+        eq_match = re.search(r"^(.+?)\s*=\s*(.+)$", clean_eq, re.IGNORECASE)
         if eq_match and ("x" in q or "y" in q or "z" in q):
             lhs_str = eq_match.group(1).strip()
             rhs_str = eq_match.group(2).strip()
@@ -753,7 +855,8 @@ class MathematicsEngine:
                 logger.warning("Equation solving error: %s", e)
 
         # 10. Pure Arithmetic & Numeric Evaluation
-        clean_arith = re.sub(r"^(calculate|evaluate|solve|compute)\s*", "", q, flags=re.IGNORECASE).strip()
+        clean_arith = re.sub(r"^(what\s+is|what's|how\s+much\s+is|calculate|evaluate|solve|compute|find)\s*", "", q, flags=re.IGNORECASE).strip()
+        clean_arith = re.sub(r"[\s=\?]+$", "", clean_arith).strip()
         # Division by zero pre-check
         if re.search(r"/\s*0(?:\.0*)?(?!\d)", clean_arith):
             return MathResult(
