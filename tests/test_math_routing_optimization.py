@@ -12,6 +12,7 @@ from ai_routing.maths import (
     MathematicsEngine,
     can_solve_locally,
     solve_locally,
+    try_solve_locally,
     needs_explanation,
     normalize_math_characters,
     strip_explanation_request,
@@ -124,6 +125,55 @@ class TestMathematicsEngineUnit(unittest.TestCase):
         self.assertTrue(needs_explanation("Explain the quadratic formula"))
         self.assertTrue(needs_explanation("Solve this problem with explanation in detail"))
         self.assertTrue(needs_explanation("Solve x^2 - 4 = 0 samjhao"))
+
+
+    def test_natural_language_arithmetic_phrases(self):
+        """Tests natural-language arithmetic phrases: divided by, multiplied by, minus, squared, cubed, square root."""
+        test_queries = [
+            ("What is 25 × 48?", "1200"),
+            ("Find the value of 250 divided by 5.", "50"),
+            ("125 multiplied by 8.", "1000"),
+            ("1000 minus 275.", "725"),
+            ("15% of 800.", "120"),
+            ("What will be 12.5% of 640?", "80"),
+            ("3² + 4².", "25"),
+            ("square root of 144", "12"),
+            ("5 squared + 2 cubed", "33"),
+            ("2 raised to the power 8", "256")
+        ]
+        for query, expected_sol in test_queries:
+            with self.subTest(query=query):
+                self.assertTrue(self.engine.can_solve(query), f"can_solve returned False for: {query}")
+                res = self.engine.solve(query)
+                self.assertTrue(res.is_solved, f"Engine failed to solve: {query}")
+                self.assertIn(expected_sol, str(res.solution), f"Expected {expected_sol} in {res.solution} for {query}")
+
+    def test_limit_variations_and_unicode_arrows(self):
+        """Tests limit evaluation with arrows (->, →), infix, and prefix forms."""
+        limit_queries = [
+            ("Calculate lim x→0 (sin x)/x", "1"),
+            ("Limit of sin(x)/x, x → 0", "1"),
+            ("limit of (1 + 1/x)^x as x approaches infinity", "E")
+        ]
+        for query, expected_sol in limit_queries:
+            with self.subTest(query=query):
+                self.assertTrue(self.engine.can_solve(query), f"can_solve returned False for: {query}")
+                res = self.engine.solve(query)
+                self.assertTrue(res.is_solved, f"Engine failed to solve limit: {query}")
+                self.assertEqual(str(res.solution), expected_sol)
+
+    def test_try_solve_locally_single_pass(self):
+        """Tests try_solve_locally returns MathResult on valid math and None on non-math."""
+        res_math = try_solve_locally("Find the value of 250 divided by 5.")
+        self.assertIsNotNone(res_math)
+        self.assertTrue(res_math.is_solved)
+        self.assertEqual(res_math.solution, "50")
+
+        res_word = try_solve_locally("A train travels 120 km in 2 hours. What is its average speed?")
+        self.assertIsNone(res_word)
+
+        res_concept = try_solve_locally("Explain the fundamental theorem of calculus")
+        self.assertIsNone(res_concept)
 
     def test_division_by_zero_handling(self):
         """Tests that division by zero returns a safe, uncrashable error message."""
@@ -255,6 +305,38 @@ class TestMathematicsAIRouting(unittest.TestCase):
             self.assertTrue(res.math_verified)
             self.assertEqual(res.workflow, "sympy_fallback")
             self.assertIn("The roots are", res.text)
+
+
+
+    @patch("ai_routing.providers.gemini_provider.GeminiProvider.generate")
+    @patch("ai_routing.providers.groq_provider.GroqProvider.generate")
+    @patch("ai_routing.providers.cerebras_provider.CerebrasProvider.generate")
+    @patch("ai_routing.providers.sambanova_provider.SambaNovaProvider.generate")
+    @patch("ai_routing.providers.openrouter_provider.OpenRouterProvider.generate")
+    def test_natural_language_arithmetic_zero_remote_calls(
+        self, mock_openrouter, mock_sambanova, mock_cerebras, mock_groq, mock_gemini
+    ):
+        """Natural-language arithmetic queries must make 0 calls to any remote LLM provider."""
+        queries = [
+            "What is 25 × 48?",
+            "Find the value of 250 divided by 5.",
+            "125 multiplied by 8.",
+            "1000 minus 275.",
+            "15% of 800.",
+            "What will be 12.5% of 640?",
+            "3² + 4².",
+            "Calculate lim x→0 (sin x)/x"
+        ]
+        for q in queries:
+            with self.subTest(query=q):
+                res = router.generate(q)
+                self.assertEqual(res.provider, "local_math_engine")
+                self.assertEqual(res.workflow, "sympy_only")
+                self.assertEqual(mock_gemini.call_count, 0)
+                self.assertEqual(mock_groq.call_count, 0)
+                self.assertEqual(mock_cerebras.call_count, 0)
+                self.assertEqual(mock_sambanova.call_count, 0)
+                self.assertEqual(mock_openrouter.call_count, 0)
 
 
 class TestMathematicsStreaming(unittest.TestCase):

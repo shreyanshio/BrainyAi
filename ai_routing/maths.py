@@ -115,17 +115,32 @@ WORD_TO_NUM = {
 
 
 def normalize_math_characters(text: str) -> str:
-    """Normalizes Unicode mathematical symbols, superscripts, operators, and minus signs."""
+    """Normalizes Unicode mathematical symbols, superscripts, operators, minus signs, arrows, and natural language arithmetic operations."""
     s = text
     # Unicode minus and hyphens
     s = s.replace("−", "-").replace("–", "-").replace("—", "-")
     # Multiplication & division
     s = s.replace("×", "*").replace("÷", "/")
-    # Roots, constants, infinity
+    # Roots, constants, infinity, arrows
     s = s.replace("√", "sqrt")
     s = s.replace("π", "pi")
     s = s.replace("∞", "oo")
+    s = s.replace("→", "->")
     s = re.sub(r"\b(inf|infinity)\b", "oo", s, flags=re.IGNORECASE)
+
+    # Natural-language arithmetic operators:
+    s = re.sub(r"\bsquare\s+root\s+of\s+", "sqrt ", s, flags=re.IGNORECASE)
+    s = re.sub(r"\braised\s+to\s+the\s+power(?:\s+of)?\b", "^", s, flags=re.IGNORECASE)
+    s = re.sub(r"\bto\s+the\s+power\s+of\b", "^", s, flags=re.IGNORECASE)
+    s = re.sub(r"([0-9\.\)a-zA-Z]+)\s+squared\b", r"\1^2", s, flags=re.IGNORECASE)
+    s = re.sub(r"([0-9\.\)a-zA-Z]+)\s+cubed\b", r"\1^3", s, flags=re.IGNORECASE)
+
+    s = re.sub(r"\s+multiplied\s+by\s+", " * ", s, flags=re.IGNORECASE)
+    s = re.sub(r"(\d+(?:\.\d+)?|\))\s+times\s+(\d+(?:\.\d+)?|\()", r"\1 * \2", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s+divided\s+by\s+", " / ", s, flags=re.IGNORECASE)
+    s = re.sub(r"(\d+(?:\.\d+)?|\))\s+over\s+(\d+(?:\.\d+)?|\()", r"\1 / \2", s, flags=re.IGNORECASE)
+    s = re.sub(r"(\d+(?:\.\d+)?|\))\s+plus\s+(\d+(?:\.\d+)?|\()", r"\1 + \2", s, flags=re.IGNORECASE)
+    s = re.sub(r"(\d+(?:\.\d+)?|\))\s+minus\s+(\d+(?:\.\d+)?|\()", r"\1 - \2", s, flags=re.IGNORECASE)
 
     # Replace superscripts: e.g. x² -> x^2, x³ -> x^3, (x+1)⁻¹ -> (x+1)^-1
     def _rep_super(m):
@@ -286,14 +301,15 @@ class MathematicsEngine:
         if re.search(r"\bprobability\s+of\s+(?:getting\s+)?(?:\d+|\w+)\s+heads?\s+in\s+(?:\d+|\w+)\s+(?:coin\s+)?(?:tosses|flips)\b", q):
             return True
 
-        # Arithmetic expression: "calculate 123 * 45", "what is 2 + 2", "345 * 789", "evaluate (3 + 5) / 2"
-        clean_arith = re.sub(r"^(what\s+is|what's|how\s+much\s+is|calculate|evaluate|solve|compute|find)\s*", "", q, flags=re.IGNORECASE).strip()
-        clean_arith = re.sub(r"[\s=\?]+$", "", clean_arith).strip()
+        # Arithmetic expression: "calculate 123 * 45", "what is 2 + 2", "345 * 789", "evaluate (3 + 5) / 2", "250 divided by 5."
+        clean_arith = re.sub(r"^(what\s+is|what's|how\s+much\s+is|what\s+will\s+be|calculate|evaluate|solve|compute|find\s+the\s+value\s+of|find)\s*", "", q, flags=re.IGNORECASE).strip()
+        clean_arith = re.sub(r"[\s=\?\.]+$", "", clean_arith).strip()
+        clean_arith = re.sub(r"\b(sqrt|sin|cos|tan|asin|acos|atan|log|ln|exp)\s+([a-zA-Z0-9\.]+)\b", r"\1(\2)", clean_arith)
         if clean_arith and re.search(r"^[\d\.\(\)\+\-\*/\^\s]+$", clean_arith) and any(op in clean_arith for op in "+-*/^"):
             return True
 
-        # Square root, log, power: "sqrt(144)", "log10(100)", "ln(e)"
-        if re.search(r"\b(sqrt|log|ln|exp|sin|cos|tan)\s*\([\d\.\s\+\-\*/]+\)", q):
+        # Square root, log, power: "sqrt(144)", "sqrt 144", "log10(100)", "ln(e)"
+        if re.search(r"\b(sqrt|log|ln|exp|sin|cos|tan)\s*\([\d\.\s\+\-\*/]+\)", q) or re.search(r"\bsqrt\s+\d+(\.\d+)?", q):
             return True
 
         # Statistics: "mean of 1, 2, 3", "median of ...", "standard deviation of ..."
@@ -308,8 +324,8 @@ class MathematicsEngine:
         if re.search(r"\b(factor|expand|simplify)\b\s*[\(\)a-z0-9\+\-\*/\^]+", q):
             return True
 
-        # Calculus: "integrate x^2 dx", "derivative of sin(x)", "d/dx(x^3)", "limit (sin(x)/x), x -> 0", "limit of sin(x)/x as x approaches 0"
-        if re.search(r"\b(integrate|integral|derivative|diff|differentiate|d/dx|limit)\b", q):
+        # Calculus: "integrate x^2 dx", "derivative of sin(x)", "d/dx(x^3)", "limit (sin(x)/x), x -> 0", "limit of sin(x)/x as x approaches 0", "lim x->0 (sin x)/x"
+        if re.search(r"\b(integrate|integral|derivative|diff|differentiate|d/dx|limit|lim)\b", q):
             return True
 
         # Matrix: "det [[1, 2], [3, 4]]", "inv [[1, 0], [0, 1]]"
@@ -540,19 +556,30 @@ class MathematicsEngine:
                 logger.warning("Matrix parse error: %s", e)
 
         # 6. Calculus: Limits, Integration & Differentiation
-        lim_match = re.search(r"\blimit\s*(?:of\s+)?(.+?)\s*(?:as|,)\s*([a-zA-Z])\s*(?:->|to|approaches|goes\s+to|tends\s+to|\\to)\s*([0-9\.\-\+oo]+)", q, re.IGNORECASE)
-        if lim_match:
-            expr_str = lim_match.group(1).strip()
-            var_str = lim_match.group(2).strip()
-            pt_str = lim_match.group(3).strip()
+        lim_match_infix = re.search(r"\blimit\s*(?:of\s+)?(.+?)\s*(?:as|,)\s*([a-zA-Z])\s*(?:->|to|approaches|goes\s+to|tends\s+to|\\to)\s*([0-9\.\-\+oo]+)", q, re.IGNORECASE)
+        lim_match_prefix = re.search(r"\blim(?:it)?\s+(?:as\s+)?([a-zA-Z])\s*(?:->|to|approaches|goes\s+to|tends\s+to|\\to)\s*([0-9\.\-\+oo]+)\s*(?:of\s+)?(.+)", q, re.IGNORECASE)
+
+        lim_var_str, lim_pt_str, lim_expr_str = None, None, None
+        if lim_match_infix:
+            lim_expr_str = lim_match_infix.group(1).strip()
+            lim_var_str = lim_match_infix.group(2).strip()
+            lim_pt_str = lim_match_infix.group(3).strip()
+        elif lim_match_prefix:
+            lim_var_str = lim_match_prefix.group(1).strip()
+            lim_pt_str = lim_match_prefix.group(2).strip()
+            lim_expr_str = lim_match_prefix.group(3).strip()
+
+        if lim_var_str and lim_pt_str and lim_expr_str:
             try:
-                sym_var = sp.Symbol(var_str)
-                pt_val = sp.sympify(pt_str)
-                parsed = safe_parse_expression(expr_str)
+                sym_var = sp.Symbol(lim_var_str)
+                pt_val = sp.sympify(lim_pt_str)
+                clean_lim_expr = re.sub(r"[\s=\?\.]+$", "", lim_expr_str).strip()
+                clean_lim_expr = re.sub(r"\b(sqrt|sin|cos|tan|asin|acos|atan|log|ln|exp)\s+([a-zA-Z0-9\.]+)\b", r"\1(\2)", clean_lim_expr)
+                parsed = safe_parse_expression(clean_lim_expr)
                 lim_val = sp.limit(parsed, sym_var, pt_val)
                 md = (
                     f"### Calculus: Limit Evaluation\n\n"
-                    f"**Problem:**\n$$\\lim_{{{var_str} \\to {pt_str}}} \\left({sp.latex(parsed)}\\right)$$\n\n"
+                    f"**Problem:**\n$$\\lim_{{{lim_var_str} \\to {lim_pt_str}}} \\left({sp.latex(parsed)}\\right)$$\n\n"
                     f"**Final Answer:** **${sp.latex(lim_val)}$**\n\n"
                     f"**Verification:** Symbolic limit confirmed (Verified ✓)."
                 )
@@ -561,7 +588,7 @@ class MathematicsEngine:
                     problem_type="calculus_limit",
                     query=query,
                     solution=lim_val,
-                    steps=[f"Limit as {var_str} -> {pt_str} of {sp.latex(parsed)} = {sp.latex(lim_val)}"],
+                    steps=[f"Limit as {lim_var_str} -> {lim_pt_str} of {sp.latex(parsed)} = {sp.latex(lim_val)}"],
                     verification_status="verified_symbolically",
                     verification_details="L'Hôpital / expansion limit verified.",
                     formatted_markdown=md,
@@ -855,8 +882,9 @@ class MathematicsEngine:
                 logger.warning("Equation solving error: %s", e)
 
         # 10. Pure Arithmetic & Numeric Evaluation
-        clean_arith = re.sub(r"^(what\s+is|what's|how\s+much\s+is|calculate|evaluate|solve|compute|find)\s*", "", q, flags=re.IGNORECASE).strip()
-        clean_arith = re.sub(r"[\s=\?]+$", "", clean_arith).strip()
+        clean_arith = re.sub(r"^(what\s+is|what's|how\s+much\s+is|what\s+will\s+be|calculate|evaluate|solve|compute|find\s+the\s+value\s+of|find)\s*", "", q, flags=re.IGNORECASE).strip()
+        clean_arith = re.sub(r"[\s=\?\.]+$", "", clean_arith).strip()
+        clean_arith = re.sub(r"\b(sqrt|sin|cos|tan|asin|acos|atan|log|ln|exp)\s+([a-zA-Z0-9\.]+)\b", r"\1(\2)", clean_arith)
         # Division by zero pre-check
         if re.search(r"/\s*0(?:\.0*)?(?!\d)", clean_arith):
             return MathResult(
@@ -1090,3 +1118,21 @@ def can_solve_locally(query: str) -> bool:
 def solve_locally(query: str, platform: str = "web") -> MathResult:
     """Helper function to solve mathematical problem locally."""
     return maths_engine.solve(query, platform=platform)
+
+def try_solve_locally(query: str, platform: str = "web") -> Optional[MathResult]:
+    """
+    Single-pass safe evaluation entry point.
+    Returns MathResult if the expression was successfully parsed and solved locally,
+    or None if the problem is non-mathematical, unsupported, or requires LLM reasoning.
+    Eliminates duplicate parse cycles between detection and solving.
+    """
+    if not can_solve_locally(query):
+        return None
+    try:
+        res = solve_locally(query, platform=platform)
+        if res and res.is_solved:
+            return res
+        return None
+    except Exception as e:
+        logger.warning("try_solve_locally exception encountered: %s", e)
+        return None
