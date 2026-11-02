@@ -74,9 +74,11 @@ class GroqProvider(BaseProvider):
             raise RuntimeError("NO_KEYS: groq")
 
         primary_model = model_id or registry.groq_fast_model
-        model_chain = [primary_model, registry.groq_balanced_model, "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
-        # De-duplicate
-        model_chain = list(dict.fromkeys(model_chain))
+        model_chain = [primary_model, registry.groq_balanced_model, "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
+        # Filter eligible active models
+        model_chain = [m for m in dict.fromkeys(model_chain) if registry.is_model_eligible("groq", m)]
+        if not model_chain:
+            model_chain = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
 
         last_exc = None
         start_t = time.perf_counter()
@@ -116,6 +118,10 @@ class GroqProvider(BaseProvider):
                     )
                 except Exception as e:
                     last_exc = e
+                    if is_model_not_found(e):
+                        logger.warning("Groq model %s returned 404 Not Found; quarantining in registry", model)
+                        registry.mark_model_unavailable(model, reason="404_not_found")
+                        continue
                     if is_model_context_or_limit_error(e):
                         logger.info("Groq model %s context/limit error (%s), falling to next model in chain...", model, type(e).__name__)
                         continue
@@ -134,13 +140,16 @@ class GroqProvider(BaseProvider):
         multimodal_parts: Optional[List[Dict[str, Any]]] = None
     ) -> Iterator[str]:
         self.last_stream_finish_reason = None
+        self.last_stream_model = None
         rot = registry.get_rotator("groq")
         if not rot or rot.key_count == 0:
             raise RuntimeError("NO_KEYS: groq")
 
         primary_model = model_id or registry.groq_fast_model
-        model_chain = [primary_model, registry.groq_balanced_model, "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
-        model_chain = list(dict.fromkeys(model_chain))
+        model_chain = [primary_model, registry.groq_balanced_model, "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
+        model_chain = [m for m in dict.fromkeys(model_chain) if registry.is_model_eligible("groq", m)]
+        if not model_chain:
+            model_chain = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
 
         last_exc = None
         for _ in range(rot.key_count):
@@ -160,6 +169,7 @@ class GroqProvider(BaseProvider):
                         kwargs["reasoning_effort"] = "low"
 
                     stream_resp = client.chat.completions.create(**kwargs)
+                    self.last_stream_model = model
                     for chunk in stream_resp:
                         if chunk.choices and len(chunk.choices) > 0:
                             c0 = chunk.choices[0]
@@ -172,6 +182,10 @@ class GroqProvider(BaseProvider):
                     return
                 except Exception as e:
                     last_exc = e
+                    if is_model_not_found(e):
+                        logger.warning("Groq stream model %s returned 404 Not Found; quarantining in registry", model)
+                        registry.mark_model_unavailable(model, reason="404_not_found")
+                        continue
                     if is_model_context_or_limit_error(e):
                         logger.info("Groq stream model %s context/limit error (%s), falling to next model in chain...", model, type(e).__name__)
                         continue

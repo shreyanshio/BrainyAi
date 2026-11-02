@@ -185,8 +185,8 @@ class ProviderRegistry:
             self.allow_paid_models = os.getenv("ALLOW_PAID_MODELS", "false").lower() in ("true", "1", "yes")
 
             # 4. Configurable model IDs
-            self.groq_fast_model = (os.getenv("GROQ_MODEL_FAST") or "llama-3.1-8b-instant").strip()
-            self.groq_balanced_model = (os.getenv("GROQ_MODEL_BALANCED") or "llama-3.3-70b-versatile").strip()
+            self.groq_fast_model = (os.getenv("GROQ_MODEL_FAST") or "openai/gpt-oss-20b").strip()
+            self.groq_balanced_model = (os.getenv("GROQ_MODEL_BALANCED") or "openai/gpt-oss-120b").strip()
             self.gemini_primary_model = (os.getenv("GEMINI_PRIMARY_MODEL") or "gemini-3.8-flash").strip()
             self.gemini_code_model = (os.getenv("GEMINI_CODE_MODEL") or "gemini-3.8-flash").strip()
             self.gemini_vision_model = (os.getenv("GEMINI_VISION_MODEL") or "gemini-3.8-flash").strip()
@@ -204,12 +204,14 @@ class ProviderRegistry:
             # 5. Populate verified Model Specifications
             self._models.clear()
 
-            # Groq models
-            self._register(ModelSpec("llama-3.1-8b-instant", "groq", "Llama 3.1 8B Instant", CostCategory.FREE_TIER, 0.05, 0.08, supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=15.0, lifecycle="stable", model_category="fast"))
-            self._register(ModelSpec("llama-3.3-70b-versatile", "groq", "Llama 3.3 70B Versatile", CostCategory.FREE_TIER, 0.59, 0.79, supports_streaming=True, supports_structured_json=True, max_output_tokens=8192, timeout_sec=25.0, lifecycle="stable", model_category="fallback"))
-            self._register(ModelSpec("qwen/qwen3.8-27b", "groq", "Qwen 3.8 27B", CostCategory.FREE_TIER, 0.20, 0.60, supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=20.0, lifecycle="stable", model_category="fallback"))
-            self._register(ModelSpec("openai/gpt-oss-20b", "groq", "GPT OSS 20B", CostCategory.FREE_TIER, 0.20, 0.40, supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=20.0, lifecycle="stable", model_category="fast"))
-            self._register(ModelSpec("openai/gpt-oss-120b", "groq", "GPT OSS 120B", CostCategory.FREE_TIER, 0.60, 1.20, supports_streaming=True, supports_structured_json=True, max_output_tokens=8192, timeout_sec=25.0, lifecycle="stable", model_category="fallback"))
+            # Groq models - Active verified models
+            self._register(ModelSpec("openai/gpt-oss-20b", "groq", "GPT OSS 20B", CostCategory.FREE_TIER, 0.20, 0.40, supports_streaming=True, supports_structured_json=True, supports_tool_calling=True, max_context_tokens=131072, max_output_tokens=4096, timeout_sec=20.0, lifecycle="stable", availability_status="available", documentation_verified=True, model_category="fast"))
+            self._register(ModelSpec("openai/gpt-oss-120b", "groq", "GPT OSS 120B", CostCategory.FREE_TIER, 0.60, 1.20, supports_streaming=True, supports_structured_json=True, supports_tool_calling=True, max_context_tokens=131072, max_output_tokens=8192, timeout_sec=25.0, lifecycle="stable", availability_status="available", documentation_verified=True, model_category="fallback"))
+            self._register(ModelSpec("qwen/qwen3.8-27b", "groq", "Qwen 3.8 27B", CostCategory.FREE_TIER, 0.20, 0.60, supports_streaming=True, supports_structured_json=True, supports_tool_calling=True, supports_vision=True, max_context_tokens=131072, max_output_tokens=4096, timeout_sec=20.0, lifecycle="stable", availability_status="available", documentation_verified=True, model_category="fallback"))
+
+            # Groq models - Retired / Deprecated upstream by Groq on August 16, 2026 (quarantined to avoid 404s)
+            self._register(ModelSpec("llama-3.1-8b-instant", "groq", "Llama 3.1 8B Instant (Deprecated)", CostCategory.FREE_TIER, 0.05, 0.08, supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=15.0, lifecycle="deprecated", availability_status="unavailable", model_category="deprecated"))
+            self._register(ModelSpec("llama-3.3-70b-versatile", "groq", "Llama 3.3 70B Versatile (Deprecated)", CostCategory.FREE_TIER, 0.59, 0.79, supports_streaming=True, supports_structured_json=True, max_output_tokens=8192, timeout_sec=25.0, lifecycle="deprecated", availability_status="unavailable", model_category="deprecated"))
 
             # Gemini models (Multimodal, Thinking & Reasoning Support)
             self._register(ModelSpec(
@@ -411,6 +413,25 @@ class ProviderRegistry:
 
         return True
 
+    def mark_model_unavailable(self, model_id: str, reason: str = "", cooldown_sec: float = 3600.0) -> None:
+        """Quarantine/mark a model as unavailable with cooldown to avoid repeated 404s/errors."""
+        with self._lock:
+            spec = self.get_model_spec(model_id)
+            if spec:
+                spec.availability_status = "unavailable"
+                spec.last_verified_ts = time.time() + cooldown_sec
+                logger.warning("Marked model %s as unavailable (cooldown=%ss, reason=%s)", model_id, cooldown_sec, reason or "unspecified")
+
+    def mark_model_available(self, model_id: str) -> None:
+        """Restore a model to available after verified successful validation."""
+        with self._lock:
+            spec = self.get_model_spec(model_id)
+            if spec:
+                spec.availability_status = "available"
+                spec.last_verified_ts = time.time()
+                spec.last_successful_validation = time.time()
+                logger.info("Marked model %s as available", model_id)
+
     def get_model_thinking_level(self, model_id: str, complexity: Optional[Any] = None) -> Optional[str]:
         """Resolves optimal thinking level (low, medium, high) based on model capabilities and task complexity."""
         with self._lock:
@@ -568,7 +589,18 @@ class ProviderRegistry:
                 )
                 if resp.status_code == 200:
                     data = resp.json()
-                    discovered = [item["id"] for item in data.get("data", []) if "id" in item]
+                    raw_ids = [item["id"] for item in data.get("data", []) if "id" in item]
+                    # Filter out non-chat models (audio transcription, TTS, prompt guard)
+                    discovered = [
+                        m for m in raw_ids
+                        if not any(skip in m.lower() for skip in ("whisper", "canopylabs", "prompt-guard", "guard"))
+                    ]
+                    # Mark discovered chat models as available in registry
+                    for m in discovered:
+                        spec = self.get_model_spec(m)
+                        if spec:
+                            spec.availability_status = "available"
+                            spec.last_successful_validation = now
 
             elif p == "sambanova":
                 resp = requests.get(

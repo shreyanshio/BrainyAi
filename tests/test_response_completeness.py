@@ -65,7 +65,7 @@ class TestResponseCompletenessSuite(unittest.TestCase):
             task=TaskType.DETAILED_EXPLANATION,
             depth=ResponseDepth.DEEP,
             provider_name="groq",
-            model_id="llama-3.3-70b-versatile"
+            model_id="openai/gpt-oss-120b"
         )
         self.assertGreaterEqual(budget_groq, 4096)
 
@@ -287,13 +287,13 @@ class TestResponseCompletenessSuite(unittest.TestCase):
 
         # Context headroom check (near max context window limit)
         from ai_routing.registry import registry
-        spec = registry.get_model_spec("llama-3.3-70b-versatile")
+        spec = registry.get_model_spec("openai/gpt-oss-120b")
         max_ctx = spec.max_context_tokens if spec and spec.max_context_tokens else 32768
         headroom_budget = OutputBudgetManager.resolve_budget(
             task=TaskType.DETAILED_EXPLANATION,
             depth=ResponseDepth.BALANCED,
             provider_name="groq",
-            model_id="llama-3.3-70b-versatile",
+            model_id="openai/gpt-oss-120b",
             estimated_input_tokens=max_ctx - 1500
         )
         self.assertLessEqual(headroom_budget, 2000)

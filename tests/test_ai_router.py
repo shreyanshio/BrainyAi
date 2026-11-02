@@ -72,7 +72,7 @@ class TestAITelemetry(unittest.TestCase):
     def test_record_and_summary(self):
         self.telemetry.record_call(
             provider="groq",
-            model="llama-3.3-70b-versatile",
+            model="openai/gpt-oss-120b",
             task="CODING",
             latency_ms=120.5,
             success=True,
@@ -81,7 +81,7 @@ class TestAITelemetry(unittest.TestCase):
         )
         self.telemetry.record_call(
             provider="groq",
-            model="llama-3.3-70b-versatile",
+            model="openai/gpt-oss-120b",
             task="CODING",
             latency_ms=180.0,
             success=False,

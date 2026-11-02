@@ -41,13 +41,13 @@ class TestRoutingMapping(unittest.TestCase):
         self.assertEqual(educational_decision.primary_provider, "gemini")
         self.assertEqual(educational_decision.primary_model, "gemini-3.8-flash")
         self.assertEqual(educational_decision.fallback_provider, "groq")
-        self.assertEqual(educational_decision.fallback_model, "llama-3.3-70b-versatile")
+        self.assertEqual(educational_decision.fallback_model, "openai/gpt-oss-120b")
 
         normal_decision = workflow_router.route(content="Hello, who are you?")
         self.assertEqual(normal_decision.primary_provider, "gemini")
         self.assertEqual(normal_decision.primary_model, "gemini-3.5-flash-lite")
         self.assertEqual(normal_decision.fallback_provider, "groq")
-        self.assertEqual(normal_decision.fallback_model, "llama-3.1-8b-instant")
+        self.assertEqual(normal_decision.fallback_model, "openai/gpt-oss-20b")
 
     def test_pdf_studio_grounded_workflows(self):
         """Verifies document context routes strictly to PDF Studio with search forbidden."""

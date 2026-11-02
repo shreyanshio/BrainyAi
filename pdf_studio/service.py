@@ -22,6 +22,7 @@ from ai_routing.prompts import prompt_registry, Platform
 from pdf_studio.extractor import extract_pdf_pages, PageExtraction
 from pdf_studio.chunker import chunk_document_pages, sample_pages_evenly
 from pdf_studio.notes_engine import generate_local_notes
+from pdf_studio.google_drive import drive_storage, GoogleDriveCompliancePause, GoogleDriveError
 
 logger = logging.getLogger("pdf_service")
 
@@ -170,11 +171,33 @@ class PDFStudyService:
         from datetime import timedelta
         expires_at = (now + timedelta(days=5)).isoformat()
 
+        import hashlib
+        checksum = hashlib.sha256(file_bytes).hexdigest()
+
         # 1. Local disk persistence
         local_path = self._persist_file_locally(user_id, doc_id, file_bytes)
 
-        # 2. Supabase Storage persistence (private study-pdfs bucket)
+        # 2. Centralized Google Drive persistence (Owner account, isolated user folder)
+        drive_file_id = None
+        drive_folder_id = None
+        upload_status = "local_only"
+        try:
+            cfg = drive_storage.get_owner_config()
+            if cfg and cfg.get("is_active") and drive_storage.is_compliance_cleared():
+                drive_res = drive_storage.upload_pdf(user_id, clean_name, file_bytes, doc_id)
+                drive_file_id = drive_res.get("drive_file_id")
+                drive_folder_id = drive_res.get("drive_folder_id")
+                upload_status = "drive_synced"
+                logger.info("PDF stored in Centralized Google Drive doc_id=%s file_id=%s", doc_id, drive_file_id)
+        except GoogleDriveCompliancePause as cpe:
+            logger.info("Google Drive upload paused by compliance checkpoint: %s", cpe)
+        except Exception as gde:
+            logger.warning("Google Drive storage failed (falling back to Supabase/local): %s", gde)
+
+        # 3. Supabase Storage persistence (private study-pdfs bucket) fallback
         storage_path = self._upload_to_supabase_storage(user_id, doc_id, file_bytes) or local_path
+        if not drive_file_id and storage_path != local_path:
+            upload_status = "supabase_stored"
 
         # 3. Local text extraction using PyMuPDF (zero AI calls)
         try:
@@ -210,12 +233,17 @@ class PDFStudyService:
         doc_record = {
             "id": doc_id,
             "user_id": user_id,
+            "owner_user_id": user_id,
+            "drive_file_id": drive_file_id,
+            "drive_folder_id": drive_folder_id,
+            "checksum": checksum,
             "filename": clean_name,
             "file_size": size,
             "page_count": total_pages,
-            "storage_bucket": "study-pdfs",
+            "storage_bucket": "google-drive" if drive_file_id else "study-pdfs",
             "storage_path": storage_path,
             "mime_type": "application/pdf",
+            "upload_status": upload_status,
             "processing_status": "ready",
             "status": "ready",
             "error_message": None,
@@ -445,9 +473,54 @@ class PDFStudyService:
         logger.info("5-Day Retention Cleanup completed: %d documents expired.", expired_count)
         return {"expired_count": expired_count, "document_ids": cleaned_docs, "cleaned_at": now_iso}
 
+    def stream_document_pdf(self, doc_id: str, user_id: Any):
+        """
+        Retrieves PDF file bytes generator for streaming download/preview.
+        Strictly verifies ownership: user_id must match doc['user_id'].
+        """
+        doc = self.get_document(doc_id, user_id)
+        drive_file_id = doc.get("drive_file_id")
+        if drive_file_id:
+            try:
+                return drive_storage.stream_pdf(user_id, doc_id, drive_file_id), doc
+            except Exception as gde:
+                logger.warning("Streaming from Google Drive failed for %s, falling back to local: %s", doc_id, gde)
+
+        # Fallback to local file
+        local_path = os.path.join(DATA_DIR, str(user_id), f"{doc_id}.pdf")
+        if os.path.exists(local_path):
+            def _local_stream():
+                with open(local_path, "rb") as f:
+                    while chunk := f.read(65536):
+                        yield chunk
+            return _local_stream(), doc
+
+        # Fallback to Supabase storage
+        storage_path = doc.get("storage_path")
+        if storage_path and not os.path.isabs(storage_path) and self._supabase_url and self._supabase_key:
+            url = f"{self._supabase_url}/storage/v1/object/study-pdfs/{storage_path}"
+            headers = self._sb_storage_headers("application/pdf")
+            resp = requests.get(url, headers=headers, stream=True, timeout=20)
+            if resp.status_code == 200:
+                def _sb_stream():
+                    for chunk in resp.iter_content(chunk_size=65536):
+                        if chunk:
+                            yield chunk
+                return _sb_stream(), doc
+
+        raise PDFNotFoundError("Source PDF file content is no longer available.")
+
     def delete_document(self, doc_id: str, user_id: Any) -> bool:
         """Securely deletes document, files from Supabase Storage and all derived records."""
         doc = self.get_document(doc_id, user_id)
+
+        # 0. Delete from Centralized Google Drive if present
+        drive_file_id = doc.get("drive_file_id")
+        if drive_file_id:
+            try:
+                drive_storage.delete_pdf(user_id, doc_id, drive_file_id)
+            except Exception as gde:
+                logger.warning("Could not delete file %s from Google Drive: %s", drive_file_id, gde)
 
         # 1. Delete from Supabase Storage
         storage_path = doc.get("storage_path")

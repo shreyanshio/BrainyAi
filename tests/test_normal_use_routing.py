@@ -61,7 +61,7 @@ class NormalUseRoutingTests(unittest.TestCase):
         router = AIRouter()
         provider = MagicMock(spec=BaseProvider)
         provider.generate.return_value = ProviderResult(
-            text="Hello!", model="llama-3.1-8b-instant", provider="groq", latency_ms=10, tokens_in=10, tokens_out=2
+            text="Hello!", model="openai/gpt-oss-20b", provider="groq", latency_ms=10, tokens_in=10, tokens_out=2
         )
         router._providers = {"groq": provider}
         history = [
@@ -70,7 +70,7 @@ class NormalUseRoutingTests(unittest.TestCase):
             {"role": "user", "content": "How are you?"},
         ]
         with patch("ai_routing.router.global_telemetry") as telemetry:
-            result = router.generate(messages=history, candidate_chain=[("groq", "llama-3.1-8b-instant")])
+            result = router.generate(messages=history, candidate_chain=[("groq", "openai/gpt-oss-20b")])
         self.assertEqual(result.text, "Hello!")
         kwargs = provider.generate.call_args.kwargs
         self.assertEqual(kwargs["messages"], history)

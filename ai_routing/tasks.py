@@ -132,7 +132,7 @@ _STATISTICS_KEYWORDS = re.compile(
 
 # General Math (English, Hindi, Gujarati, Hinglish)
 _MATH_KEYWORDS = re.compile(
-    r"(\b(math|maths|mathematics|calculate|evaluate|solve|percentage|percent|fraction|exponent|powers?|root|sqrt|logarithm|trigonometry|geometry|matrix|matrices|determinant|vector|eigenvalue|hisab|ganit|jod|ghatav|guna|bhag|ganatri|ketla thay|pratishat)\b|[\∫\∑\∏\√\∂\±\≤\≥\≠\≈\∞\∈\∉\⊂\⊆\∪\∩]|(\d+\s*[\+\-\*\/\^]\s*\d+)|(\d+\s*[×÷−]\s*\d+))",
+    r"(\b(math|maths|mathematics|calculate|evaluate|solve|percentage|percent|fraction|exponent|powers?|root|sqrt|logarithm|trigonometry|geometry|matrix|matrices|determinant|vector|eigenvalue|hisab|ganit|jod|ghatav|guna|bhag|ganatri|ketla thay|pratishat|sin|cos|tan|cot|sec|cosec|csc|arcsin|arccos|arctan|sine|cosine|tangent)\b|(\b(sin|cos|tan|cot|sec|csc)\s*\d+)|[\∫\∑\∏\√\∂\±\≤\≥\≠\≈\∞\∈\∉\⊂\⊆\∪\∩]|(\d+\s*[\+\-\*\/\^]\s*\d+)|(\d+\s*[×÷−]\s*\d+))",
     re.IGNORECASE
 )
 

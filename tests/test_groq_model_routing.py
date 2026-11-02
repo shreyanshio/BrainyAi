@@ -12,12 +12,12 @@ class GroqModelRoutingTests(unittest.TestCase):
         client = Mock()
         client.chat.completions.create.return_value = [chunk]
         with patch.object(study_bot, "GROQ_API_KEYS", ["fake-key"]), \
-             patch.object(study_bot, "GROQ_FAST_MODEL", "llama-3.1-8b-instant"), \
+             patch.object(study_bot, "GROQ_FAST_MODEL", "openai/gpt-oss-20b"), \
              patch.object(study_bot, "_get_groq_client", return_value=client):
             self.assertEqual(list(study_bot._stream_groq([], "system", 256, "brainy-fast")), ["fast"])
 
         kwargs = client.chat.completions.create.call_args.kwargs
-        self.assertEqual(kwargs["model"], "llama-3.1-8b-instant")
+        self.assertEqual(kwargs["model"], "openai/gpt-oss-20b")
         self.assertEqual(kwargs.get("max_tokens") or kwargs.get("max_completion_tokens"), 256)
         self.assertNotIn("reasoning_effort", kwargs)
 
@@ -26,14 +26,14 @@ class GroqModelRoutingTests(unittest.TestCase):
         client = Mock()
         client.chat.completions.create.return_value = completion
         with patch.object(study_bot, "GROQ_API_KEYS", ["fake-key"]), \
-             patch.object(study_bot, "GROQ_BALANCED_MODEL", "llama-3.3-70b-versatile"), \
+             patch.object(study_bot, "GROQ_BALANCED_MODEL", "openai/gpt-oss-120b"), \
              patch.object(study_bot, "_get_groq_client", return_value=client):
             text, truncated = study_bot._call_groq([], "system", 512)
 
         self.assertEqual(text, "balanced")
         self.assertFalse(truncated)
         kwargs = client.chat.completions.create.call_args.kwargs
-        self.assertEqual(kwargs["model"], "llama-3.3-70b-versatile")
+        self.assertEqual(kwargs["model"], "openai/gpt-oss-120b")
         self.assertEqual(kwargs.get("max_tokens") or kwargs.get("max_completion_tokens"), 512)
         self.assertNotIn("reasoning_effort", kwargs)
 

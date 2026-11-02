@@ -469,7 +469,7 @@ class TestPDFStudyServicePersistenceAndSecurity(unittest.TestCase):
     def test_document_grounded_qa(self, mock_generate):
         mock_generate.return_value = ProviderResult(
             text="The derivative measures instantaneous slope [Page 1].",
-            model="llama-3.3-70b-versatile",
+            model="openai/gpt-oss-120b",
             provider="groq",
             latency_ms=80.0,
             tokens_out=40
@@ -554,7 +554,7 @@ class TestPDFStudyServicePersistenceAndSecurity(unittest.TestCase):
         """Verifies that conversational document chat strictly caps context window to at most 10 messages."""
         mock_generate.return_value = ProviderResult(
             text="The derivative at x=2 is 4 [Page 1].",
-            model="llama-3.3-70b-versatile",
+            model="openai/gpt-oss-120b",
             provider="groq",
             latency_ms=90.0,
             tokens_out=25

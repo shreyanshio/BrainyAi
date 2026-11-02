@@ -207,7 +207,7 @@ class TestAdvancedAIOrchestration(unittest.TestCase):
         mock_groq = MagicMock()
         mock_groq.generate.return_value = MagicMock(
             text="Recovered answer from Groq",
-            model="llama-3.3-70b-versatile",
+            model="openai/gpt-oss-120b",
             finish_reason="stop",
             input_tokens=100,
             output_tokens=50
@@ -216,7 +216,7 @@ class TestAdvancedAIOrchestration(unittest.TestCase):
         with patch.object(router, "get_provider", side_effect=lambda name: mock_gemini if name == "gemini" else mock_groq):
             res = router.generate(
                 prompt="Explain Dijkstra algorithm",
-                candidate_chain=[("gemini", "gemini-3.8-flash"), ("groq", "llama-3.3-70b-versatile")]
+                candidate_chain=[("gemini", "gemini-3.8-flash"), ("groq", "openai/gpt-oss-120b")]
             )
             self.assertEqual(res.text, "Recovered answer from Groq")
             self.assertTrue(res.fallback_used)
@@ -239,7 +239,7 @@ class TestAdvancedAIOrchestration(unittest.TestCase):
         with patch.object(router, "get_provider", side_effect=lambda name: mock_groq if name == "groq" else mock_cerebras):
             res = router.generate(
                 prompt="Hi!",
-                candidate_chain=[("groq", "llama-3.1-8b-instant"), ("cerebras", "llama3.1-8b")]
+                candidate_chain=[("groq", "openai/gpt-oss-20b"), ("cerebras", "llama3.1-8b")]
             )
             self.assertEqual(res.text, "Recovered from Cerebras")
             self.assertTrue(res.fallback_used)
@@ -261,7 +261,7 @@ class TestAdvancedAIOrchestration(unittest.TestCase):
         with patch.object(router, "get_provider", side_effect=lambda name: mock_openrouter if name == "openrouter" else mock_fail):
             res = router.generate(
                 prompt="Explain photosynthesis",
-                candidate_chain=[("gemini", "gemini-3.8-flash"), ("groq", "llama-3.3-70b-versatile"), ("openrouter", "openrouter/free")]
+                candidate_chain=[("gemini", "gemini-3.8-flash"), ("groq", "openai/gpt-oss-120b"), ("openrouter", "openrouter/free")]
             )
             self.assertEqual(res.text, "Answer from OpenRouter free")
             self.assertEqual(res.provider, "openrouter")
@@ -308,7 +308,7 @@ class TestAdvancedAIOrchestration(unittest.TestCase):
         self.assertIsNotNone(spec)
         self.assertLessEqual(spec.timeout_sec, 45.0)
 
-        groq_spec = registry.get_model_spec("llama-3.1-8b-instant")
+        groq_spec = registry.get_model_spec("openai/gpt-oss-20b")
         self.assertIsNotNone(groq_spec)
         self.assertLessEqual(groq_spec.timeout_sec, 20.0)
 

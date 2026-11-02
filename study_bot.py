@@ -310,7 +310,7 @@ def _collect_keys(prefix: str, count: int = 15) -> list:
 
 # ── API Keys (supports singular and multi-key KEY_1..N) ──
 GROQ_API_KEYS       = _collect_keys("GROQ_API_KEY", 15)
-GROQ_FAST_MODEL = (os.getenv("GROQ_MODEL_FAST") or "qwen/qwen3.8-27b").strip()
+GROQ_FAST_MODEL = (os.getenv("GROQ_MODEL_FAST") or "openai/gpt-oss-20b").strip()
 GROQ_BALANCED_MODEL = (os.getenv("GROQ_MODEL_BALANCED") or "openai/gpt-oss-120b").strip()
 GEMINI_API_KEYS     = _collect_keys("GEMINI_API_KEY", 15)
 TAVILY_API_KEYS     = _collect_keys("TAVILY_API_KEY", 15)
@@ -1268,10 +1268,9 @@ def _call_groq(messages, system_prompt, max_tokens):
         raise Exception("NO_KEYS: groq")
     groq_models = [
         GROQ_BALANCED_MODEL,
-        "qwen/qwen3.8-27b",
         "openai/gpt-oss-120b",
         "openai/gpt-oss-20b",
-        "llama-3.1-8b-instant",
+        "qwen/qwen3.8-27b",
     ]
     groq_models = list(dict.fromkeys(groq_models))
 
@@ -1321,11 +1320,9 @@ def _stream_groq(messages, system_prompt, max_tokens, model_id=None):
     # Groq active models fallback chain in case requested model is unavailable on the account
     groq_models = [
         requested_model,
-        "qwen/qwen3.8-27b",
         "openai/gpt-oss-120b",
         "openai/gpt-oss-20b",
-        "llama-3.1-8b-instant",
-        "llama-3.3-70b-versatile",
+        "qwen/qwen3.8-27b",
     ]
     # De-duplicate while preserving order
     groq_models = list(dict.fromkeys(groq_models))

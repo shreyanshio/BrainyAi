@@ -4109,6 +4109,188 @@ def get_pdf_study_progress(doc_id):
         return jsonify({"error": "Failed to fetch study progress."}), 500
 
 
+
+# ── CENTRALIZED GOOGLE DRIVE INTEGRATION (OWNER-ONLY OAUTH & STORAGE) ──
+from pdf_studio.google_drive import drive_storage, cipher, audit_drive_event
+
+# Connect drive_storage with Supabase requester
+drive_storage.set_supabase_requester(_sb_request)
+
+
+@app.route("/api/integrations/google-drive/owner/connect", methods=["GET"])
+@login_required
+def drive_owner_connect():
+    """
+    Owner-only endpoint to initiate Google Drive OAuth authorization.
+    Regular users are strictly forbidden.
+    """
+    user_id = session.get("user_id")
+    if not drive_storage.is_owner_user(user_id, is_admin_session()):
+        return jsonify({
+            "error": "Forbidden: Only the configured Brainy project owner can authorize centralized Google Drive storage.",
+            "code": "OWNER_ONLY"
+        }), 403
+
+    try:
+        auth_url = drive_storage.get_oauth_authorization_url(owner_user_id=user_id, prompt_consent=True)
+        if request.args.get('redirect') == '1' or 'text/html' in request.headers.get('Accept', ''):
+            return redirect(auth_url)
+        return jsonify({"auth_url": auth_url})
+    except Exception as e:
+        logger.error("Drive connect initialization error: %s", e)
+        return jsonify({"error": f"Failed to initialize Drive authorization: {str(e)}"}), 500
+
+
+@app.route("/api/integrations/google-drive/callback", methods=["GET"])
+def drive_oauth_callback():
+    """
+    OAuth 2.0 callback for owner Google Drive authorization.
+    Validates single-use state, exchanges authorization code, verifies owner identity,
+    and initializes root hierarchy without exposing tokens to frontend.
+    """
+    frontend_url = os.getenv("FRONTEND_URL", "https://brainyai.cenai.workers.dev").rstrip("/")
+    err = request.args.get("error", "").strip()
+    if err:
+        logger.warning("Google Drive OAuth error returned: %s", err)
+        return redirect(f"{frontend_url}/?drive_error={requests.utils.quote(err)}")
+
+    code = request.args.get("code", "").strip()
+    state = request.args.get("state", "").strip()
+    if not (code and state):
+        return redirect(f"{frontend_url}/?drive_error=missing_code_or_state")
+
+    # Validate state (single-use, HMAC verified, time-limited)
+    if not drive_storage.validate_oauth_state(state, expected_user_id=None):
+        logger.warning("Google Drive callback rejected: invalid or expired OAuth state")
+        return redirect(f"{frontend_url}/?drive_error=invalid_state")
+
+    try:
+        tokens = drive_storage.exchange_code_for_tokens(code)
+        access_token = tokens["access_token"]
+        refresh_token = tokens.get("refresh_token")
+        expires_in = int(tokens.get("expires_in", 3600))
+        now = time.time()
+        exp_dt = datetime.fromtimestamp(now + expires_in, timezone.utc)
+
+        # Existing config check for reconnection
+        existing_cfg = drive_storage.get_owner_config() or {}
+        if not refresh_token and existing_cfg.get("encrypted_refresh_token"):
+            enc_refresh = existing_cfg["encrypted_refresh_token"]
+        elif refresh_token:
+            enc_refresh = cipher.encrypt(refresh_token)
+        else:
+            return redirect(f"{frontend_url}/?drive_error=missing_refresh_token")
+
+        # Fetch owner account identity
+        owner_email = None
+        try:
+            u_resp = requests.get(
+                "https://www.googleapis.com/oauth2/v2/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=8
+            )
+            if u_resp.status_code == 200:
+                owner_email = u_resp.json().get("email")
+        except Exception as ue:
+            logger.warning("Could not fetch Google userinfo: %s", ue)
+
+        # Save config
+        config_data = {
+            "owner_user_id": existing_cfg.get("owner_user_id") or session.get("user_id"),
+            "owner_email": owner_email or existing_cfg.get("owner_email"),
+            "encrypted_refresh_token": enc_refresh,
+            "encrypted_access_token": cipher.encrypt(access_token),
+            "access_token_expires_at": exp_dt.isoformat(),
+            "is_active": True,
+            "compliance_cleared": drive_storage.is_compliance_cleared(),
+            "last_health_check_at": datetime.now(timezone.utc).isoformat(),
+            "last_health_status": "authorized"
+        }
+        drive_storage.save_owner_config(config_data)
+
+        # Initialize Brainy/Users/ directory hierarchy in Drive
+        try:
+            drive_storage.initialize_root_hierarchy()
+        except Exception as fe:
+            logger.error("Failed to initialize Drive root hierarchy: %s", fe)
+
+        audit_drive_event("OWNER_CONNECTED", session.get("user_id"), {
+            "owner_email": owner_email,
+            "compliance_cleared": drive_storage.is_compliance_cleared()
+        })
+
+        return redirect(f"{frontend_url}/?drive_connected=true")
+    except Exception as e:
+        logger.error("Drive OAuth code exchange failed: %s", e)
+        return redirect(f"{frontend_url}/?drive_error={requests.utils.quote(str(e))}")
+
+
+@app.route("/api/integrations/google-drive/owner/status", methods=["GET"])
+@login_required
+def drive_owner_status():
+    """
+    Owner-only endpoint to check status and health of the centralized Drive storage.
+    """
+    user_id = session.get("user_id")
+    if not drive_storage.is_owner_user(user_id, is_admin_session()):
+        return jsonify({
+            "error": "Forbidden: Only the configured Brainy project owner can inspect centralized Drive status.",
+            "code": "OWNER_ONLY"
+        }), 403
+
+    status = drive_storage.get_status()
+    return jsonify(status)
+
+
+@app.route("/api/integrations/google-drive/owner/disconnect", methods=["POST"])
+@login_required
+def drive_owner_disconnect():
+    """
+    Owner-only endpoint to disconnect Google Drive. Revokes credentials without deleting stored user files.
+    """
+    user_id = session.get("user_id")
+    if not drive_storage.is_owner_user(user_id, is_admin_session()):
+        return jsonify({
+            "error": "Forbidden: Only the configured Brainy project owner can disconnect centralized Drive.",
+            "code": "OWNER_ONLY"
+        }), 403
+
+    success = drive_storage.disconnect(owner_user_id=user_id)
+    return jsonify({
+        "success": success,
+        "message": "Google Drive integration disconnected successfully. Stored files remain safely in Drive."
+    })
+
+
+@app.route("/api/pdf/documents/<doc_id>/download", methods=["GET"])
+@login_required
+def download_pdf_document(doc_id):
+    """
+    Streams private PDF bytes to the authenticated document owner.
+    Enforces strict ownership: User A cannot download User B's PDF.
+    """
+    user_id = session["user_id"]
+    try:
+        from pdf_studio.service import pdf_service, PDFValidationError, PDFSecurityError
+        stream_gen, doc = pdf_service.stream_document_pdf(doc_id=doc_id, user_id=user_id)
+        filename = doc.get("filename", f"{doc_id}.pdf")
+        clean_filename = re.sub(r'[\r\n",;]', "_", filename)
+
+        response = Response(stream_with_context(stream_gen), mimetype="application/pdf")
+        response.headers["Content-Disposition"] = f'inline; filename="{clean_filename}"'
+        response.headers["Cache-Control"] = "private, no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+    except PDFValidationError as ve:
+        return jsonify({"error": str(ve)}), 404
+    except PDFSecurityError as se:
+        return jsonify({"error": str(se)}), 403
+    except Exception as e:
+        logger.error("Download document error doc_id=%s: %s", doc_id, e)
+        return jsonify({"error": "Failed to stream document."}), 500
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)

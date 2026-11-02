@@ -203,7 +203,7 @@ class TestModelEligibilityAndZeroBudget(unittest.TestCase):
         self.assertIn("gemini-3.8-flash", model_ids)
         self.assertIn("gemini-3.6-flash", model_ids)
         self.assertIn("gemini-3.5-flash-lite", model_ids)
-        self.assertIn("llama-3.1-8b-instant", model_ids)
+        self.assertIn("openai/gpt-oss-20b", model_ids)
 
         g38 = model_ids["gemini-3.8-flash"]
         self.assertEqual(g38["lifecycle"], "stable")
@@ -288,12 +288,12 @@ class TestAIRouterEndToEnd(unittest.TestCase):
         with patch.object(router._providers["groq"], "generate") as mock_groq_gen:
             mock_groq_gen.return_value = ProviderResult(
                 text="Hello! How can I help you today?",
-                model="llama-3.1-8b-instant",
+                model="openai/gpt-oss-20b",
                 provider="groq"
             )
             res = router.generate("Hey there! Good morning")
             self.assertEqual(res.provider, "groq")
-            self.assertEqual(res.model, "llama-3.1-8b-instant")
+            self.assertEqual(res.model, "openai/gpt-oss-20b")
             self.assertTrue(mock_groq_gen.called)
 
     def test_router_generates_via_gemini_for_coding(self):

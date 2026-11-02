@@ -10,7 +10,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -21,7 +21,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -32,7 +32,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: true
 
@@ -43,7 +43,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -54,7 +54,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: true
 
@@ -65,7 +65,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: true
 
@@ -76,7 +76,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -87,7 +87,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.5-flash-lite
     fallback_provider: groq
-    fallback_model: llama-3.1-8b-instant
+    fallback_model: openai/gpt-oss-20b
     search_required: false
     is_fast_path: true
 
@@ -98,7 +98,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -109,7 +109,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -120,7 +120,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -131,7 +131,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -143,7 +143,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -154,7 +154,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -165,7 +165,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -176,7 +176,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -187,7 +187,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -198,7 +198,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.5-flash-lite
     fallback_provider: groq
-    fallback_model: llama-3.1-8b-instant
+    fallback_model: openai/gpt-oss-20b
     search_required: false
     is_fast_path: true
 
@@ -209,7 +209,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.5-flash-lite
     fallback_provider: groq
-    fallback_model: llama-3.1-8b-instant
+    fallback_model: openai/gpt-oss-20b
     search_required: false
     is_fast_path: true
 
@@ -221,7 +221,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: true
 
@@ -232,7 +232,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: true
 
@@ -243,7 +243,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: true
 
@@ -254,7 +254,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: true
 
@@ -265,7 +265,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: true
 
@@ -276,7 +276,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: true
 
@@ -287,7 +287,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: true
 
@@ -298,7 +298,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -310,7 +310,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: true
     is_fast_path: false
 
@@ -321,7 +321,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: true
     is_fast_path: false
 
@@ -332,7 +332,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: true
     is_fast_path: false
 
@@ -343,7 +343,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: true
     is_fast_path: false
 
@@ -355,7 +355,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -366,7 +366,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -377,7 +377,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -388,7 +388,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -399,7 +399,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -410,7 +410,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -422,7 +422,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.5-flash-lite
     fallback_provider: groq
-    fallback_model: llama-3.1-8b-instant
+    fallback_model: openai/gpt-oss-20b
     search_required: false
     is_fast_path: true
 
@@ -433,7 +433,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -444,7 +444,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.5-flash-lite
     fallback_provider: groq
-    fallback_model: llama-3.1-8b-instant
+    fallback_model: openai/gpt-oss-20b
     search_required: false
     is_fast_path: true
 
@@ -455,7 +455,7 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false
 
@@ -466,6 +466,6 @@ mappings:
     primary_provider: gemini
     primary_model: gemini-3.8-flash
     fallback_provider: groq
-    fallback_model: llama-3.3-70b-versatile
+    fallback_model: openai/gpt-oss-120b
     search_required: false
     is_fast_path: false

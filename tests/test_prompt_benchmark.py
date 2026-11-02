@@ -267,9 +267,9 @@ class TestContextBudgetAndTokenAllocation(unittest.TestCase):
     def test_token_budget_for_deep_tasks(self):
         budget_mgr = OutputBudgetManager()
         # Coding and deep reasoning should receive large completion budgets
-        coding_budget = budget_mgr.resolve_budget(TaskType.CODING, ResponseDepth.DEEP, provider_name="groq", model_id="llama-3.3-70b-versatile")
-        math_budget = budget_mgr.resolve_budget(TaskType.MATH_AND_LOGIC, ResponseDepth.DEEP, provider_name="groq", model_id="llama-3.3-70b-versatile")
-        quick_budget = budget_mgr.resolve_budget(TaskType.QUICK_CHAT, ResponseDepth.FAST, provider_name="groq", model_id="llama-3.3-70b-versatile")
+        coding_budget = budget_mgr.resolve_budget(TaskType.CODING, ResponseDepth.DEEP, provider_name="groq", model_id="openai/gpt-oss-120b")
+        math_budget = budget_mgr.resolve_budget(TaskType.MATH_AND_LOGIC, ResponseDepth.DEEP, provider_name="groq", model_id="openai/gpt-oss-120b")
+        quick_budget = budget_mgr.resolve_budget(TaskType.QUICK_CHAT, ResponseDepth.FAST, provider_name="groq", model_id="openai/gpt-oss-120b")
 
         self.assertGreaterEqual(coding_budget, 4000)
         self.assertGreaterEqual(math_budget, 4000)
