@@ -53,32 +53,54 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
 export function normalizeMathDelimiters(content: string): string {
   if (!content) return ''
 
-  let s = content
-
-  // 1. Standard LaTeX display delimiters: \[ ... \] -> $$\n...\n$$
-  s = s.replace(/\\\[([\s\S]*?)\\\]/g, (_match, inner) => `\n\n$$\n${inner.trim()}\n$$\n\n`)
-
-  // 2. Standard LaTeX inline delimiters: \( ... \) -> $ ... $
-  s = s.replace(/\\\(([\s\S]*?)\\\)/g, (_match, inner) => `$${inner.trim()}$`)
-
-  // 3. Isolated bracket display math: [ ... ] containing LaTeX commands (e.g. \sin, \frac)
-  // Lookahead (?![	 ]*\() checks only horizontal whitespace on the same line to avoid markdown links [text](url),
-  // without erroneously rejecting brackets followed by a newline and '(' in the next paragraph.
-  s = s.replace(/\[\s*((?:[^\[\]]|\[[^\[\]]*\])*?\\[a-zA-Z]+(?:[^\[\]]|\[[^\[\]]*\])*?)\s*\](?![ \t]*\()/g, (_match, inner) => {
-    return `\n\n$$\n${inner.trim()}\n$$\n\n`
+  // Preserve code blocks so code containing [ or ( or \ isn't touched
+  const codeBlocks: string[] = []
+  let s = content.replace(/(```[\s\S]*?```|`[^`\n]+`)/g, (match) => {
+    codeBlocks.push(match)
+    return `__CODE_BLOCK_${codeBlocks.length - 1}__`
   })
 
-  // 4. Standalone parenthesized LaTeX expressions: ( ... \command ... ) -> $ ... $
+  // 1. Standard LaTeX display delimiters: \[ ... \] -> \n\n$$\n...\n$$\n\n
+  // Also handles double-escaped \\\[ ... \\\]
+  s = s.replace(/\\{1,2}\[([\s\S]*?)\\{1,2}\]/g, (_match, inner) => `\n\n$$\n${inner.trim()}\n$$\n\n`)
+
+  // 2. Standard LaTeX inline delimiters: \( ... \) -> $ ... $
+  // Also handles double-escaped \\\( ... \\\)
+  s = s.replace(/\\{1,2}\(([\s\S]*?)\\{1,2}\)/g, (_match, inner) => `$${inner.trim()}$`)
+
+  // 3. Isolated bracket display math: [ ... ] containing LaTeX commands (e.g. \sin, \frac)
+  // Lookahead (?![ \t]*\() avoids matching markdown links [text](url).
+  // Ignore if it looks like an English sentence with multiple words.
+  s = s.replace(/(^|[^\\])\[\s*([^\n\[\]]*?\\[a-zA-Z]+[^\n\[\]]*?)\s*\](?![ \t]*\()/gm, (match, prefix, inner) => {
+    if (/[a-zA-Z]{3,}\s+[a-zA-Z]{3,}\s+[a-zA-Z]{3,}/.test(inner)) {
+      return match
+    }
+    return `${prefix}\n\n$$\n${inner.trim()}\n$$\n\n`
+  })
+
+  // 4. Standalone parenthesized LaTeX expressions without backslash: (\command ...) -> $ \command ... $
   // Example: (Equivalently, (\sin(\pi/6)=0.5).) -> (Equivalently, $\sin(\pi/6)=0.5$.)
-  s = s.replace(/\(([\s]*[^\(\)]*?\\[a-zA-Z]+(?:[^()]|\([^()]*\))*?)\)/g, (_match, inner) => {
+  // Must NOT match function calls (e.g. \sin(\pi/6)) or text already inside $ math mode.
+  s = s.replace(/(^|[\s,;:(])\(\s*(\\[a-zA-Z]+(?:[^()]|\([^()]*\))*?)\s*\)/g, (match, prefix, inner) => {
+    // If it contains natural language words with spaces like "Equivalently, ", skip
+    if (/[a-zA-Z]{4,}\s*,?\s+[a-zA-Z]{4,}/.test(inner)) {
+      return match
+    }
     let trimmed = inner.trim()
     let trail = ''
     if (/[.,;:]$/.test(trimmed)) {
       trail = trimmed.slice(-1)
       trimmed = trimmed.slice(0, -1).trim()
     }
-    return `$${trimmed}$${trail}`
+    return `${prefix}$${trimmed}$${trail}`
   })
+
+  // 5. Clean up any accidental quadruple or triple newlines around block math
+  // Use function callbacks to prevent Javascript's $$ replacement string collapsing into a single $!
+  s = s.replace(/\n{3,}\$\$/g, () => '\n\n$$').replace(/\$\$\n{3,}/g, () => '$$\n\n')
+
+  // Restore code blocks
+  s = s.replace(/__CODE_BLOCK_(\d+)__/g, (_match, index) => codeBlocks[Number(index)] || '')
 
   return s
 }

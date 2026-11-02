@@ -722,19 +722,36 @@ def format_for_web(text: str) -> str:
     text = re.sub(r'^[ \t]*[-*][ \t]+', '• ', text, flags=re.MULTILINE)
 
     # Normalize LaTeX delimiters for web markdown rendering
-    text = re.sub(r'\\\[([\s\S]*?)\\\]', lambda m: f"\n\n$$\n{m.group(1).strip()}\n$$\n\n", text)
-    text = re.sub(r'\\\(([\s\S]*?)\\\)', lambda m: f"${m.group(1).strip()}$", text)
-    text = re.sub(r'\[\s*((?:[^\[\]]|\[[^\[\]]*\])*?\\[a-zA-Z]+(?:[^\[\]]|\[[^\[\]]*\])*?)\s*\](?![ \t]*\()', lambda m: f"\n\n$$\n{m.group(1).strip()}\n$$\n\n", text)
+    # 1. Block math \[ ... \]
+    text = re.sub(r'\\{1,2}\[([\s\S]*?)\\{1,2}\]', lambda m: f"\n\n$$\n{m.group(1).strip()}\n$$\n\n", text)
+    # 2. Inline math \( ... \)
+    text = re.sub(r'\\{1,2}\(([\s\S]*?)\\{1,2}\)', lambda m: f"${m.group(1).strip()}$", text)
 
+    # 3. Isolated bracket display math [ ... ] with LaTeX commands
+    def _repl_bracket(m):
+        prefix = m.group(1)
+        inner = m.group(2)
+        if re.search(r'[a-zA-Z]{3,}\s+[a-zA-Z]{3,}\s+[a-zA-Z]{3,}', inner):
+            return m.group(0)
+        return f"{prefix}\n\n$$\n{inner.strip()}\n$$\n\n"
+    text = re.sub(r'(^|[^\\])\[\s*([^\n\[\]]*?\\[a-zA-Z]+[^\n\[\]]*?)\s*\](?![ \t]*\()', _repl_bracket, text, flags=re.MULTILINE)
+
+    # 4. Standalone parenthesized LaTeX expressions without backslash: (\command ...)
     def _repl_paren(m):
-        inner = m.group(1).strip()
+        prefix = m.group(1)
+        inner = m.group(2)
+        if re.search(r'[a-zA-Z]{4,}\s*,?\s+[a-zA-Z]{4,}', inner):
+            return m.group(0)
+        trimmed = inner.strip()
         trail = ''
-        if inner and inner[-1] in '.,;:':
-            trail = inner[-1]
+        if trimmed and trimmed[-1] in '.,;:':
+            trail = trimmed[-1]
             inner = inner[:-1].strip()
-        return f"${inner}${trail}"
+        return f"{prefix}${trimmed}${trail}"
 
-    text = re.sub(r'\(([\s]*[^\(\)]*?\\[a-zA-Z]+(?:[^()]|\([^()]*\))*?)\)', _repl_paren, text)
+    text = re.sub(r'(^|[\s,;:(])\(\s*(\\[a-zA-Z]+(?:[^()]|\([^()]*\))*?)\s*\)', _repl_paren, text)
+    text = re.sub(r'\n{3,}\$\$', '\n\n$$', text)
+    text = re.sub(r'\$\$\n{3,}', '$$\n\n', text)
     return text
 
 
