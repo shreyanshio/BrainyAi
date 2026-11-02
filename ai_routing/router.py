@@ -201,7 +201,13 @@ class AIRouter:
 
         # ── Fast-Path 1: Local Mathematics Engine ──
         enable_local_math = os.getenv("ENABLE_LOCAL_MATH_ENGINE", "true").lower() in ("true", "1", "yes")
-        if enable_local_math and resolved_task in MATH_TASKS and not json_output:
+        has_non_text_context = bool(document_context and any(
+            document_context.get(key)
+            for key in ("pdf_text", "document_pages", "multimodal_parts", "has_image", "doc_id", "document_id")
+        ))
+        # Solver capability is authoritative: a missed task label must not block
+        # supported calculations. Attached files/images remain on the multimodal path.
+        if enable_local_math and not json_output and not has_non_text_context:
             if can_solve_locally(prompt_text):
                 start_math = time.perf_counter()
                 math_res = solve_locally(prompt_text, platform=resolved_plat.value)
@@ -493,7 +499,12 @@ class AIRouter:
 
         # ── Fast-Path: Local Mathematics Engine for Streaming ──
         enable_local_math = os.getenv("ENABLE_LOCAL_MATH_ENGINE", "true").lower() in ("true", "1", "yes")
-        if enable_local_math and resolved_task in MATH_TASKS:
+        has_non_text_context = bool(document_context and any(
+            document_context.get(key)
+            for key in ("pdf_text", "document_pages", "multimodal_parts", "has_image", "doc_id", "document_id")
+        ))
+        # Keep streaming and non-streaming routing consistent; protect multimodal requests.
+        if enable_local_math and not has_non_text_context:
             if can_solve_locally(prompt_text):
                 start_math = time.perf_counter()
                 math_res = solve_locally(prompt_text, platform=resolved_plat.value)

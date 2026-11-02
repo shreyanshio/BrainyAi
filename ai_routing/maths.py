@@ -86,13 +86,35 @@ _DISALLOWED_TOKENS = re.compile(
     re.IGNORECASE
 )
 
+
+_SUPERSCRIPT_TRANSLATION = str.maketrans({
+    "⁰": "0", "¹": "1", "²": "2", "³": "3", "⁴": "4",
+    "⁵": "5", "⁶": "6", "⁷": "7", "⁸": "8", "⁹": "9",
+    "⁺": "+", "⁻": "-"
+})
+_SUPERSCRIPT_EXPONENT = re.compile(r"([A-Za-z0-9\)])([⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+)")
+
+
+def _normalize_math_symbols(raw: str) -> str:
+    """Normalize common Unicode math notation before safe parsing or routing."""
+    normalized = (
+        str(raw)
+        .replace("×", "*")
+        .replace("÷", "/")
+        .replace("−", "-")
+        .replace("–", "-")
+        .replace("—", "-")
+    )
+    return _SUPERSCRIPT_EXPONENT.sub(
+        lambda match: f"{match.group(1)}**{match.group(2).translate(_SUPERSCRIPT_TRANSLATION)}",
+        normalized
+    )
+
 def _sanitize_math_input(raw: str) -> str:
     """Sanitizes text to prevent injection of non-mathematical code and normalizes implicit multiplication."""
     if _DISALLOWED_TOKENS.search(raw):
         raise ValueError("Invalid mathematical input: forbidden keywords detected.")
-    s = raw.strip()
-    # Normalize operators
-    s = s.replace("×", "*").replace("÷", "/")
+    s = _normalize_math_symbols(raw).strip()
     s = s.replace("√", "sqrt")
     s = s.replace("π", "pi")
     s = s.replace("∞", "oo")
@@ -209,7 +231,7 @@ class MathematicsEngine:
 
     def can_solve(self, query: str) -> bool:
         """Determines whether a query can be solved locally by the engine."""
-        q = query.strip().lower()
+        q = _normalize_math_symbols(query).strip().lower()
         if not q or len(q) > 400:
             return False
 

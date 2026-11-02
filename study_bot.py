@@ -2156,35 +2156,31 @@ PROVIDER_MAX_TOKENS = {
 MAX_CONTINUATION_ROUNDS = 4  # safety cap so one runaway answer can't loop forever / burn quota
 
 def ai_call(messages, system_prompt=None, max_tokens=None, platform=None, user_id=None, document_context=None):
-    """
-    Intelligent routing with seamless continuation and fallback.
-    """
+    """Use the central router; only use legacy providers if the router package is unavailable."""
     try:
         from ai_routing.router import router
         from ai_routing.tasks import classify_task, ResponseDepth
         from ai_routing.prompts import Platform
+    except ImportError:
+        router = None
+
+    if router is not None:
         depth = ResponseDepth.BALANCED
         if max_tokens and max_tokens <= 1024:
             depth = ResponseDepth.FAST
         elif max_tokens and max_tokens >= 2500:
             depth = ResponseDepth.DEEP
-        task = classify_task(messages, system_prompt)
-        res = router.generate(
-            messages,
-            task=task,
-            depth=depth,
-            system_prompt=system_prompt,
-            max_tokens=max_tokens,
-            platform=platform or Platform.TELEGRAM_DM,
-            user_id=user_id,
-            document_context=document_context
+        task = classify_task(messages=messages, context=document_context)
+        result = router.generate(
+            messages, task=task, depth=depth, system_prompt=system_prompt,
+            max_tokens=max_tokens, platform=platform or Platform.TELEGRAM_DM,
+            user_id=user_id, document_context=document_context
         )
-        if res and res.text:
-            return res.text
-    except Exception:
-        pass
+        if result and result.text and result.text.strip():
+            return result.text
+        raise RuntimeError("The central AI router returned an empty response.")
 
-    """
+    
     No more fixed truncation. max_tokens is just a *starting* budget — if the model's
     answer genuinely needs more space, we detect the cut-off (finish_reason == length /
     MAX_TOKENS) and automatically ask it to continue from where it stopped, stitching the
@@ -2238,36 +2234,31 @@ def ai_call(messages, system_prompt=None, max_tokens=None, platform=None, user_i
     raise Exception(f"All providers failed: {last_err}")
 
 def ai_stream(messages, system_prompt=None, max_tokens=None, model_id=None, platform=None, user_id=None, document_context=None):
-    """
-    Real-time streaming token generator with zero mock delay and pre-output provider failover.
-    Yields string text chunks as they arrive from the upstream model.
-    If the active provider encounters an error before yielding the first chunk,
-    it automatically falls back to the next eligible provider without dropping the stream.
-    """
+    """Stream through the central router without replaying a partially emitted response."""
     prompt = system_prompt or SYSTEM_PROMPT
     try:
         from ai_routing.router import router
         from ai_routing.tasks import classify_task, ResponseDepth
         from ai_routing.prompts import Platform
+    except ImportError:
+        router = None
+
+    if router is not None:
         depth = ResponseDepth.BALANCED
         if max_tokens and max_tokens <= 1024:
             depth = ResponseDepth.FAST
         elif max_tokens and max_tokens >= 2500:
             depth = ResponseDepth.DEEP
-        task = classify_task(messages, prompt)
+        task = classify_task(messages=messages, context=document_context)
+        # The central router owns pre-first-token fallback. Runtime errors propagate.
         yield from router.stream(
-            messages,
-            task=task,
-            depth=depth,
-            system_prompt=prompt,
-            max_tokens=max_tokens,
-            platform=platform or Platform.WEB,
-            user_id=user_id,
-            document_context=document_context
+            messages, task=task, depth=depth, system_prompt=prompt,
+            max_tokens=max_tokens, platform=platform or Platform.WEB,
+            user_id=user_id, document_context=document_context
         )
         return
-    except Exception:
-        pass
+
+    
     q_type = detect_question_type(messages)
 
     if max_tokens is None:

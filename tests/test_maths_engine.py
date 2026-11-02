@@ -276,5 +276,47 @@ class TestRoutingAndCostProtection(unittest.TestCase):
         self.assertFalse(registry.is_model_eligible("openrouter", "test-expensive-paid-model"))
 
 
+
+class TestSympyRoutingRegressions(unittest.TestCase):
+    """Regression tests proving supported maths bypasses remote LLM providers."""
+
+    def test_unicode_multiplication_is_classified_as_math(self):
+        self.assertIn(classify_task("25 × 48"), (TaskType.MATHEMATICS, TaskType.ALGEBRA))
+
+    def test_unicode_superscript_equation_solves_locally(self):
+        self.assertTrue(can_solve_locally("Solve x² - 5x + 6 = 0"))
+        result = solve_locally("Solve x² - 5x + 6 = 0")
+        self.assertTrue(result.is_solved, result.error_message)
+        self.assertEqual(set(result.solution), {"2", "3"})
+
+    def test_unicode_superscript_differentiation_solves_locally(self):
+        self.assertTrue(can_solve_locally("Differentiate x³ + 2x²"))
+        result = solve_locally("Differentiate x³ + 2x²")
+        self.assertTrue(result.is_solved, result.error_message)
+        self.assertEqual(result.solution, "3*x**2 + 4*x")
+
+    def test_unicode_superscript_integration_solves_locally(self):
+        self.assertTrue(can_solve_locally("Integrate 3x²"))
+        result = solve_locally("Integrate 3x²")
+        self.assertTrue(result.is_solved, result.error_message)
+        self.assertIn("x**3", str(result.solution))
+
+    def test_unicode_arithmetic_never_invokes_a_provider(self):
+        from unittest.mock import patch
+        with patch.object(router, "get_provider") as get_provider:
+            response = router.generate("Calculate 25 × 48")
+        self.assertEqual(response.provider, "local_math_engine")
+        self.assertEqual(response.model, "math_engine_v1")
+        self.assertIn("1200", response.text)
+        get_provider.assert_not_called()
+
+    def test_local_solver_runs_even_when_task_label_is_not_math(self):
+        from unittest.mock import patch
+        with patch.object(router, "get_provider") as get_provider:
+            response = router.generate("Calculate 25 × 48", task=TaskType.SIMPLE_EXPLANATION)
+        self.assertEqual(response.provider, "local_math_engine")
+        self.assertIn("1200", response.text)
+        get_provider.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main()
