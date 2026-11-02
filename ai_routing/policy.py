@@ -2,7 +2,7 @@
 BrainyAi Intelligent Multi-Provider Routing Policy
 Maps task types and response-depth modes to ordered candidate chains of (provider, model_id).
 Enforces:
-  1. Strict non-Gemini guarantee for all PDF Study Studio operations.
+  1. Gemini-first high-intelligence routing for PDF Study Studio with zero-cost failover.
   2. Strict Zero-Budget model eligibility filtering (zero-price and free-tier models only).
   3. Modality validation (multimodal models for images/diagrams).
   4. Specialist model assignment (Math, Science, Coding, Web Research).
@@ -122,7 +122,7 @@ def get_routing_candidates(
       - Groq = Speed: Instant routing for casual chit-chat, simple definitions, and greetings.
       - Gemini = Intelligence: Gemini 3.8 Flash primary for coding, math, science, and reasoning.
       - Gemini 3.6 Flash: High-quality secondary balanced intelligence and fallback.
-      - Strict zero-budget eligibility and strict non-Gemini guarantee for PDF Study Studio.
+      - Gemini primary for PDF Study Studio with Groq / Cerebras / SambaNova failover.
     """
     groq_fast = registry.groq_fast_model
     groq_balanced = registry.groq_balanced_model

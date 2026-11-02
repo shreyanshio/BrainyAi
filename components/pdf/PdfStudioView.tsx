@@ -124,6 +124,7 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
   const [uploading, setUploading] = useState<boolean>(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState<string>('')
+  const [isDragging, setIsDragging] = useState<boolean>(false)
   const [mobilePanel, setMobilePanel] = useState<'library' | 'studio'>('studio')
 
   // Active studio tab
@@ -272,11 +273,8 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
     return activeNote ? parseNoteSections(activeNote.content) : []
   }, [activeNote])
 
-  // Handle File Upload
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
+  // Reusable File Upload Processor (Supports File Picker & Drag-and-Drop)
+  const processUploadFile = async (file: File) => {
     if (!file.name.toLowerCase().endsWith('.pdf')) {
       setErrorMsg('Please select a valid PDF file.')
       return
@@ -299,6 +297,36 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
     } finally {
       setUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  // Handle File Input Change
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    await processUploadFile(file)
+  }
+
+  // Drag and Drop Event Handlers
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+  }
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file) {
+      await processUploadFile(file)
     }
   }
 
@@ -607,11 +635,17 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
             className="hidden"
           />
 
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="w-full py-2.5 px-4 rounded-xl font-semibold text-xs text-white bg-blue-600 hover:bg-blue-500 transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-50 min-h-[42px]"
+          <div
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`transition-all rounded-xl ${isDragging ? 'ring-2 ring-blue-500 bg-blue-500/10' : ''}`}
           >
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="w-full py-2.5 px-4 rounded-xl font-semibold text-xs text-white bg-blue-600 hover:bg-blue-500 transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-50 min-h-[42px]"
+            >
             {uploading ? (
               <>
                 <Loader2 size={14} className="animate-spin" />
@@ -624,6 +658,7 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
               </>
             )}
           </button>
+          </div>
 
           {/* Search Library */}
           {documents.length > 0 && (
@@ -648,11 +683,21 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
               <span>Loading library...</span>
             </div>
           ) : documents.length === 0 ? (
-            <div className="text-center p-8 border border-dashed border-[var(--border-subtle)] rounded-2xl">
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={`text-center p-8 border border-dashed rounded-2xl cursor-pointer transition-all ${
+                isDragging
+                  ? 'border-blue-500 bg-blue-500/10'
+                  : 'border-[var(--border-subtle)] hover:border-blue-500/50'
+              }`}
+            >
               <FileText className="w-8 h-8 text-[var(--text-muted)] mx-auto mb-2 opacity-50" />
               <p className="text-xs font-semibold text-[var(--text-secondary)]">No documents uploaded</p>
               <p className="text-[11px] text-[var(--text-muted)] mt-1">
-                Upload class notes, textbooks, or research papers up to 10 MB (5-day retention).
+                Drag & drop or click to upload PDF up to 10 MB (5-day retention).
               </p>
             </div>
           ) : (
@@ -692,6 +737,12 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
                             <span>{doc.page_count} pages</span>
                             <span>•</span>
                             <span>{(doc.file_size / (1024 * 1024)).toFixed(1)} MB</span>
+                            {doc.status === 'expired' && (
+                              <>
+                                <span>•</span>
+                                <span className="font-semibold text-amber-500">Expired</span>
+                              </>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1208,14 +1259,14 @@ export function PdfStudioView({ onBackToChat }: PdfStudioViewProps) {
                         className="bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] text-xs font-semibold rounded-xl px-2.5 py-1.5 text-[var(--text-primary)] focus:outline-none cursor-pointer"
                       >
                         <option value="ALL">All Categories</option>
-                        <option value="DEFINITION">Definition</option>
-                        <option value="CONCEPTUAL">Conceptual</option>
-                        <option value="COMPARATIVE">Comparative</option>
-                        <option value="PROCEDURAL">Procedural</option>
-                        <option value="NUMERICAL">Numerical</option>
-                        <option value="ANALYTICAL">Analytical</option>
-                        <option value="EVALUATIVE">Evaluative</option>
-                        <option value="SCENARIO">Scenario</option>
+                        <option value="Short Answer">Short Answer</option>
+                        <option value="Long Answer">Long Answer</option>
+                        <option value="Definition">Definition</option>
+                        <option value="Conceptual">Conceptual</option>
+                        <option value="Derivation/Proof">Derivation/Proof</option>
+                        <option value="Numerical/Formula">Numerical/Formula</option>
+                        <option value="Comparison">Comparison</option>
+                        <option value="Application">Application</option>
                       </select>
 
                       {/* Count Selector */}

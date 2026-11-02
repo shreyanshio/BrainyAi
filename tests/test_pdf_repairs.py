@@ -101,6 +101,87 @@ class TestPdfStudioRepairs(unittest.TestCase):
             self.assertIn("question", events)
             self.assertTrue("complete" in events or "done" in events)
 
+    def test_cleanup_expired_documents_user_scoping(self):
+        """Verifies cleanup_expired_documents accepts user_id without TypeError and scopes cleanup correctly."""
+        from pdf_studio.service import _DOCUMENTS_STORE
+        now = datetime.now(timezone.utc)
+        past = (now - timedelta(days=6)).isoformat()
+        future = (now + timedelta(days=2)).isoformat()
+
+        _DOCUMENTS_STORE["expired_user_10"] = {
+            "id": "expired_user_10",
+            "user_id": 10,
+            "filename": "old10.pdf",
+            "status": "ready",
+            "expires_at": past
+        }
+        _DOCUMENTS_STORE["expired_user_20"] = {
+            "id": "expired_user_20",
+            "user_id": 20,
+            "filename": "old20.pdf",
+            "status": "ready",
+            "expires_at": past
+        }
+        _DOCUMENTS_STORE["active_user_10"] = {
+            "id": "active_user_10",
+            "user_id": 10,
+            "filename": "active10.pdf",
+            "status": "ready",
+            "expires_at": future
+        }
+
+        # 1. Scope cleanup to user 10
+        res = self.service.cleanup_expired_documents(user_id=10)
+        self.assertIn("expired_user_10", res["document_ids"])
+        self.assertNotIn("expired_user_20", res["document_ids"])
+        self.assertEqual(_DOCUMENTS_STORE["expired_user_10"]["status"], "expired")
+        self.assertEqual(_DOCUMENTS_STORE["expired_user_20"]["status"], "ready")
+        self.assertEqual(_DOCUMENTS_STORE["active_user_10"]["status"], "ready")
+
+        # 2. Global cleanup with no user_id cleans remaining expired
+        res2 = self.service.cleanup_expired_documents()
+        self.assertIn("expired_user_20", res2["document_ids"])
+        self.assertEqual(_DOCUMENTS_STORE["expired_user_20"]["status"], "expired")
+
+    def test_important_questions_category_normalization(self):
+        """Verifies category normalization handles aliases and case-insensitivity cleanly."""
+        with patch.object(self.service, 'get_document') as mock_get_doc, \
+             patch.object(self.service, 'get_document_pages') as mock_pages, \
+             patch('ai_routing.router.router.generate_structured') as mock_ai:
+            mock_get_doc.return_value = {"id": "doc_101", "user_id": 1, "status": "ready", "title": "Physics"}
+            mock_pages.return_value = [{"page_number": 1, "text_content": "Newton's second law is F = ma."}]
+            mock_ai.return_value = {
+                "questions": [
+                    {
+                        "question": "State Newton's second law.",
+                        "category": "definitions and terminology",
+                        "priority": "HIGH",
+                        "answer_outline": ["F = ma", "Rate of change of momentum"],
+                        "page_ref": "Page 1"
+                    }
+                ]
+            }
+
+            res = self.service.generate_important_questions(
+                doc_id="doc_101",
+                user_id=1,
+                count=5,
+                category="DEFINITION"
+            )
+            self.assertEqual(res["questions"][0]["category"], "Definition")
+
+    def test_pdf_routes_value_error_handling(self):
+        """Verifies that ValueError raised by service produces HTTP 400 instead of generic 500."""
+        from app import app
+        with app.test_client() as client:
+            with client.session_transaction() as sess:
+                sess["user_id"] = 101
+
+            with patch("pdf_studio.service.pdf_service.generate_notes", side_effect=ValueError("Document has no readable text to generate notes from.")):
+                resp = client.post("/api/pdf/documents/test-doc/notes", json={"depth": "STANDARD"})
+                self.assertEqual(resp.status_code, 400)
+                self.assertIn("Document has no readable text", resp.get_json()["error"])
+
     def test_fast_deterministic_greeting(self):
         """Fast greeting check must catch pure greetings and return immediately."""
         from app import _check_fast_greeting

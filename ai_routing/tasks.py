@@ -321,7 +321,7 @@ def classify_task(
                 text = (m.get("content") or "").strip()
                 break
 
-    # 1. Document / PDF tasks (Strict non-Gemini domain)
+    # 1. Document / PDF tasks (Academic Study Studio)
     is_doc_topic = has_pdf_context or "pdf" in text.lower() or "document" in text.lower()
     if is_doc_topic:
         if _IMPORTANT_Q_KEYWORDS.search(text):

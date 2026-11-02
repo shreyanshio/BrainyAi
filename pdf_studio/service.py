@@ -371,18 +371,23 @@ class PDFStudyService:
 
         return doc
 
-    def cleanup_expired_documents(self) -> Dict[str, Any]:
+    def cleanup_expired_documents(self, user_id: Optional[Any] = None) -> Dict[str, Any]:
         """
         Deletes original source PDF files for documents whose 5-day retention period has passed.
         Preserves generated notes, flashcards, questions, quizzes, and progress records.
+        If user_id is provided, scopes cleanup to that user's expired documents.
         """
         now = datetime.now(timezone.utc)
         now_iso = now.isoformat()
         expired_count = 0
         cleaned_docs = []
 
+        user_str = str(user_id) if user_id is not None else None
+
         # 1. Check in-memory & local storage
         for doc_id, doc in list(_DOCUMENTS_STORE.items()):
+            if user_str is not None and str(doc.get("user_id")) != user_str:
+                continue
             if doc.get("status") == "expired":
                 continue
             exp_str = doc.get("expires_at")
@@ -409,10 +414,11 @@ class PDFStudyService:
         # 2. Check Supabase user_documents if available
         if self._is_supabase_available():
             try:
+                user_filter = f"&user_id=eq.{user_id}" if user_id is not None else ""
                 resp = self._sb_req(
                     "GET",
                     "user_documents",
-                    params=f"?status=neq.expired&expires_at=lt.{now_iso}&select=id,user_id,storage_path,expires_at"
+                    params=f"?status=neq.expired&expires_at=lt.{now_iso}{user_filter}&select=id,user_id,storage_path,expires_at"
                 )
                 rows = resp.json() if hasattr(resp, "json") else []
                 if isinstance(rows, list):
@@ -613,7 +619,7 @@ class PDFStudyService:
         notes = _NOTES_STORE.get(doc_id, [])
         return sorted(notes, key=lambda x: x.get("created_at", ""), reverse=True)
 
-    # ── GROUNDED DOCUMENT Q&A (STRICT 10-MESSAGE CONVERSATIONAL CONTEXT, NON-GEMINI) ──
+    # ── GROUNDED DOCUMENT Q&A (STRICT 10-MESSAGE CONVERSATIONAL CONTEXT, GEMINI PRIMARY) ──
 
     def ask_document(
         self,
@@ -626,7 +632,7 @@ class PDFStudyService:
         """
         Source-grounded Document Q&A with exact page citation.
         Enforces strict 10-message conversational context limit.
-        Routes strictly to non-Gemini AI providers (Groq, Cerebras, SambaNova, OpenRouter).
+        Routes to Gemini first with resilient fallback across Groq, Cerebras, SambaNova, and OpenRouter.
         """
         doc = self.get_document(doc_id, user_id)
         if doc.get("status") == "expired":
@@ -707,7 +713,7 @@ class PDFStudyService:
             "context_count": len(history_lines) + 1
         }
 
-    # ── STRICT 4-OPTION MCQ QUIZ GENERATION (NON-GEMINI) ──
+    # ── STRICT 4-OPTION MCQ QUIZ GENERATION (GEMINI PRIMARY) ──
 
     def generate_quiz(
         self,
@@ -720,7 +726,7 @@ class PDFStudyService:
         """
         Generates interactive multiple-choice quiz with strictly 4 distinct options per question.
         Supports difficulty: EASY, MEDIUM, HARD.
-        Routes strictly to non-Gemini AI providers (Groq, Cerebras, SambaNova, OpenRouter).
+        Routes to Gemini first with resilient fallback across Groq, Cerebras, SambaNova, and OpenRouter.
         Evenly samples across long documents.
         """
         doc = self.get_document(doc_id, user_id)
@@ -938,7 +944,7 @@ class PDFStudyService:
 
         return attempt_record
 
-    # ── PDF-TO-IMPORTANT-QUESTIONS GENERATION (NON-GEMINI) ──
+    # ── PDF-TO-IMPORTANT-QUESTIONS GENERATION (GEMINI PRIMARY) ──
 
     def generate_important_questions(
         self,
@@ -969,7 +975,43 @@ class PDFStudyService:
             raise ValueError("Document contains no readable text to generate important questions.")
 
         sys_prompt = prompt_registry.get_template("pdf_important_questions_prompt.txt")
-        clean_cat = str(category or "ALL").strip()
+
+        CATEGORY_ALIASES = {
+            "all": "ALL",
+            "short answer": "Short Answer",
+            "short": "Short Answer",
+            "very important short questions": "Short Answer",
+            "long answer": "Long Answer",
+            "long": "Long Answer",
+            "important long questions": "Long Answer",
+            "definition": "Definition",
+            "definitions": "Definition",
+            "definitions and terminology": "Definition",
+            "conceptual": "Conceptual",
+            "conceptual questions": "Conceptual",
+            "derivation/proof": "Derivation/Proof",
+            "derivation": "Derivation/Proof",
+            "derivations": "Derivation/Proof",
+            "procedural": "Derivation/Proof",
+            "derivations and proofs": "Derivation/Proof",
+            "numerical/formula": "Numerical/Formula",
+            "numerical": "Numerical/Formula",
+            "formula": "Numerical/Formula",
+            "numerical and formula-based questions": "Numerical/Formula",
+            "comparison": "Comparison",
+            "comparisons": "Comparison",
+            "comparative": "Comparison",
+            "comparisons and differences": "Comparison",
+            "application": "Application",
+            "application-based questions": "Application",
+            "analytical": "Conceptual",
+            "evaluative": "Conceptual",
+            "scenario": "Application",
+        }
+
+        raw_req_cat = str(category or "ALL").strip()
+        clean_cat = CATEGORY_ALIASES.get(raw_req_cat.lower(), raw_req_cat)
+
         if clean_cat != "ALL":
             cat_instruction = f"All generated questions MUST strictly belong to the '{clean_cat}' category."
         else:
@@ -1010,7 +1052,8 @@ class PDFStudyService:
                 priority = "HIGH"
 
             raw_cat = str(q.get("category") or "Conceptual").strip()
-            cat = clean_cat if clean_cat != 'ALL' and clean_cat in valid_categories else (raw_cat if raw_cat in valid_categories else 'Conceptual')
+            mapped_raw = CATEGORY_ALIASES.get(raw_cat.lower(), raw_cat)
+            cat = clean_cat if clean_cat != 'ALL' and clean_cat in valid_categories else (mapped_raw if mapped_raw in valid_categories else 'Conceptual')
 
             chapter = str(q.get("chapter") or "General").strip()
             page_ref = str(q.get("page_ref") or "Page 1").strip()
@@ -1117,12 +1160,12 @@ class PDFStudyService:
         sets = _QUESTIONS_STORE.get(doc_id, [])
         return sorted(sets, key=lambda x: x.get("created_at", ""), reverse=True)
 
-    # ── FLASHCARDS GENERATION (NON-GEMINI) ──
+    # ── FLASHCARDS GENERATION (GEMINI PRIMARY) ──
 
     def generate_flashcards(self, doc_id: str, user_id: int, count: int = 8, depth: str = "balanced") -> Dict[str, Any]:
         """
         Generates study flashcards evenly sampled from document key concepts.
-        Routes strictly to non-Gemini AI providers (Groq, Cerebras, SambaNova, OpenRouter).
+        Routes to Gemini first with resilient fallback across Groq, Cerebras, SambaNova, and OpenRouter.
         """
         doc = self.get_document(doc_id, user_id)
         pages = self.get_document_pages(doc_id, user_id)

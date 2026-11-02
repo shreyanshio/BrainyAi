@@ -546,7 +546,17 @@ export interface PdfDocument {
 
   storage_path?: string
 
+  storage_bucket?: string
+
   processing_status: 'ready' | 'processing' | 'error'
+
+  status?: string
+
+  ocr_status?: string
+
+  expires_at?: string
+
+  uploaded_at?: string
 
   error_message?: string | null
 

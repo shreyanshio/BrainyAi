@@ -3653,6 +3653,8 @@ def generate_pdf_notes(doc_id):
         return jsonify({"success": True, "note": note}), 201
     except PDFValidationError as ve:
         return jsonify({"error": str(ve)}), 404
+    except ValueError as val_err:
+        return jsonify({"error": str(val_err)}), 400
     except PDFSecurityError as se:
         return jsonify({"error": str(se)}), 403
     except Exception as e:
@@ -3700,6 +3702,8 @@ def ask_pdf_document(doc_id):
         return jsonify(result)
     except PDFValidationError as ve:
         return jsonify({"error": str(ve)}), 404
+    except ValueError as val_err:
+        return jsonify({"error": str(val_err)}), 400
     except PDFSecurityError as se:
         return jsonify({"error": str(se)}), 403
     except Exception as e:
@@ -3725,6 +3729,8 @@ def generate_pdf_quiz(doc_id):
         return jsonify({"success": True, "quiz": quiz}), 201
     except PDFValidationError as ve:
         return jsonify({"error": str(ve)}), 404
+    except ValueError as val_err:
+        return jsonify({"error": str(val_err)}), 400
     except PDFSecurityError as se:
         return jsonify({"error": str(se)}), 403
     except Exception as e:
@@ -3747,6 +3753,8 @@ def generate_pdf_important_questions(doc_id):
         return jsonify({"success": True, "questions": result}), 201
     except PDFValidationError as ve:
         return jsonify({"error": str(ve)}), 404
+    except ValueError as val_err:
+        return jsonify({"error": str(val_err)}), 400
     except PDFSecurityError as se:
         return jsonify({"error": str(se)}), 403
     except Exception as e:
@@ -3877,6 +3885,8 @@ def generate_pdf_flashcards(doc_id):
         return jsonify({"success": True, "flashcards": flashcards}), 201
     except PDFValidationError as ve:
         return jsonify({"error": str(ve)}), 404
+    except ValueError as val_err:
+        return jsonify({"error": str(val_err)}), 400
     except PDFSecurityError as se:
         return jsonify({"error": str(se)}), 403
     except Exception as e:
