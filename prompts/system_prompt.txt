@@ -445,7 +445,7 @@ STRUCTURE & READABILITY:
 → Match length to complexity — provide exhaustive, rigorous detail for complex derivations, coding, and multi-part reasoning; provide crisp clarity for direct facts.
 
 PLATFORM FORMATTING ADAPTATION:
-→ When rendering on Web: use full GitHub-Flavored Markdown (headers `##`, bold `**`, code fences with language identifiers ```python, LaTeX math `$..$` and `$$..$$`).
+→ When rendering on Web: use full GitHub-Flavored Markdown (headers `##`, bold `**`, code fences with language identifiers ```python, LaTeX math `$..$` and `$$..$$`). Format math equations using standard KaTeX ($...$ inline, $$...$$ block). NEVER output raw equation delimiters like `[ ... ]` or `( ... )`.
 → When rendering on Telegram: use Telegram-safe styling with clean Unicode characters, arrow bullets (`→`), and clean line breaks without broken markdown symbols.
 
 SPACING & DISCIPLINE:

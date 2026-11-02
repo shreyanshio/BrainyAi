@@ -718,7 +718,23 @@ def format_for_web(text: str) -> str:
     text = re.sub(r'<code>(.*?)</code>', _unhtml_inline, text, flags=re.DOTALL | re.IGNORECASE)
 
     # Upgrade plain "- item" / "* item" bullets
-    return re.sub(r'^[ \t]*[-*][ \t]+', '• ', text, flags=re.MULTILINE)
+    text = re.sub(r'^[ \t]*[-*][ \t]+', '• ', text, flags=re.MULTILINE)
+
+    # Normalize LaTeX delimiters for web markdown rendering
+    text = re.sub(r'\\\[([\s\S]*?)\\\]', lambda m: f"\n\n$$\n{m.group(1).strip()}\n$$\n\n", text)
+    text = re.sub(r'\\\(([\s\S]*?)\\\)', lambda m: f"${m.group(1).strip()}$", text)
+    text = re.sub(r'\[\s*((?:[^\[\]]|\[[^\[\]]*\])*?\\[a-zA-Z]+(?:[^\[\]]|\[[^\[\]]*\])*?)\s*\](?![ \t]*\()', lambda m: f"\n\n$$\n{m.group(1).strip()}\n$$\n\n", text)
+
+    def _repl_paren(m):
+        inner = m.group(1).strip()
+        trail = ''
+        if inner and inner[-1] in '.,;:':
+            trail = inner[-1]
+            inner = inner[:-1].strip()
+        return f"${inner}${trail}"
+
+    text = re.sub(r'\(([\s]*[^\(\)]*?\\[a-zA-Z]+(?:[^()]|\([^()]*\))*?)\)', _repl_paren, text)
+    return text
 
 
 # In-memory browser auth handshake sessions (short-lived, just for the login flow):

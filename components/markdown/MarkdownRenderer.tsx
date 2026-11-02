@@ -55,21 +55,22 @@ export function normalizeMathDelimiters(content: string): string {
 
   let s = content
 
-  // 1. Standard LaTeX display delimiters: \[ ... \] -> $$ ... $$
-  s = s.replace(/\\\[([\s\S]*?)\\\]/g, (_match, inner) => `\n\n$$${inner.trim()}$$\n\n`)
+  // 1. Standard LaTeX display delimiters: \[ ... \] -> $$\n...\n$$
+  s = s.replace(/\\\[([\s\S]*?)\\\]/g, (_match, inner) => `\n\n$$\n${inner.trim()}\n$$\n\n`)
 
   // 2. Standard LaTeX inline delimiters: \( ... \) -> $ ... $
   s = s.replace(/\\\(([\s\S]*?)\\\)/g, (_match, inner) => `$${inner.trim()}$`)
 
-  // 3. Isolated bracket display math: [ \command ... ] -> $$ \command ... $$
-  // Only matches when inner text contains LaTeX commands (e.g. \sin, \frac) and is not followed by '(' (markdown link)
-  s = s.replace(/\[\s*(\\[a-zA-Z]+[\s\S]*?)\s*\](?!\s*\()/g, (_match, inner) => {
-    return `\n\n$$${inner.trim()}$$\n\n`
+  // 3. Isolated bracket display math: [ ... ] containing LaTeX commands (e.g. \sin, \frac)
+  // Lookahead (?![	 ]*\() checks only horizontal whitespace on the same line to avoid markdown links [text](url),
+  // without erroneously rejecting brackets followed by a newline and '(' in the next paragraph.
+  s = s.replace(/\[\s*((?:[^\[\]]|\[[^\[\]]*\])*?\\[a-zA-Z]+(?:[^\[\]]|\[[^\[\]]*\])*?)\s*\](?![ \t]*\()/g, (_match, inner) => {
+    return `\n\n$$\n${inner.trim()}\n$$\n\n`
   })
 
-  // 4. Standalone parenthesized LaTeX expressions: (\command ...) -> $ \command ... $
+  // 4. Standalone parenthesized LaTeX expressions: ( ... \command ... ) -> $ ... $
   // Example: (Equivalently, (\sin(\pi/6)=0.5).) -> (Equivalently, $\sin(\pi/6)=0.5$.)
-  s = s.replace(/\(([\s]*\\[a-zA-Z]+(?:[^()]|\([^()]*\))*?)\)/g, (_match, inner) => {
+  s = s.replace(/\(([\s]*[^\(\)]*?\\[a-zA-Z]+(?:[^()]|\([^()]*\))*?)\)/g, (_match, inner) => {
     let trimmed = inner.trim()
     let trail = ''
     if (/[.,;:]$/.test(trimmed)) {
@@ -81,7 +82,6 @@ export function normalizeMathDelimiters(content: string): string {
 
   return s
 }
-
 export function MarkdownRenderer({ content, className = '' }: MarkdownRendererProps) {
   const processedContent = normalizeMathDelimiters(content)
 

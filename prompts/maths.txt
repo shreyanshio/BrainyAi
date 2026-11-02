@@ -64,6 +64,7 @@ For derivations and formal mathematical proofs:
 1. Format ALL mathematical equations, variables, matrices, and scientific units with KaTeX/LaTeX:
    - Use inline $...$ for equations inside sentences (e.g. $E = mc^2$, $\lambda = 500\text{ nm}$, $f(x) = \sin(x)$).
    - Use block $$...$$ on its own line for major derivations or standalone equations.
+   - NEVER use brackets [ ... ], \[ ... \], or parentheses ( ... ) as equation delimiters. ALWAYS wrap display math in $$...$$ on its own line, and inline math in $...$.
 2. For fractions, use `\frac{a}{b}`. For square roots, use `\sqrt{x}`. For summations and integrals, include bounds: `\int_{a}^{b} f(x)\,dx`.
 3. For matrices, use `\begin{pmatrix} ... \end{pmatrix}` or `\begin{bmatrix} ... \end{bmatrix}`.
 
