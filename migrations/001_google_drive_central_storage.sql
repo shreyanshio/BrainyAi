@@ -100,21 +100,35 @@ CREATE INDEX IF NOT EXISTS idx_user_documents_drive_file ON user_documents(drive
 CREATE INDEX IF NOT EXISTS idx_user_documents_upload_status ON user_documents(upload_status);
 
 -- Ensure RLS on user_documents strictly isolates users
+-- Brainy's application layer enforces user isolation via verified backend JWTs.
+-- Direct client access by anon or authenticated Supabase tokens is blocked.
 ALTER TABLE user_documents ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Users can only select their own documents" ON user_documents;
-CREATE POLICY "Users can only select their own documents"
-    ON user_documents
-    FOR SELECT
-    TO authenticated
-    USING (user_id = (auth.uid())::text::bigint OR owner_user_id = (auth.uid())::text::bigint);
-
 DROP POLICY IF EXISTS "Users can only delete their own documents" ON user_documents;
-CREATE POLICY "Users can only delete their own documents"
+DROP POLICY IF EXISTS "Deny direct client access to user_documents" ON user_documents;
+CREATE POLICY "Deny direct client access to user_documents"
     ON user_documents
-    FOR DELETE
-    TO authenticated
-    USING (user_id = (auth.uid())::text::bigint OR owner_user_id = (auth.uid())::text::bigint);
+    FOR ALL
+    TO anon, authenticated
+    USING (false);
+
+DROP POLICY IF EXISTS "service_role_all_user_documents" ON user_documents;
+CREATE POLICY "service_role_all_user_documents"
+    ON user_documents
+    FOR ALL
+    TO service_role
+    USING (true)
+    WITH CHECK (true);
+
+-- 4. Seed Verified Project Owner Configuration
+-- Explicitly binds the owner user ID (328196512) and verified Google email (shreyansh.npm@gmail.com)
+INSERT INTO google_drive_owner_config (id, owner_user_id, owner_email, is_active, compliance_cleared)
+VALUES (1, 328196512, 'shreyansh.npm@gmail.com', FALSE, FALSE)
+ON CONFLICT (id) DO UPDATE SET
+    owner_user_id = EXCLUDED.owner_user_id,
+    owner_email = EXCLUDED.owner_email,
+    updated_at = NOW();
 
 
 -- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

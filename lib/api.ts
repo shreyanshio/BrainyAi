@@ -1681,3 +1681,38 @@ export function getAdminExportUrl(exportType: 'requests' | 'users' | 'audit_logs
 
 
 
+
+
+export interface GoogleDriveOwnerStatus {
+  connected: boolean
+  status: string
+  compliance_cleared: boolean
+  owner_email: string | null
+  owner_user_id?: number | string | null
+  owner_google_sub_bound?: boolean
+  root_folder_id?: string | null
+  users_folder_id?: string | null
+  storage_quota?: {
+    limit_bytes: number
+    usage_bytes: number
+    usage_in_drive_bytes: number
+  } | null
+  registered_user_folders: number
+  stored_drive_documents: number
+  last_checked_at: string
+}
+
+export async function fetchOwnerDriveStatus(): Promise<GoogleDriveOwnerStatus> {
+  return request<GoogleDriveOwnerStatus>('/api/integrations/google-drive/owner/status')
+}
+
+export async function disconnectOwnerDrive(): Promise<{ success: boolean; message: string }> {
+  return request<{ success: boolean; message: string }>('/api/integrations/google-drive/owner/disconnect', {
+    method: 'POST',
+  })
+}
+
+export function getOwnerDriveConnectUrl(): string {
+  const base = getApiBase()
+  return `${base}/api/integrations/google-drive/owner/connect?redirect=1`
+}

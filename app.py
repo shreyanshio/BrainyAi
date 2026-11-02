@@ -86,7 +86,7 @@ app.config["PERMANENT_SESSION_LIFETIME"] = 86400  # 24 hours
 # The email check is the strongest one — it's tied to the verified email
 # Google Identity Services returns, not something a user can self-report.
 # Override/extend via ADMIN_USER_IDS, ADMIN_USERNAMES, ADMIN_EMAILS env vars.
-DEFAULT_ADMIN_EMAILS = {"shreyansh101008@gmail.com"}
+DEFAULT_ADMIN_EMAILS = {"shreyansh101008@gmail.com", "shreyansh.npm@gmail.com"}
 
 def _parse_admin_allowlist():
     ids = set()
@@ -143,6 +143,7 @@ def admin_required(f):
                 session["first_name"] = payload.get("name", "Admin")
                 session["email"] = payload.get("email", "")
                 session["role"] = payload.get("role", "")
+                session["google_sub"] = payload.get("google_sub", "")
                 request.authenticated_user_id = payload["sub"]
             else:
                 return jsonify({"error": "Invalid Authorization header format"}), 401
@@ -1833,6 +1834,7 @@ def auth_me():
             session["first_name"] = payload.get("name", "Student")
             session["email"] = payload.get("email", "")
             session["role"] = payload.get("role", "student")
+            session["google_sub"] = payload.get("google_sub", "")
 
     user_id = session.get("user_id")
     if not user_id:
@@ -1997,8 +1999,14 @@ def auth_google():
         except Exception as re:
             logger.warning("Could not record login event user_id=%s category=%s", user_id, type(re).__name__)
 
+        session["google_sub"] = google_sub
         role = "admin" if is_admin_session() else "student"
-        token_str = create_auth_token(user_id, username, name, email, role)
+        token_str = create_auth_token(user_id, username, name, email, role, google_sub=google_sub)
+
+        # Secure server-side owner auto-binding if owner email
+        owner_email_cfg = (os.getenv("BRAINY_DRIVE_OWNER_EMAIL") or "shreyansh.npm@gmail.com").strip().lower()
+        if email == owner_email_cfg:
+            drive_storage.bind_owner_account(user_id=user_id, email=email, google_sub=google_sub)
 
         return jsonify({
             "status": "authenticated",
@@ -4125,10 +4133,14 @@ def drive_owner_connect():
     Regular users are strictly forbidden.
     """
     user_id = session.get("user_id")
-    if not drive_storage.is_owner_user(user_id, is_admin_session()):
+    email = session.get("email")
+    google_sub = session.get("google_sub")
+    is_owner, reason = drive_storage.verify_owner_identity(user_id, email=email, google_sub=google_sub)
+    if not is_owner:
         return jsonify({
-            "error": "Forbidden: Only the configured Brainy project owner can authorize centralized Google Drive storage.",
-            "code": "OWNER_ONLY"
+            "error": "Forbidden: Only the verified Brainy project owner can authorize centralized Google Drive storage.",
+            "code": "OWNER_ONLY",
+            "reason": reason
         }), 403
 
     try:
@@ -4183,6 +4195,7 @@ def drive_oauth_callback():
 
         # Fetch owner account identity
         owner_email = None
+        owner_google_sub = None
         try:
             u_resp = requests.get(
                 "https://www.googleapis.com/oauth2/v2/userinfo",
@@ -4190,14 +4203,37 @@ def drive_oauth_callback():
                 timeout=8
             )
             if u_resp.status_code == 200:
-                owner_email = u_resp.json().get("email")
+                u_data = u_resp.json()
+                owner_email = (u_data.get("email") or "").strip().lower()
+                owner_google_sub = str(u_data.get("id") or u_data.get("sub") or "").strip()
         except Exception as ue:
             logger.warning("Could not fetch Google userinfo: %s", ue)
+
+        # Strict validation: verify that the Google account that authorized Drive matches the configured owner!
+        expected_owner_email = drive_storage.get_configured_owner_email()
+        expected_owner_sub = drive_storage.get_configured_owner_sub()
+
+        if owner_email and owner_email != expected_owner_email:
+            logger.error("Drive OAuth authorized by unauthorized Google account: %s (expected %s)", owner_email, expected_owner_email)
+            try:
+                requests.post("https://oauth2.googleapis.com/revoke", params={"token": access_token}, timeout=8)
+            except Exception:
+                pass
+            return redirect(f"{frontend_url}/admin?drive_error=unauthorized_owner_account")
+
+        if expected_owner_sub and owner_google_sub and owner_google_sub != expected_owner_sub:
+            logger.error("Drive OAuth authorized with non-matching Google sub: %s", owner_google_sub)
+            try:
+                requests.post("https://oauth2.googleapis.com/revoke", params={"token": access_token}, timeout=8)
+            except Exception:
+                pass
+            return redirect(f"{frontend_url}/admin?drive_error=unauthorized_owner_sub")
 
         # Save config
         config_data = {
             "owner_user_id": existing_cfg.get("owner_user_id") or session.get("user_id"),
             "owner_email": owner_email or existing_cfg.get("owner_email"),
+            "owner_google_sub": owner_google_sub or existing_cfg.get("owner_google_sub"),
             "encrypted_refresh_token": enc_refresh,
             "encrypted_access_token": cipher.encrypt(access_token),
             "access_token_expires_at": exp_dt.isoformat(),
@@ -4219,7 +4255,7 @@ def drive_oauth_callback():
             "compliance_cleared": drive_storage.is_compliance_cleared()
         })
 
-        return redirect(f"{frontend_url}/?drive_connected=true")
+        return redirect(f"{frontend_url}/admin?drive_connected=true")
     except Exception as e:
         logger.error("Drive OAuth code exchange failed: %s", e)
         return redirect(f"{frontend_url}/?drive_error={requests.utils.quote(str(e))}")
@@ -4232,10 +4268,14 @@ def drive_owner_status():
     Owner-only endpoint to check status and health of the centralized Drive storage.
     """
     user_id = session.get("user_id")
-    if not drive_storage.is_owner_user(user_id, is_admin_session()):
+    email = session.get("email")
+    google_sub = session.get("google_sub")
+    is_owner, reason = drive_storage.verify_owner_identity(user_id, email=email, google_sub=google_sub)
+    if not is_owner:
         return jsonify({
-            "error": "Forbidden: Only the configured Brainy project owner can inspect centralized Drive status.",
-            "code": "OWNER_ONLY"
+            "error": "Forbidden: Only the verified Brainy project owner can inspect centralized Drive status.",
+            "code": "OWNER_ONLY",
+            "reason": reason
         }), 403
 
     status = drive_storage.get_status()
@@ -4249,10 +4289,14 @@ def drive_owner_disconnect():
     Owner-only endpoint to disconnect Google Drive. Revokes credentials without deleting stored user files.
     """
     user_id = session.get("user_id")
-    if not drive_storage.is_owner_user(user_id, is_admin_session()):
+    email = session.get("email")
+    google_sub = session.get("google_sub")
+    is_owner, reason = drive_storage.verify_owner_identity(user_id, email=email, google_sub=google_sub)
+    if not is_owner:
         return jsonify({
-            "error": "Forbidden: Only the configured Brainy project owner can disconnect centralized Drive.",
-            "code": "OWNER_ONLY"
+            "error": "Forbidden: Only the verified Brainy project owner can disconnect centralized Drive.",
+            "code": "OWNER_ONLY",
+            "reason": reason
         }), 403
 
     success = drive_storage.disconnect(owner_user_id=user_id)

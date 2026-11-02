@@ -255,7 +255,7 @@ def _get_auth_secret_key() -> str:
     return key
 
 
-def create_auth_token(user_id: int, username: str, first_name: str, email: str = "", role: str = "student", expires_in_secs: int = 86400 * 7) -> str:
+def create_auth_token(user_id: int, username: str, first_name: str, email: str = "", role: str = "student", expires_in_secs: int = 86400 * 7, google_sub: str = "") -> str:
     """Create a signed, tamper-proof bearer token (HS256) valid for expires_in_secs."""
     now = int(time.time())
     payload = {
@@ -264,6 +264,7 @@ def create_auth_token(user_id: int, username: str, first_name: str, email: str =
         "name": first_name or "",
         "email": email or "",
         "role": role or "student",
+        "google_sub": str(google_sub or "").strip(),
         "iat": now,
         "exp": now + expires_in_secs
     }

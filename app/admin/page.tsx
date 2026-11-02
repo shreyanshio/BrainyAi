@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import {
   ShieldCheck,
+  HardDrive,
   ShieldAlert,
   Users,
   Activity,
@@ -52,8 +53,12 @@ import {
   fetchAdminUsers,
   toggleUserSuspend,
   deleteUserAccount,
-  checkAuth
+  checkAuth,
+  fetchOwnerDriveStatus,
+  disconnectOwnerDrive,
+  getOwnerDriveConnectUrl
 } from '@/lib/api'
+import type { GoogleDriveOwnerStatus } from '@/lib/api'
 import type {
   AdminKPIs,
   TimeSeriesBucket,
@@ -79,10 +84,14 @@ type AdminTab =
   | 'pdf_analytics'
   | 'security_audit'
   | 'config_exports'
+  | 'google_drive'
 
 export default function AdminPage() {
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null)
   const [currentUser, setCurrentUser] = useState<User | null>(null)
+  const [driveStatus, setDriveStatus] = useState<GoogleDriveOwnerStatus | null>(null)
+  const [driveLoading, setDriveLoading] = useState(false)
+  const [driveNotice, setDriveNotice] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
   const [activeTab, setActiveTab] = useState<AdminTab>('overview')
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -163,8 +172,21 @@ export default function AdminPage() {
     return () => clearInterval(interval)
   }, [autoRefresh, isAdmin, windowSec])
 
+  const loadDriveStatus = async () => {
+    try {
+      setDriveLoading(true)
+      const st = await fetchOwnerDriveStatus()
+      setDriveStatus(st)
+    } catch (e: any) {
+      console.warn('Could not load owner drive status:', e)
+    } finally {
+      setDriveLoading(false)
+    }
+  }
+
   // Data Loading Routine
   const refreshAllData = async (activeWindow = windowSec, background = false) => {
+    loadDriveStatus()
     if (!background) setRefreshing(true)
     try {
       const [
@@ -464,7 +486,8 @@ export default function AdminPage() {
           { id: 'request_logs', label: 'Request Logs', icon: Terminal, badge: logTotal },
           { id: 'pdf_analytics', label: 'PDF Studio', icon: BookOpen, badge: pdfStats?.total_documents },
           { id: 'security_audit', label: 'Security & Alerts', icon: ShieldCheck, badge: alerts.length ? alerts.length : undefined },
-          { id: 'config_exports', label: 'Config & Exports', icon: Sliders }
+          { id: 'config_exports', label: 'Config & Exports', icon: Sliders },
+          { id: 'google_drive', label: 'Centralized Drive', icon: HardDrive, badge: driveStatus?.connected ? 'Active' : undefined }
         ].map(tab => {
           const Icon = tab.icon
           const isActive = activeTab === tab.id
@@ -1604,6 +1627,178 @@ export default function AdminPage() {
             </div>
           </div>
         )}
+
+        {/* ── 10. CENTRALIZED GOOGLE DRIVE OWNER PANEL ────────────────── */}
+        {activeTab === 'google_drive' && (
+          <div className="space-y-6">
+            <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-5 shadow-xl">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-lg bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                      <HardDrive className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                        Centralized Google Drive Vault
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${
+                          driveStatus?.connected
+                            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                        }`}>
+                          {driveStatus?.connected ? 'CONNECTED & AUTHORIZED' : 'NOT CONNECTED'}
+                        </span>
+                      </h2>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        One owner-authorized Google Drive account acts as centralized storage vault for all Brainy student PDFs.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={loadDriveStatus}
+                    disabled={driveLoading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition cursor-pointer border border-slate-700"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${driveLoading ? 'animate-spin' : ''}`} />
+                    <span>Refresh</span>
+                  </button>
+
+                  {driveStatus?.connected ? (
+                    <button
+                      onClick={async () => {
+                        if (!confirm('Are you sure you want to disconnect Google Drive? Stored files remain safely in Drive.')) return
+                        try {
+                          const res = await disconnectOwnerDrive()
+                          setDriveNotice({ msg: res.message || 'Disconnected successfully', type: 'success' })
+                          loadDriveStatus()
+                        } catch (e: any) {
+                          setDriveNotice({ msg: e.message || 'Failed to disconnect', type: 'error' })
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 text-xs font-medium transition cursor-pointer border border-rose-500/30"
+                    >
+                      Disconnect Vault
+                    </button>
+                  ) : (
+                    <a
+                      href={getOwnerDriveConnectUrl()}
+                      className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold transition cursor-pointer shadow-lg shadow-purple-600/20 flex items-center gap-1.5"
+                    >
+                      <HardDrive className="w-3.5 h-3.5" />
+                      <span>Authorize Owner Google Drive</span>
+                    </a>
+                  )}
+                </div>
+              </div>
+
+              {driveNotice && (
+                <div className={`mt-4 p-3 rounded-lg text-xs border ${
+                  driveNotice.type === 'success' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' : 'bg-rose-500/10 text-rose-300 border-rose-500/30'
+                }`}>
+                  {driveNotice.msg}
+                </div>
+              )}
+            </div>
+
+            {/* Status Metric Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 shadow-xl">
+                <span className="text-[11px] font-medium text-slate-400">Vault Health & State</span>
+                <div className="mt-1 flex items-center justify-between">
+                  <span className="text-lg font-bold text-slate-100 capitalize">
+                    {driveStatus?.status || 'Unknown'}
+                  </span>
+                  <div className={`w-2.5 h-2.5 rounded-full ${driveStatus?.connected ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600'}`} />
+                </div>
+                <p className="text-[10px] text-slate-500 mt-2">
+                  Tokens encrypted with AES-256-GCM
+                </p>
+              </div>
+
+              <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 shadow-xl">
+                <span className="text-[11px] font-medium text-slate-400">Verified Owner Account</span>
+                <div className="mt-1">
+                  <span className="text-sm font-semibold text-slate-100 truncate block" title={driveStatus?.owner_email || 'Not configured'}>
+                    {driveStatus?.owner_email || 'shreyansh.npm@gmail.com'}
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-500 mt-2">
+                  UID: {driveStatus?.owner_user_id || '328196512'} (Server bound)
+                </p>
+              </div>
+
+              <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 shadow-xl">
+                <span className="text-[11px] font-medium text-slate-400">Isolated Student Folders</span>
+                <div className="mt-1 flex items-center justify-between">
+                  <span className="text-lg font-bold text-slate-100">
+                    {driveStatus?.registered_user_folders ?? 0}
+                  </span>
+                  <Users className="w-4 h-4 text-slate-500" />
+                </div>
+                <p className="text-[10px] text-slate-500 mt-2">
+                  Stored PDFs: {driveStatus?.stored_drive_documents ?? 0}
+                </p>
+              </div>
+
+              <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 shadow-xl">
+                <span className="text-[11px] font-medium text-slate-400">Drive Quota Used</span>
+                <div className="mt-1 flex items-center justify-between">
+                  <span className="text-lg font-bold text-slate-100">
+                    {driveStatus?.storage_quota?.usage_in_drive_bytes
+                      ? `${(driveStatus.storage_quota.usage_in_drive_bytes / (1024 * 1024)).toFixed(1)} MB`
+                      : driveStatus?.storage_quota?.usage_bytes
+                      ? `${(driveStatus.storage_quota.usage_bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+                      : '0 MB'}
+                  </span>
+                  <Database className="w-4 h-4 text-slate-500" />
+                </div>
+                <p className="text-[10px] text-slate-500 mt-2">
+                  {driveStatus?.storage_quota?.limit_bytes
+                    ? `Limit: ${(driveStatus.storage_quota.limit_bytes / (1024 * 1024 * 1024)).toFixed(0)} GB`
+                    : 'Unlimited / Standard'}
+                </p>
+              </div>
+            </div>
+
+            {/* Hierarchy & Privacy Isolation Card */}
+            <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-5 shadow-xl space-y-4">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                Directory Hierarchy & Strict Application-Level Isolation
+              </h3>
+              <div className="bg-slate-950 p-4 rounded-lg font-mono text-xs text-slate-300 border border-slate-800/80 leading-relaxed overflow-x-auto">
+                <div>My Drive/</div>
+                <div>└── <span className="text-purple-400 font-semibold">Brainy/</span> <span className="text-slate-500">(Root application vault: {driveStatus?.root_folder_id || 'uninitialized'})</span></div>
+                <div>    └── <span className="text-purple-400 font-semibold">Users/</span> <span className="text-slate-500">({driveStatus?.users_folder_id || 'uninitialized'})</span></div>
+                <div>        ├── <span className="text-emerald-400">user_&lt;opaque_id_A&gt;/</span> <span className="text-slate-500">→ private HMAC-derived folder</span></div>
+                <div>        │   └── <span className="text-blue-400">PDFs/</span> <span className="text-slate-500">&lt;doc_id&gt;.pdf</span></div>
+                <div>        ├── <span className="text-emerald-400">user_&lt;opaque_id_B&gt;/</span></div>
+                <div>        │   └── <span className="text-blue-400">PDFs/</span> <span className="text-slate-500">&lt;doc_id&gt;.pdf</span></div>
+                <div>        └── ...</div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                <div className="p-3 rounded-lg bg-slate-800/40 border border-slate-800 text-slate-300">
+                  <div className="font-semibold text-slate-200 mb-1 flex items-center gap-1.5">
+                    <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                    Zero End-User OAuth Friction
+                  </div>
+                  Students upload and study PDFs directly without connecting their personal Google accounts or granting Drive permissions.
+                </div>
+                <div className="p-3 rounded-lg bg-slate-800/40 border border-slate-800 text-slate-300">
+                  <div className="font-semibold text-slate-200 mb-1 flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-purple-400" />
+                    Strict Per-User IDOR Isolation
+                  </div>
+                  All downloads are streamed privately through authenticated backend endpoints with verified Supabase ownership checks.
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
       </main>
     </div>
   )

@@ -57,7 +57,8 @@ class TestGoogleDriveCentralizedStorage(unittest.TestCase):
         os.environ["BRAINY_DRIVE_TOKEN_ENCRYPTION_KEY"] = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
         # Generate tokens
-        self.owner_token = create_auth_token(self.owner_id, "brainy_owner", "Project Owner", "owner@example.com", role="admin")
+        os.environ["BRAINY_DRIVE_OWNER_EMAIL"] = "shreyansh.npm@gmail.com"
+        self.owner_token = create_auth_token(self.owner_id, "brainy_owner", "Project Owner", "shreyansh.npm@gmail.com", role="admin", google_sub="sub_owner_123")
         self.user_a_token = create_auth_token(self.user_a_id, "student_a", "Alice Student", "alice@example.com")
         self.user_b_token = create_auth_token(self.user_b_id, "student_b", "Bob Student", "bob@example.com")
 
@@ -65,6 +66,12 @@ class TestGoogleDriveCentralizedStorage(unittest.TestCase):
         drive_storage._cached_access_token = None
         drive_storage._token_expiry_ts = 0.0
         from pdf_studio.google_drive import DATA_DIR
+        cfg_file = os.path.join(DATA_DIR, "owner_config.json")
+        if os.path.exists(cfg_file):
+            try:
+                os.remove(cfg_file)
+            except Exception:
+                pass
         for uid in [self.user_a_id, self.user_b_id, self.owner_id]:
             cf = os.path.join(DATA_DIR, f"user_folder_{uid}.json")
             if os.path.exists(cf):
@@ -177,7 +184,7 @@ class TestGoogleDriveCentralizedStorage(unittest.TestCase):
         # Mock userinfo
         mock_userinfo_resp = MagicMock()
         mock_userinfo_resp.status_code = 200
-        mock_userinfo_resp.json.return_value = {"email": "owner@brainyai.app"}
+        mock_userinfo_resp.json.return_value = {"email": "shreyansh.npm@gmail.com", "sub": "sub_owner_123"}
         mock_get.return_value = mock_userinfo_resp
 
         with patch.object(drive_storage, "initialize_root_hierarchy", return_value=("root_id_123", "users_id_456")):
@@ -188,7 +195,7 @@ class TestGoogleDriveCentralizedStorage(unittest.TestCase):
             # Verify credentials saved encrypted
             cfg = drive_storage.get_owner_config()
             self.assertTrue(cfg["is_active"])
-            self.assertEqual(cfg["owner_email"], "owner@brainyai.app")
+            self.assertEqual(cfg["owner_email"], "shreyansh.npm@gmail.com")
             # Refresh token must be decrypted properly
             self.assertEqual(cipher.decrypt(cfg["encrypted_refresh_token"]), "1//test_refresh_token_123")
 
@@ -198,7 +205,7 @@ class TestGoogleDriveCentralizedStorage(unittest.TestCase):
         # Setup existing config with valid refresh token
         existing_cfg = {
             "owner_user_id": self.owner_id,
-            "owner_email": "owner@brainyai.app",
+            "owner_email": "shreyansh.npm@gmail.com",
             "encrypted_refresh_token": cipher.encrypt("existing_valid_refresh_token"),
             "is_active": True
         }
@@ -214,7 +221,7 @@ class TestGoogleDriveCentralizedStorage(unittest.TestCase):
             "expires_in": 3600
         }
         mock_post.return_value = mock_token_resp
-        mock_get.return_value = MagicMock(status_code=200, json=lambda: {"email": "owner@brainyai.app"})
+        mock_get.return_value = MagicMock(status_code=200, json=lambda: {"email": "shreyansh.npm@gmail.com", "sub": "sub_owner_123"})
 
         with patch.object(drive_storage, "initialize_root_hierarchy", return_value=("root_1", "users_1")):
             resp = self.app.get(f"/api/integrations/google-drive/callback?code=reconnect_code&state={state}")
@@ -322,7 +329,7 @@ class TestGoogleDriveCentralizedStorage(unittest.TestCase):
         # Configure active config
         cfg = {
             "owner_user_id": self.owner_id,
-            "owner_email": "owner@brainyai.app",
+            "owner_email": "shreyansh.npm@gmail.com",
             "encrypted_refresh_token": cipher.encrypt("dummy_refresh"),
             "is_active": True
         }
@@ -343,7 +350,7 @@ class TestGoogleDriveCentralizedStorage(unittest.TestCase):
         self.assertEqual(resp_owner.status_code, 200)
         data = resp_owner.get_json()
         self.assertTrue(data["connected"])
-        self.assertEqual(data["owner_email"], "owner@brainyai.app")
+        self.assertEqual(data["owner_email"], "shreyansh.npm@gmail.com")
         # Ensure secret tokens are never exposed in JSON
         self.assertNotIn("encrypted_refresh_token", data)
         self.assertNotIn("refresh_token", data)
@@ -375,6 +382,75 @@ class TestGoogleDriveCentralizedStorage(unittest.TestCase):
         self.assertEqual(resp_config.status_code, 200)
         self.assertIn("google_client_id", resp_config.get_json())
 
+
+    # ── 10. MULTI-LAYER OWNER IDENTITY VERIFICATION TESTS ──
+
+    def test_generic_admin_cannot_impersonate_drive_owner(self):
+        # A generic admin with user_id = 888888 and role = admin must NOT be able to connect Drive
+        fake_admin_token = create_auth_token(888888, "random_admin", "Admin Guy", "other_admin@brainyai.app", role="admin")
+        resp = self.app.get(
+            "/api/integrations/google-drive/owner/connect",
+            headers={"Authorization": f"Bearer {fake_admin_token}"}
+        )
+        self.assertEqual(resp.status_code, 403)
+        data = resp.get_json()
+        self.assertEqual(data.get("code"), "OWNER_ONLY")
+
+    def test_email_only_impersonation_rejected(self):
+        # Attacker claims owner email but has wrong user_id
+        attacker_token = create_auth_token(666666, "attacker", "Evil Bob", "shreyansh.npm@gmail.com")
+        resp = self.app.get(
+            "/api/integrations/google-drive/owner/connect",
+            headers={"Authorization": f"Bearer {attacker_token}"}
+        )
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.get_json().get("code"), "OWNER_ONLY")
+
+    def test_google_sub_mismatch_rejected(self):
+        os.environ["BRAINY_DRIVE_OWNER_GOOGLE_SUB"] = "sub_owner_12345"
+        # Token has owner user_id and email, but wrong google_sub
+        mismatched_token = create_auth_token(
+            self.owner_id, "owner", "Owner", "shreyansh.npm@gmail.com",
+            role="admin", google_sub="wrong_sub_99999"
+        )
+        resp = self.app.get(
+            "/api/integrations/google-drive/owner/status",
+            headers={"Authorization": f"Bearer {mismatched_token}"}
+        )
+        self.assertEqual(resp.status_code, 403)
+        # Restore env
+        os.environ.pop("BRAINY_DRIVE_OWNER_GOOGLE_SUB", None)
+
+    @patch("requests.post")
+    @patch("requests.get")
+    def test_oauth_callback_rejects_unauthorized_google_account(self, mock_get, mock_post):
+        state = drive_storage.generate_oauth_state(self.owner_id)
+
+        # Mock token exchange
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {
+                "access_token": "ya29.stranger_token",
+                "refresh_token": "1//stranger_refresh",
+                "expires_in": 3600
+            }
+        )
+        # Userinfo returns an unauthorized account
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"email": "stranger@evil.com", "sub": "stranger_sub"}
+        )
+
+        resp = self.app.get(f"/api/integrations/google-drive/callback?code=mock_code&state={state}")
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("drive_error=unauthorized_owner_account", resp.headers["Location"])
+
+    def test_invalid_jwt_rejected(self):
+        resp = self.app.get(
+            "/api/integrations/google-drive/owner/status",
+            headers={"Authorization": "Bearer invalid.fake.token"}
+        )
+        self.assertEqual(resp.status_code, 401)
 
 if __name__ == "__main__":
     unittest.main()

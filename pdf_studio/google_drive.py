@@ -193,18 +193,122 @@ class GoogleDriveStorageManager:
         env_val = os.getenv("BRAINY_DRIVE_PRODUCTION_ENABLED", "false").lower()
         return env_val in ("true", "1", "yes")
 
-    # ── OWNER IDENTITY CHECK ──
+    # ── MULTI-LAYER OWNER IDENTITY VERIFICATION ──
 
     def get_configured_owner_id(self) -> str:
         return os.getenv("BRAINY_DRIVE_OWNER_USER_ID", "").strip()
 
-    def is_owner_user(self, user_id: Any, is_admin: bool = False) -> bool:
-        configured_id = self.get_configured_owner_id()
-        if configured_id and str(user_id) == configured_id:
-            return True
-        if is_admin:
-            return True
-        return False
+    def get_configured_owner_email(self) -> str:
+        return (os.getenv("BRAINY_DRIVE_OWNER_EMAIL") or "shreyansh.npm@gmail.com").strip().lower()
+
+    def get_configured_owner_sub(self) -> str:
+        return os.getenv("BRAINY_DRIVE_OWNER_GOOGLE_SUB", "").strip()
+
+    def verify_owner_identity(
+        self,
+        user_id: Any,
+        email: Optional[str] = None,
+        google_sub: Optional[str] = None,
+    ) -> Tuple[bool, str]:
+        """
+        Multi-layer owner identity verification:
+        1. Valid integer/string user_id matching configured or bound owner ID.
+        2. If google_sub is configured/bound, must match verified google_sub.
+        3. If email is provided/configured, must match verified owner email.
+        4. Rejects email-only claims without user_id / google_sub verification.
+        5. Rejects arbitrary users or unverified sessions.
+        """
+        if not user_id:
+            return False, "USER_ID_REQUIRED"
+
+        user_id_str = str(user_id).strip()
+        env_owner_id = self.get_configured_owner_id()
+        env_owner_sub = self.get_configured_owner_sub()
+        env_owner_email = self.get_configured_owner_email()
+
+        cfg = self.get_owner_config() or {}
+        db_owner_id = str(cfg.get("owner_user_id")).strip() if cfg.get("owner_user_id") else ""
+        db_owner_sub = str(cfg.get("owner_google_sub")).strip() if cfg.get("owner_google_sub") else ""
+        db_owner_email = (cfg.get("owner_email") or "").strip().lower()
+
+        expected_owner_id = env_owner_id or db_owner_id
+        expected_owner_sub = env_owner_sub or db_owner_sub
+        expected_owner_email = env_owner_email or db_owner_email or "shreyansh.npm@gmail.com"
+
+        # 1. User ID check
+        if expected_owner_id:
+            if user_id_str != expected_owner_id:
+                return False, f"USER_ID_MISMATCH (got {user_id_str}, expected {expected_owner_id})"
+
+        # 2. Google Sub check
+        if expected_owner_sub:
+            if not google_sub:
+                return False, "MISSING_VERIFIED_GOOGLE_SUB"
+            if str(google_sub).strip() != expected_owner_sub:
+                return False, "GOOGLE_SUB_MISMATCH"
+
+        # 3. Email consistency check
+        if email:
+            clean_email = email.strip().lower()
+            if clean_email != expected_owner_email:
+                return False, f"EMAIL_MISMATCH (got {clean_email}, expected {expected_owner_email})"
+
+        # 4. Bootstrap / Unbound check: if expected_owner_id is not set in env or DB
+        if not expected_owner_id:
+            if email and email.strip().lower() == expected_owner_email and google_sub:
+                return True, "OWNER_BOOTSTRAP_ELIGIBLE"
+            return False, "OWNER_NOT_CONFIGURED"
+
+        return True, "AUTHORIZED"
+
+    def is_owner_user(
+        self,
+        user_id: Any,
+        email: Optional[str] = None,
+        google_sub: Optional[str] = None,
+        is_admin: bool = False
+    ) -> bool:
+        """
+        Returns True only if the user satisfies multi-layer owner identity requirements.
+        Admin status alone without owner identity matching is strictly disallowed.
+        """
+        valid, _ = self.verify_owner_identity(user_id=user_id, email=email, google_sub=google_sub)
+        return valid
+
+    def bind_owner_account(self, user_id: Any, email: str, google_sub: str) -> bool:
+        """
+        Secure server-side owner binding.
+        Once bound, locks owner config in DB to this specific user_id and google_sub.
+        Cannot be hijacked or claimed by another account.
+        """
+        clean_email = email.strip().lower()
+        expected_email = self.get_configured_owner_email()
+        if clean_email != expected_email:
+            logger.warning("Refused owner binding: email %s does not match expected %s", clean_email, expected_email)
+            return False
+
+        if not google_sub or not user_id:
+            logger.warning("Refused owner binding: missing user_id or google_sub")
+            return False
+
+        cfg = self.get_owner_config() or {}
+        existing_id = str(cfg.get("owner_user_id")) if cfg.get("owner_user_id") else ""
+        existing_sub = str(cfg.get("owner_google_sub")) if cfg.get("owner_google_sub") else ""
+
+        # If already bound to a different identity, reject to prevent replay / hijack
+        if existing_id and existing_id != str(user_id):
+            logger.error("Owner binding collision! Existing: %s, Attempted: %s", existing_id, user_id)
+            return False
+        if existing_sub and existing_sub != str(google_sub):
+            logger.error("Owner sub collision! Existing: %s, Attempted: %s", existing_sub, google_sub)
+            return False
+
+        cfg["owner_user_id"] = int(user_id) if str(user_id).isdigit() else str(user_id)
+        cfg["owner_email"] = clean_email
+        cfg["owner_google_sub"] = str(google_sub).strip()
+        self.save_owner_config(cfg)
+        audit_drive_event("OWNER_BOUND", user_id, {"email": clean_email, "google_sub_bound": True})
+        return True
 
     # ── OAUTH STATE MANAGEMENT (CSRF & SINGLE-USE) ──
 
@@ -747,14 +851,39 @@ class GoogleDriveStorageManager:
         except Exception as e:
             health_status = f"degraded_{type(e).__name__}"
 
+        # Storage Isolation Metrics
+        registered_users_count = 0
+        stored_docs_count = 0
+        if self._sb_req:
+            try:
+                uf_resp = self._sb_req("GET", "google_drive_user_folders", params="?select=user_id")
+                if hasattr(uf_resp, "json"):
+                    rows = uf_resp.json()
+                    if isinstance(rows, list):
+                        registered_users_count = len(rows)
+            except Exception:
+                pass
+            try:
+                doc_resp = self._sb_req("GET", "user_documents", params="?drive_file_id=not.is.null&select=id")
+                if hasattr(doc_resp, "json"):
+                    rows = doc_resp.json()
+                    if isinstance(rows, list):
+                        stored_docs_count = len(rows)
+            except Exception:
+                pass
+
         return {
             "connected": connected,
             "status": health_status,
             "compliance_cleared": self.is_compliance_cleared(),
             "owner_email": owner_email,
+            "owner_user_id": cfg.get("owner_user_id"),
+            "owner_google_sub_bound": bool(cfg.get("owner_google_sub")),
             "root_folder_id": cfg.get("root_folder_id"),
             "users_folder_id": cfg.get("users_folder_id"),
             "storage_quota": quota_info,
+            "registered_user_folders": registered_users_count,
+            "stored_drive_documents": stored_docs_count,
             "last_checked_at": datetime.now(timezone.utc).isoformat()
         }
 
