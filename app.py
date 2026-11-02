@@ -594,6 +594,20 @@ def refund_user_quota(user_id: int | str) -> dict:
         raise
 
 
+# ── SHARED 5-IMAGE FREE ALLOWANCE ENGINE (WEB & TELEGRAM) ──
+from ai_routing.quota import (
+    IMAGE_FREE_LIMIT,
+    get_user_image_quota,
+    consume_user_image_quota,
+    refund_user_image_quota,
+    generate_telegram_link_code,
+    link_telegram_to_web_account,
+    resolve_effective_identity,
+    _in_memory_quotas,
+    _in_memory_link_codes,
+    _in_memory_user_links,
+)
+
 # ── SUSPENDED USERS MANAGEMENT ──
 SUSPENDED_USERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "suspended_users.json")
 _suspended_users = set()
@@ -2605,6 +2619,17 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
     image_payload = data.get("image") or data.get("image_url")
     document_context = None
     if image_payload:
+        img_allowed, remaining, effective_id = consume_user_image_quota(user_id)
+        if not img_allowed:
+            refund_user_quota(user_id)
+            return None, jsonify({
+                "error": "image_quota_exceeded",
+                "code": "IMAGE_QUOTA_EXCEEDED",
+                "message": "You've used your 5 free image requests. Your image allowance is currently exhausted.",
+                "usage": {"used": IMAGE_FREE_LIMIT, "remaining": 0, "limit": IMAGE_FREE_LIMIT},
+                "remaining": 0,
+                "limit": IMAGE_FREE_LIMIT
+            }), 429
         mime_type = "image/jpeg"
         b64_str = ""
         if isinstance(image_payload, dict):
@@ -3251,7 +3276,31 @@ def get_user_profile():
         "level": profile.get("level") or "Not set",
         "score": profile.get("score", 0),
         "total": profile.get("total", 0),
-        "joined": profile.get("joined") or "Recently"
+        "joined": profile.get("joined") or "Recently",
+        "image_quota": get_user_image_quota(user_id)
+    })
+
+
+@app.route("/api/user/image-quota", methods=["GET"])
+@login_required
+def get_image_quota_endpoint():
+    """Returns the user's remaining 5-image free quota allowance."""
+    user_id = session["user_id"]
+    return jsonify(get_user_image_quota(user_id))
+
+
+@app.route("/api/user/link-telegram", methods=["POST"])
+@login_required
+def create_telegram_link_code_endpoint():
+    """Generates a secure single-use verification code to link a Telegram account."""
+    user_id = session["user_id"]
+    code = generate_telegram_link_code(user_id)
+    bot_name = os.getenv("TELEGRAM_BOT_USERNAME", "BrainyStudyBot")
+    return jsonify({
+        "link_code": code,
+        "bot_username": bot_name,
+        "instruction": f"Send /link {code} to @{bot_name} on Telegram within 15 minutes.",
+        "expires_in_seconds": 900
     })
 
 

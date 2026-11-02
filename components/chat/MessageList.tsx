@@ -90,6 +90,15 @@ export function MessageList({
           return (
             <div key={messageKey} className="flex justify-end items-start gap-2 sm:gap-3">
               <div className="max-w-[90%] sm:max-w-[78%] rounded-3xl rounded-tr-sm bg-[var(--text-primary)] text-[var(--bg-app)] px-3.5 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm leading-relaxed shadow-sm break-words">
+                {msg.image && (
+                  <div className="mb-2">
+                    <img
+                      src={msg.image}
+                      alt="Uploaded attachment"
+                      className="max-h-60 max-w-full rounded-2xl object-contain border border-white/20 shadow-xs"
+                    />
+                  </div>
+                )}
                 {msg.content}
               </div>
               <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] text-[var(--text-primary)] flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5 shadow-xs">

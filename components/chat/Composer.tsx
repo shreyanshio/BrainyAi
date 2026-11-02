@@ -166,7 +166,7 @@ export function Composer({
             <img
               src={selectedImage}
               alt="Attachment preview"
-              className="h-20 w-auto max-w-[200px] object-cover rounded-xl border border-[var(--border-subtle)] shadow-xs"
+              className="max-h-28 w-auto max-w-[240px] object-contain rounded-xl border border-[var(--border-subtle)] shadow-xs bg-black/10"
             />
             <button
               type="button"

@@ -503,6 +503,7 @@ export default function BrainyApp() {
       role: 'user',
       content: textToSend,
       created_at: new Date().toISOString(),
+      image: imagePayload || undefined,
     }
 
     // Add optimistic assistant message placeholder for streaming

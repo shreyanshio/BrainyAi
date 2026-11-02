@@ -120,6 +120,8 @@ export interface ChatMessage {
 
   isStreaming?: boolean
 
+  image?: string
+
 }
 
 

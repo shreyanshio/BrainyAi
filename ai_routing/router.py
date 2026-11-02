@@ -261,6 +261,13 @@ class AIRouter:
             include_completeness=not normal_use
         )
 
+        # Dynamic Language Intelligence (Hinglish Roman-script enforcement, Script fidelity)
+        try:
+            from ai_routing.language import apply_language_directive
+            sys_prompt = apply_language_directive(sys_prompt, prompt_text)
+        except Exception:
+            pass
+
         # ── Web Research Pre-Search Hook ──
         citations = []
         if resolved_task in (TaskType.WEB_RESEARCH, TaskType.CURRENT_INFO):
@@ -525,6 +532,13 @@ class AIRouter:
             normal_use=normal_use,
             include_completeness=not normal_use
         )
+
+        # Dynamic Language Intelligence (Hinglish Roman-script enforcement, Script fidelity)
+        try:
+            from ai_routing.language import apply_language_directive
+            sys_prompt = apply_language_directive(sys_prompt, prompt_text)
+        except Exception:
+            pass
 
         # Web research grounding hook for streaming
         if resolved_task in (TaskType.WEB_RESEARCH, TaskType.CURRENT_INFO):

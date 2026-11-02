@@ -658,6 +658,10 @@ export async function sendChatMessage(req: ChatSendRequest): Promise<ChatSendRes
 
       idempotency_key: req.idempotency_key,
 
+      image: req.image,
+
+      web_search: req.web_search,
+
     }),
 
   })
@@ -725,6 +729,10 @@ export async function streamChatMessage(
       tone: req.tone,
 
       idempotency_key: req.idempotency_key,
+
+      image: req.image,
+
+      web_search: req.web_search,
 
     }),
 

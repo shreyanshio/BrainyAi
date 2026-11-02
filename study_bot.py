@@ -20,6 +20,120 @@ if hasattr(sys.stdout, "reconfigure"):
 from groq import Groq
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram import Poll
+def safe_split_telegram_message(text: str, max_chunk: int = 4000) -> list[str]:
+    """
+    Splits long messages into clean Telegram chunks without breaking code fences.
+    """
+    if len(text) <= max_chunk:
+        return [text]
+
+    chunks = []
+    lines = text.split("\n")
+    current_chunk = []
+    current_len = 0
+    in_code_block = False
+    code_fence_header = "```"
+
+    for line in lines:
+        if line.strip().startswith("```"):
+            if not in_code_block:
+                in_code_block = True
+                code_fence_header = line.strip()
+            else:
+                in_code_block = False
+                code_fence_header = "```"
+
+        line_len = len(line) + 1
+        if current_len + line_len > max_chunk:
+            if in_code_block:
+                current_chunk.append("```")
+            chunks.append("\n".join(current_chunk))
+            current_chunk = []
+            if in_code_block:
+                current_chunk.append(code_fence_header)
+                current_len = len(code_fence_header) + 1
+            else:
+                current_len = 0
+
+        current_chunk.append(line)
+        current_len += line_len
+
+    if current_chunk:
+        chunks.append("\n".join(current_chunk))
+
+    return chunks
+
+
+ONBOARDING_WELCOME_TEXT = """👋 Hi, I'm Brainy — your AI study assistant.
+
+Here is what I can do for you:
+• Answer questions across subjects with clear, step-by-step explanations
+• Understand and analyze study diagrams, homework problems, and textbook photos
+• Transcribe and answer voice questions
+• Research complex academic topics with grounded web search
+• Help you prepare with practice quizzes and revision summaries
+
+How to interact:
+• Just send any question directly in private chat
+• Send a photo with your question as the caption
+• Send a voice note with your question
+• In groups: @mention me or use /image and /voice commands
+
+Use /help to see all available commands."""
+
+ONBOARDING_KEYBOARD = InlineKeyboardMarkup([
+    [
+        InlineKeyboardButton("💬 Start Chatting", callback_data="cb_start_chat"),
+        InlineKeyboardButton("📚 Help & Commands", callback_data="cb_help"),
+    ],
+    [
+        InlineKeyboardButton("✨ Features", callback_data="cb_features"),
+        InlineKeyboardButton("🔒 Privacy", callback_data="cb_privacy"),
+    ],
+])
+
+HELP_COMMANDS_TEXT = """📚 𝗕𝗿𝗮𝗶𝗻𝘆 𝗖𝗼𝗺𝗺𝗮𝗻𝗱𝘀 & 𝗚𝘂𝗶𝗱𝗲:
+
+• /start - Welcome & onboarding overview
+• /help - Full command reference
+• /quota - View remaining image analyses and account status
+• /link <code> - Link your Telegram account to Brainy Web
+• /clear or /reset - Reset current conversation context
+• /image <question> - Analyze diagram, equation, or photo
+• /voice - Transcribe and answer a voice note (required in groups)
+• /quiz <topic> - Generate an interactive 5-question study quiz
+• /formula <subject> - Quick subject formulas (Physics, Chemistry, Math)
+• /login - Authorize active web session
+
+💡 𝗜𝗻𝘁𝗲𝗿𝗮𝗰𝘁𝗶𝗼𝗻 𝗧𝗶𝗽𝘀:
+- In private chat: send text, images, or voice notes directly.
+- In group chats: tag @BrainyBot or reply directly to bot messages."""
+
+FEATURES_TEXT = """✨ 𝗕𝗿𝗮𝗶𝗻𝘆 𝗞𝗲𝘆 𝗖𝗮𝗽𝗮𝗯𝗶𝗹𝗶𝘁𝗶𝗲𝘀:
+
+• 🧠 Multimodal Vision: Detailed step-by-step reasoning for textbook diagrams, numerical equations, and graphs via Gemini Vision.
+• 🌐 Dual Web Search: Real-time academic citations and current topic research via Tavily and DuckDuckGo.
+• 🗣 Natural Language Fluency: Seamless responses in English, Roman-script Hinglish, Hindi, and Gujarati.
+• 🎙 Audio Intelligence: Fast speech transcription via Groq Whisper large-v3-turbo.
+• 🔄 Unified Account: Shared 5-image visual quota between Web and Telegram via /link."""
+
+PRIVACY_TEXT = """🔒 𝗣𝗿𝗶𝘃𝗮𝗰𝘆 & 𝗗𝗮𝘁𝗮 𝗣𝗿𝗼𝘁𝗲𝗰𝘁𝗶𝗼𝗻:
+
+• 🛡 Complete User Isolation: Your questions and personal conversation history are strictly isolated and never leaked to other users.
+• 👥 Group Chat Discretion: In groups, Brainy only speaks when explicitly invoked and never stores group messages in your private study memory.
+• 🔐 Single-Use Linking: Web linking uses cryptographically random, ephemeral 10-minute tokens.
+• 🚫 No Third-Party Training: Your private study notes are never used for third-party model training."""
+
+from ai_routing.language import detect_language, apply_language_directive
+from ai_routing.quota import (
+    get_user_image_quota,
+    consume_user_image_quota,
+    refund_user_image_quota,
+    link_telegram_to_web_account,
+    resolve_effective_identity,
+    IMAGE_FREE_LIMIT,
+)
+
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     filters, ContextTypes, ConversationHandler, CallbackQueryHandler,
@@ -2210,9 +2324,10 @@ def _analyze_gemini_vision(image_bytes: bytes, question: str) -> str:
     if not GEMINI_API_KEYS:
         raise Exception("NO_KEYS: gemini_vision")
     VISION_MODELS = [
+        os.getenv("GEMINI_VISION_MODEL", "gemini-3.8-flash"),
+        "gemini-3.8-flash",
+        "gemini-3.5-flash",
         "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-3-flash-preview",
     ]
     key = _rotate_key("gemini", GEMINI_API_KEYS)
     img_b64 = base64.b64encode(image_bytes).decode("utf-8")
@@ -2375,32 +2490,17 @@ def is_abusing_owner(text: str) -> bool:
     return any(w in t for w in ABUSE_KEYWORDS) and any(n in t for n in OWNER_NAMES)
 
 async def send(update: Update, text: str, reply_markup=None):
-    """Send a message with HTML parse_mode for <code> blocks. Falls back to plain text on parse failure.
-
-    reply_markup is only attached to the LAST chunk when a message is long
-    enough to be split — Telegram doesn't allow the same InlineKeyboardMarkup
-    object to usefully appear on multiple messages, and it belongs on the
-    final one (e.g. the mini-app button after the /start welcome text).
-    """
+    """Send a message safely split for Telegram 4096-char ceiling without breaking code fences."""
     _has_html = "<code>" in text or "<pre>" in text
     _parse = "HTML" if _has_html else None
-    try:
-        if len(text) > 4000:
-            chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
-            for i, chunk in enumerate(chunks):
-                is_last = i == len(chunks) - 1
-                await update.message.reply_text(chunk, parse_mode=_parse, reply_markup=reply_markup if is_last else None)
-        else:
-            await update.message.reply_text(text, parse_mode=_parse, reply_markup=reply_markup)
-    except Exception:
-        # HTML parse failed (unclosed tags etc.) — fall back to plain text
-        if len(text) > 4000:
-            chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
-            for i, chunk in enumerate(chunks):
-                is_last = i == len(chunks) - 1
-                await update.message.reply_text(chunk, reply_markup=reply_markup if is_last else None)
-        else:
-            await update.message.reply_text(text, reply_markup=reply_markup)
+    chunks = safe_split_telegram_message(text, max_chunk=4000)
+    for i, chunk in enumerate(chunks):
+        is_last = (i == len(chunks) - 1)
+        markup = reply_markup if is_last else None
+        try:
+            await update.message.reply_text(chunk, parse_mode=_parse, reply_markup=markup)
+        except Exception:
+            await update.message.reply_text(chunk, reply_markup=markup)
 
 async def safe_edit(msg, text: str):
     try:
@@ -2459,7 +2559,10 @@ async def _run_ai(update: Update, messages: list, system_prompt: str, max_tok: i
     loading_msg = await update.message.reply_text(THINKING_DOTS[0])
     loop = asyncio.get_event_loop()
     plat = "telegram_group" if is_group(update) else "telegram_dm"
-    ai_task = loop.run_in_executor(None, lambda: ai_call(messages, system_prompt, max_tok, platform=plat))
+    # Apply deterministic language intelligence directive to preserve user language/script
+    detected_lang = detect_language(last_user_msg)
+    effective_prompt = apply_language_directive(system_prompt, detected_lang)
+    ai_task = loop.run_in_executor(None, lambda: ai_call(messages, effective_prompt, max_tok, platform=plat))
     try:
         dot = 1
         while not ai_task.done():
@@ -2493,7 +2596,7 @@ async def _run_ai(update: Update, messages: list, system_prompt: str, max_tok: i
         else:
             # Long answer: delete loading, send in chunks — buttons go on the final chunk
             await loading_msg.delete()
-            chunks = [result[i:i+4000] for i in range(0, len(result), 4000)]
+            chunks = safe_split_telegram_message(result, max_chunk=4000)
             for i, chunk in enumerate(chunks):
                 is_last = (i == len(chunks) - 1)
                 try:
@@ -2729,76 +2832,132 @@ async def process_query(update: Update, question: str, system_prompt=None, suppr
         base_prompt = SYSTEM_PROMPT
     max_tok = 250 if is_group(update) else None   # None = ai_call picks smart limit per question type
 
-    # Inject learning context + this user's own liked-answer memory
-    learn_ctx = get_learning_context(5)
+    # Inject this user's own liked-answer memory only (zero cross-user leakage)
     liked_ctx = get_liked_context(user_id, 5)
-    extra = "\n\n".join(c for c in (learn_ctx, liked_ctx) if c)
-    if extra:
-        base_prompt = base_prompt + "\n\n" + extra
+    if liked_ctx:
+        base_prompt = base_prompt + "\n\n" + liked_ctx
 
-    user_conversations[user_id].append({"role": "user", "content": question + level_ctx})
-    trim_history(user_id)
-    result = await _run_ai(update, user_conversations[user_id], base_prompt, max_tok, source="query", suppress_feedback=suppress_feedback)
-    if result:
-        user_conversations[user_id].append({"role": "assistant", "content": result})
-        save_user_memory_async(user_id)
+    if is_group(update):
+        # Strict isolation: NEVER record group messages into private personal conversation memory
+        group_msgs = [{"role": "user", "content": question + level_ctx}]
+        result = await _run_ai(update, group_msgs, base_prompt, max_tok, source="group_query", suppress_feedback=suppress_feedback)
+    else:
+        user_conversations[user_id].append({"role": "user", "content": question + level_ctx})
+        trim_history(user_id)
+        result = await _run_ai(update, user_conversations[user_id], base_prompt, max_tok, source="query", suppress_feedback=suppress_feedback)
+        if result:
+            user_conversations[user_id].append({"role": "assistant", "content": result})
+            save_user_memory_async(user_id)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #   IMAGE HANDLER
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if is_group(update) and MAINTENANCE_MODE and not is_owner(update):
-        return  # Silent during maintenance
-    if await maintenance_guard(update):
-        return
-    caption = update.message.caption or ""
-    if is_group(update):
-        if not caption.lower().startswith("/image"):
-            return
-        question = caption.partition(" ")[2].strip()
-    else:
-        question = caption
-        if question.lower().startswith("/image"):
-            question = question.partition(" ")[2].strip()
-
-    if update.message.photo:
-        file_obj = await context.bot.get_file(update.message.photo[-1].file_id)
-    elif update.message.document and update.message.document.mime_type.startswith("image/"):
-        file_obj = await context.bot.get_file(update.message.document.file_id)
-    else:
-        await send(update, "❌ Only image files are supported!")
+async def _process_image_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE, file_id: str, question: str):
+    """Core image analysis handler using real Gemini Vision and unified 5-image quota."""
+    user = update.effective_user
+    user_id = user.id
+    
+    # 1. Enforce unified 5-image quota
+    allowed, remaining, effective_id = consume_user_image_quota(user_id)
+    if not allowed:
+        await send(
+            update,
+            "⚠️ You've used your 5 free image requests.\n\n"
+            "Your image allowance is currently exhausted. You can continue asking text questions anytime, "
+            "or link your account with /link."
+        )
         return
 
-    loading_msg = await update.message.reply_text("🔍 Scanning .  ")
+    loading_msg = await update.message.reply_text("🔍 Scanning image with Gemini Vision .  ")
     try:
+        file_obj = await context.bot.get_file(file_id)
         buf = io.BytesIO()
         await file_obj.download_to_memory(buf)
         image_bytes = buf.getvalue()
+
         loop = asyncio.get_event_loop()
-        ai_task = loop.run_in_executor(None, lambda: analyze_image(image_bytes, question))
+        prompt_q = question or "Please analyze and explain this study material in detail."
+        ai_task = loop.run_in_executor(None, lambda: _analyze_gemini_vision(image_bytes, prompt_q))
+
         dot = 0
         while not ai_task.done():
             await safe_edit(loading_msg, SCANNING_DOTS[dot % 3])
             dot += 1
             await asyncio.sleep(0.5)
+
         result = await ai_task
         result = clean_response(result)
         await loading_msg.delete()
-        await send(update, f"📷 𝗜𝗺𝗮𝗴𝗲 𝗔𝗻𝗮𝗹𝘆𝘀𝗶𝘀:\n\n{result}")
-        print(f"Image analyzed for {update.effective_user.id}")
-    except Exception as e:
-        logger.error(f"Image error: {e}")
-        await loading_msg.delete()
-        if "NO_KEYS" in str(e):
-            await send(update,
-                "❌ Add GEMINI_API_KEY_1 to .env for image analysis!\n"
-                "🔗 Free key: aistudio.google.com"
-            )
-        else:
-            await send(update, f"❌ Error scanning image: {str(e)[:100]}\n\n⏳ Try again in a bit!")
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        quota_badge = f"\n\n📊 Free image requests remaining: {remaining} of {IMAGE_FREE_LIMIT}"
+        await send(update, f"📷 𝗜𝗺𝗮𝗴𝗲 𝗔𝗻𝗮𝗹𝘆𝘀𝗶𝘀:\n\n{result}{quota_badge}")
+
+        # Store in user conversation if private
+        if not is_group(update):
+            q_text = f"[Image Question]: {question}" if question else "[Analyzed Image]"
+            user_conversations[user_id].append({"role": "user", "content": q_text})
+            user_conversations[user_id].append({"role": "assistant", "content": result})
+            save_user_memory_async(user_id)
+    except Exception as e:
+        logger.error(f"Image analysis error: {e}")
+        refund_user_image_quota(effective_id)
+        try:
+            await loading_msg.delete()
+        except Exception:
+            pass
+        if "NO_KEYS" in str(e):
+            await send(update, "❌ Vision service temporarily unavailable. Free quota refunded. Please try again later!")
+        else:
+            await send(update, f"❌ Error scanning image: {str(e)[:100]}\n\n⏳ Free quota refunded. Try again in a bit!")
+
+
+async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles incoming photos and image documents."""
+    if is_group(update) and MAINTENANCE_MODE and not is_owner(update):
+        return
+    if await maintenance_guard(update):
+        return
+
+    msg = update.message
+    if not msg:
+        return
+    caption = (msg.caption or "").strip()
+
+    # ── GROUP CHAT IMAGE RESTRICTION ──
+    if is_group(update):
+        # Strict rule: In groups, only handle images if caption starts with /image
+        if not caption.lower().startswith("/image"):
+            return  # Silently ignore uncommanded images in group chats
+        question = caption.partition(" ")[2].strip()
+        if not question:
+            await msg.reply_text("Please include your question with the /image command, e.g. `/image Solve this numerical`")
+            return
+    else:
+        # ── PRIVATE CHAT IMAGE BEHAVIOR ──
+        question = caption
+        if question.lower().startswith("/image"):
+            question = question.partition(" ")[2].strip()
+
+        # If user sent photo without any question/caption, do NOT invent a task
+        if not question:
+            await msg.reply_text(
+                "📷 What would you like me to help you with regarding this image?\n\n"
+                "(e.g., solve this problem, explain this diagram, summarize these notes)"
+            )
+            return
+
+    # Extract file ID
+    if msg.photo:
+        file_id = msg.photo[-1].file_id
+    elif msg.document and msg.document.mime_type and msg.document.mime_type.startswith("image/"):
+        file_id = msg.document.file_id
+    else:
+        return
+
+    await _process_image_analysis(update, context, file_id, question)
+
+
 def transcribe_audio(audio_bytes: bytes, filename: str = "voice.ogg") -> str:
     if not GROQ_API_KEYS:
         raise Exception("No Groq key configured for voice transcription")
@@ -2816,8 +2975,13 @@ def transcribe_audio(audio_bytes: bytes, filename: str = "voice.ogg") -> str:
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if is_group(update) and MAINTENANCE_MODE and not is_owner(update):
+    """Handles incoming voice notes."""
+    # ── GROUP CHAT VOICE RESTRICTION ──
+    if is_group(update):
+        # In groups, uncommanded voice notes must be ignored
+        # Group voice transcription is triggered via /voice command
         return
+
     if await maintenance_guard(update):
         return
 
@@ -2826,7 +2990,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     _maybe_register_chat(update)
-    status_msg = await msg.reply_text("Transcribing your voice note...")
+    status_msg = await msg.reply_text("🎙 Transcribing your voice note...")
     try:
         file_obj = await context.bot.get_file(msg.voice.file_id)
         buf = io.BytesIO()
@@ -2836,7 +3000,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not transcript:
             await status_msg.edit_text("I could not hear clear speech in that voice note. Try once more?")
             return
-        await status_msg.edit_text(f"Transcribed:\n{transcript}")
+        await status_msg.edit_text(f"🎙 Transcribed:\n\"{transcript}\"")
         await process_query(update, transcript)
     except Exception as e:
         logger.error(f"Voice transcription error: {e}")
@@ -2844,6 +3008,45 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await status_msg.edit_text(f"Could not transcribe that voice note: {str(e)[:100]}")
         except Exception:
             await send(update, "Could not transcribe that voice note. Try again in a bit.")
+
+
+async def voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Explicit /voice command: handles voice note in reply or attached in groups & private."""
+    if await maintenance_guard(update):
+        return
+
+    msg = update.message
+    if not msg:
+        return
+
+    target_msg = None
+    if msg.reply_to_message and msg.reply_to_message.voice:
+        target_msg = msg.reply_to_message
+    elif msg.voice:
+        target_msg = msg
+
+    if not target_msg:
+        await msg.reply_text(
+            "🎙 To transcribe a voice note in a group:\n"
+            "Reply to the voice note with the command /voice"
+        )
+        return
+
+    status_msg = await msg.reply_text("🎙 Transcribing voice note...")
+    try:
+        file_obj = await context.bot.get_file(target_msg.voice.file_id)
+        buf = io.BytesIO()
+        await file_obj.download_to_memory(buf)
+        loop = asyncio.get_event_loop()
+        transcript = await loop.run_in_executor(None, lambda: transcribe_audio(buf.getvalue()))
+        if not transcript:
+            await status_msg.edit_text("Could not hear clear speech in that voice note.")
+            return
+        await status_msg.edit_text(f"🎙 Transcribed:\n\"{transcript}\"")
+        await process_query(update, transcript)
+    except Exception as e:
+        logger.error(f"Voice command error: {e}")
+        await status_msg.edit_text("Could not transcribe that voice note. Try again later.")
 
 
 #   ALL COMMANDS
@@ -2881,6 +3084,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=keyboard
         )
         return
+
+    # ── Standard Professional Onboarding ──
+    user = update.effective_user
+    user_id = user.id
+    # Ensure user memory is restored from Supabase if not already cached (DO NOT clear memory on /start)
+    load_user_into_memory(user_id, user.first_name or "", user.username or "")
+
+    await update.message.reply_text(
+        ONBOARDING_WELCOME_TEXT,
+        reply_markup=ONBOARDING_KEYBOARD
+    )
 
 
 async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3087,23 +3301,55 @@ async def brainy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def image_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /image command: accepts photo in current message or replied message."""
     if await maintenance_guard(update):
         return
-    if update.message.photo or (update.message.document and update.message.document.mime_type and update.message.document.mime_type.startswith("image/")):
-        await handle_image(update, context)
-    else:
+
+    msg = update.message
+    if not msg:
+        return
+
+    file_id = None
+    question = ""
+
+    # Check attached photo
+    if msg.photo:
+        file_id = msg.photo[-1].file_id
+        caption = msg.caption or ""
+        question = caption.partition(" ")[2].strip() if caption.lower().startswith("/image") else caption
+    elif msg.document and msg.document.mime_type and msg.document.mime_type.startswith("image/"):
+        file_id = msg.document.file_id
+        caption = msg.caption or ""
+        question = caption.partition(" ")[2].strip() if caption.lower().startswith("/image") else caption
+    elif msg.reply_to_message:
+        reply = msg.reply_to_message
+        if reply.photo:
+            file_id = reply.photo[-1].file_id
+        elif reply.document and reply.document.mime_type and reply.document.mime_type.startswith("image/"):
+            file_id = reply.document.file_id
+        # Question is from command message
+        question = msg.text.partition(" ")[2].strip() if msg.text else ""
+
+    if not file_id:
         if is_group(update):
-            await send(update,
-                "📷 Use /image command with an image!\n\n"
-                "→ Send the image\n"
-                "→ Write image question as caption\n\n"
-                "📝 Example: Image attach + caption: /image Solve this numerical"
+            await send(
+                update,
+                "📷 How to use /image in groups:\n\n"
+                "• Send photo with caption: `/image <question>`\n"
+                "• Or reply to any photo with: `/image <question>`"
             )
         else:
-            await send(update,
-                "📷 Just send an image with a question as the caption in private chat!\n\n"
-                "💡 Attach the image and write your question in the caption."
+            await send(
+                update,
+                "📷 Send an image with your question as the caption, or reply to an image with `/image <question>`."
             )
+        return
+
+    if not question:
+        await send(update, "❓ Please specify what you want to analyze or solve about this image, e.g. `/image Solve question 3`")
+        return
+
+    await _process_image_analysis(update, context, file_id, question)
 
 
 async def roast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3290,6 +3536,67 @@ async def maintenance_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         await send(update, "✅ Maintenance Mode OFF\n🚀 Bot is available for everyone again!")
         print("MAINTENANCE MODE: OFF")
+
+
+async def link_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /link <code>: links Telegram account with Brainy Web account."""
+    if await maintenance_guard(update):
+        return
+
+    user = update.effective_user
+    user_id = user.id
+    args = context.args or []
+
+    if not args:
+        await send(
+            update,
+            "🔗 𝗟𝗶𝗻𝗸 𝗧𝗲𝗹𝗲𝗴𝗿𝗮𝗺 𝘁𝗼 𝗕𝗿𝗮𝗶𝗻𝘆 𝗪𝗲𝗯:\n\n"
+            "1. Log in to Brainy Web\n"
+            "2. Open Settings → Telegram Link\n"
+            "3. Generate a 6-character link code\n"
+            "4. Send it here: `/link <code>`\n\n"
+            "Once linked, your conversation memory and 5-image allowance are synchronized across both platforms."
+        )
+        return
+
+    code = args[0].strip().upper()
+    success, web_id_or_err = link_telegram_to_web_account(telegram_id=user_id, link_code=code)
+    if success:
+        await send(
+            update,
+            "✅ 𝗦𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹𝗹𝘆 𝗟𝗶𝗻𝗸𝗲𝗱!\n\n"
+            "Your Telegram account is now unified with your Brainy Web account.\n"
+            "• Shared 5-image reasoning allowance active\n"
+            "• Unified study memory enabled"
+        )
+    else:
+        await send(
+            update,
+            f"❌ Linking failed: {web_id_or_err}\n\n"
+            "Please generate a fresh link code from the web settings and try again within 10 minutes."
+        )
+
+
+async def quota_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /quota command: shows remaining daily text & image allowance."""
+    if await maintenance_guard(update):
+        return
+
+    user_id = update.effective_user.id
+    quota = get_user_image_quota(user_id)
+    limit = quota.get("limit", IMAGE_FREE_LIMIT)
+    used = quota.get("used", 0)
+    remaining = quota.get("remaining", max(0, limit - used))
+    linked_note = "• Linked Account: Active ✅" if quota.get("is_linked") else "• Linked Account: Not linked (use /link <code> to sync)"
+
+    await send(
+        update,
+        "📊 𝗕𝗥𝗔𝗜𝗡𝗬 𝗔𝗰𝗰𝗼𝘂𝗻𝘁 𝗤𝘂𝗼𝘁𝗮:\n\n"
+        "• Text Questions: Unlimited\n"
+        f"• Image Analyses: {remaining} of {limit} remaining\n"
+        f"{linked_note}\n\n"
+        "💡 5 free image reasoning requests are shared across Web and Telegram."
+    )
 
 
 async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4099,6 +4406,20 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     user_id  = query.from_user.id if query.from_user else None
     msg_id   = query.message.message_id if query.message else None
 
+    # ── Onboarding Interactive Callbacks ───────────────────
+    if data == "cb_start_chat":
+        await query.message.reply_text("💬 Just send me any question, homework problem, or concept you'd like to understand. I'm ready!")
+        return
+    elif data == "cb_help":
+        await query.message.reply_text(HELP_COMMANDS_TEXT)
+        return
+    elif data == "cb_features":
+        await query.message.reply_text(FEATURES_TEXT)
+        return
+    elif data == "cb_privacy":
+        await query.message.reply_text(PRIVACY_TEXT)
+        return
+
     # ── 👍 / 👎 feedback ─────────────────────────────────────
     if data in ("fb_up", "fb_down"):
         # Remove the buttons immediately — one-shot interaction
@@ -4505,6 +4826,10 @@ def main():
     app.add_handler(CommandHandler("ask",         ask_command))
     app.add_handler(CommandHandler("brainy",      brainy_command))
     app.add_handler(CommandHandler("image",       image_command))
+    app.add_handler(CommandHandler("voice",       voice_command))
+    app.add_handler(CommandHandler("link",        link_command))
+    app.add_handler(CommandHandler("quota",       quota_command))
+    app.add_handler(CommandHandler("reset",       clear_command))
     app.add_handler(CommandHandler("roast",       roast_command))
     app.add_handler(CommandHandler("maintenance", maintenance_command))
     app.add_handler(CommandHandler("providers",   providers_command))
