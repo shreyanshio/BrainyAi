@@ -12,3 +12,5 @@ sympy>=1.13.0
 cryptography>=41.0.0
 pytesseract>=0.3.10
 pillow>=10.0.0
+ddgs>=9.16.1
+PyYAML>=6.0.0

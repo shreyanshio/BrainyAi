@@ -1,8 +1,0 @@
-# Nixpacks configuration — Python-only build for Railway.
-# The Next.js frontend is deployed separately to Cloudflare Workers.
-
-[phases.setup]
-nixPkgs = ["...", "gcc", "libffi", "openssl", "tesseract5"]
-
-[start]
-cmd = "gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120"
