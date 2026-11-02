@@ -23,6 +23,16 @@ class CostCategory(str, Enum):
     UNKNOWN    = "UNKNOWN"     # Unverified pricing
 
 
+def mask_credential(key: str) -> str:
+    """Masks an API key for safe telemetry, admin view, and logs (e.g. '********A12F')."""
+    if not key or not isinstance(key, str):
+        return "********"
+    clean = key.strip()
+    if len(clean) <= 6:
+        return "********"
+    return "********" + clean[-4:].upper()
+
+
 @dataclass
 class ModelSpec:
     model_id: str
@@ -45,12 +55,26 @@ class ModelSpec:
     fallback_priority: int = 1
     availability_status: str = "available"  # "available", "unavailable", "quarantined"
     last_verified_ts: float = field(default_factory=time.time)
+    model_category: str = "general"  # "lightweight", "main_intelligence", "reasoning", "multimodal", "fast", "fallback"
+    supported_input_modalities: List[str] = field(default_factory=lambda: ["text"])
+    supported_output_modalities: List[str] = field(default_factory=lambda: ["text"])
+    is_free_tier: bool = True
+    is_approved_for_production: bool = True
+    can_handle_sensitive_data: bool = False
 
     def __post_init__(self):
+        if not self.supported_input_modalities:
+            self.supported_input_modalities = list(self.supported_modalities)
+        if self.supports_vision and "image" not in self.supported_input_modalities:
+            self.supported_input_modalities.append("image")
+        if "image" in self.supported_input_modalities and not self.supports_vision:
+            self.supports_vision = True
         if self.supports_vision and "image" not in self.supported_modalities:
             self.supported_modalities.append("image")
         elif "image" in self.supported_modalities and not self.supports_vision:
             self.supports_vision = True
+        if self.supports_structured_json and "json" not in self.supported_output_modalities:
+            self.supported_output_modalities.append("json")
 
 
 def collect_key_pool(prefix: str, count: int = 15) -> List[str]:
@@ -171,10 +195,11 @@ class ProviderRegistry:
             self._models.clear()
 
             # Groq models
-            self._register(ModelSpec("llama-3.1-8b-instant", "groq", "Llama 3.1 8B Instant", CostCategory.FREE_TIER, 0.05, 0.08, supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=15.0, lifecycle="stable"))
-            self._register(ModelSpec("llama-3.3-70b-versatile", "groq", "Llama 3.3 70B Versatile", CostCategory.FREE_TIER, 0.59, 0.79, supports_streaming=True, supports_structured_json=True, max_output_tokens=8192, timeout_sec=25.0, lifecycle="stable"))
-            self._register(ModelSpec("qwen/qwen3.8-27b", "groq", "Qwen 3.8 27B", CostCategory.FREE_TIER, 0.20, 0.60, supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=20.0, lifecycle="stable"))
-            self._register(ModelSpec("openai/gpt-oss-120b", "groq", "GPT OSS 120B", CostCategory.FREE_TIER, 0.60, 1.20, supports_streaming=True, supports_structured_json=True, max_output_tokens=8192, timeout_sec=25.0, lifecycle="stable"))
+            self._register(ModelSpec("llama-3.1-8b-instant", "groq", "Llama 3.1 8B Instant", CostCategory.FREE_TIER, 0.05, 0.08, supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=15.0, lifecycle="stable", model_category="fast"))
+            self._register(ModelSpec("llama-3.3-70b-versatile", "groq", "Llama 3.3 70B Versatile", CostCategory.FREE_TIER, 0.59, 0.79, supports_streaming=True, supports_structured_json=True, max_output_tokens=8192, timeout_sec=25.0, lifecycle="stable", model_category="fallback"))
+            self._register(ModelSpec("qwen/qwen3.8-27b", "groq", "Qwen 3.8 27B", CostCategory.FREE_TIER, 0.20, 0.60, supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=20.0, lifecycle="stable", model_category="fallback"))
+            self._register(ModelSpec("openai/gpt-oss-20b", "groq", "GPT OSS 20B", CostCategory.FREE_TIER, 0.20, 0.40, supports_streaming=True, supports_structured_json=True, max_output_tokens=4096, timeout_sec=20.0, lifecycle="stable", model_category="fast"))
+            self._register(ModelSpec("openai/gpt-oss-120b", "groq", "GPT OSS 120B", CostCategory.FREE_TIER, 0.60, 1.20, supports_streaming=True, supports_structured_json=True, max_output_tokens=8192, timeout_sec=25.0, lifecycle="stable", model_category="fallback"))
 
             # Gemini models (Multimodal, Thinking & Reasoning Support)
             self._register(ModelSpec(
@@ -182,7 +207,7 @@ class ProviderRegistry:
                 supports_streaming=True, supports_structured_json=True, supports_vision=True,
                 supported_modalities=["text", "image", "audio", "video"],
                 supported_thinking_levels=["low", "medium", "high"],
-                lifecycle="stable", is_paid_only=False,
+                lifecycle="stable", is_paid_only=False, model_category="main_intelligence",
                 max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=35.0, fallback_priority=1
             ))
             self._register(ModelSpec(
@@ -190,7 +215,7 @@ class ProviderRegistry:
                 supports_streaming=True, supports_structured_json=True, supports_vision=True,
                 supported_modalities=["text", "image", "audio", "video"],
                 supported_thinking_levels=["low", "medium", "high"],
-                lifecycle="stable", is_paid_only=False,
+                lifecycle="stable", is_paid_only=False, model_category="main_intelligence",
                 max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=30.0, fallback_priority=2
             ))
             self._register(ModelSpec(
@@ -198,7 +223,7 @@ class ProviderRegistry:
                 supports_streaming=True, supports_structured_json=True, supports_vision=True,
                 supported_modalities=["text", "image", "audio", "video"],
                 supported_thinking_levels=[],
-                lifecycle="stable", is_paid_only=False,
+                lifecycle="stable", is_paid_only=False, model_category="lightweight",
                 max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=20.0, fallback_priority=3
             ))
             self._register(ModelSpec(
@@ -206,7 +231,7 @@ class ProviderRegistry:
                 supports_streaming=True, supports_structured_json=True, supports_vision=True,
                 supported_modalities=["text", "image", "audio", "video"],
                 supported_thinking_levels=[],
-                lifecycle="preview", is_paid_only=False,
+                lifecycle="preview", is_paid_only=False, model_category="lightweight",
                 max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=20.0, fallback_priority=4
             ))
             self._register(ModelSpec(
@@ -214,7 +239,7 @@ class ProviderRegistry:
                 supports_streaming=True, supports_structured_json=True, supports_vision=True,
                 supported_modalities=["text", "image", "audio", "video"],
                 supported_thinking_levels=["low", "medium", "high"],
-                lifecycle="preview", is_paid_only=False,
+                lifecycle="preview", is_paid_only=False, model_category="reasoning",
                 max_context_tokens=1000000, max_output_tokens=8192, timeout_sec=45.0, fallback_priority=5
             ))
             self._register(ModelSpec(

@@ -40,6 +40,9 @@ from ai_routing.continuation import (
     MAX_CONTINUATION_ROUNDS
 )
 from ai_routing.maths import can_solve_locally, solve_locally, MathResult
+from ai_routing.cache import response_cache
+from ai_routing.memory import detect_topic_change
+from ai_routing.rate_limiter import intelligent_rate_limiter
 
 logger = logging.getLogger("ai_router")
 
@@ -224,6 +227,22 @@ class AIRouter:
                         verification_details=math_res.verification_details
                     )
 
+        # ── Fast-Path 2: Response Cache (Zero latency & token spend for static definitions) ──
+        if not json_output and not (document_context and (document_context.get("pdf_text") or document_context.get("has_image"))):
+            cached_result = response_cache.get(prompt_text, resolved_task.value, "primary", user_id=user_id)
+            if cached_result:
+                cached_text, cache_entry = cached_result
+                return RouterResponse(
+                    text=cached_text,
+                    task=resolved_task,
+                    depth=resolved_depth,
+                    provider=cache_entry.provider,
+                    model=cache_entry.model,
+                    latency_ms=1.2,
+                    input_tokens=0,
+                    output_tokens=cache_entry.output_tokens,
+                )
+
         sys_prompt = prompt_registry.compose_prompt(
             task=resolved_task,
             platform=resolved_plat,
@@ -342,6 +361,19 @@ class AIRouter:
                     prompt_tokens_estimated=True,
                     is_estimated=bool(tot_in_tokens is None or tot_out_tokens is None)
                 ))
+
+                if not json_output and accumulated_text and not fallback_used:
+                    response_cache.set(
+                        prompt_text,
+                        accumulated_text,
+                        resolved_task.value,
+                        model_id,
+                        provider_name,
+                        user_id=str(user_id) if user_id else None,
+                        input_tokens=tot_in_tokens or 0,
+                        output_tokens=tot_out_tokens or 0,
+                        document_context=document_context
+                    )
 
                 return RouterResponse(
                     text=accumulated_text,
@@ -467,6 +499,14 @@ class AIRouter:
                     ))
                     yield math_res.formatted_markdown
                     return
+
+        # ── Fast-Path: Response Cache for Streaming ──
+        if not (document_context and (document_context.get("pdf_text") or document_context.get("has_image"))):
+            cached_result = response_cache.get(prompt_text, resolved_task.value, "primary", user_id=user_id)
+            if cached_result:
+                cached_text, _ = cached_result
+                yield cached_text
+                return
 
         sys_prompt = prompt_registry.compose_prompt(
             task=resolved_task,

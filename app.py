@@ -2750,12 +2750,18 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
         "Treat a new chat as a separate conversation."
     )
     if sess and sess.get("context_summary"):
-        system_prompt += (
-            "\n\nEarlier turns from this same conversation are summarized below. Treat this as trusted "
-            "conversation context, reconcile it with the newer messages, and preserve specific names, "
-            "decisions, constraints, and unresolved questions.\n"
-            + sess["context_summary"][:16000]
-        )
+        from ai_routing.memory import detect_topic_change
+        summary_body = sess["context_summary"]
+        topic_changed = detect_topic_change(content, summary_body)
+        if not topic_changed:
+            system_prompt += (
+                "\n\nEarlier turns from this same conversation are summarized below. Treat this as trusted "
+                "conversation context, reconcile it with the newer messages, and preserve specific names, "
+                "decisions, constraints, and unresolved questions.\n"
+                + summary_body[:16000]
+            )
+        else:
+            logger.info("Topic shift detected in conversation; suppressing prior topic summary for turn")
 
     # Inject learning contexts
     liked_ctx = study_bot.get_liked_context(user_id, 5)

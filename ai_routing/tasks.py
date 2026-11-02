@@ -55,6 +55,20 @@ class TaskType(str, Enum):
     WRITING                       = "WRITING"
     CHAT_TITLE_GENERATION         = "CHAT_TITLE_GENERATION"
 
+    # Phase 3.2 Canonical Task Categories
+    TEXT_CORRECTION               = "TEXT_CORRECTION"
+    GENERAL_STUDY                 = "GENERAL_STUDY"
+    COMPLEX_MATH                  = "COMPLEX_MATH"
+    COMPLEX_DEBUGGING             = "COMPLEX_DEBUGGING"
+    CODE_ARCHITECTURE             = "CODE_ARCHITECTURE"
+    LONG_DOC_SYNTHESIS            = "LONG_DOC_SYNTHESIS"
+    PDF_EXTRACTION                = "PDF_EXTRACTION"
+    PDF_IMAGE                     = "PDF_IMAGE"
+    MCQ_GENERATION                = "MCQ_GENERATION"
+    SHORT_JSON_EXTRACTION         = "SHORT_JSON_EXTRACTION"
+    CURRENT_INFO                  = "CURRENT_INFO"
+    UNCERTAIN_COMPLEX             = "UNCERTAIN_COMPLEX"
+
 
 class ResponseDepth(str, Enum):
     FAST     = "FAST"
@@ -186,7 +200,7 @@ _COMPARISON_KEYWORDS = re.compile(
 
 # Grammar / Typo fixes (Lightweight path)
 _GRAMMAR_FIX_KEYWORDS = re.compile(
-    r"\b(small grammar|minor grammar|typo|spelling mistake|correct this typo|fix this typo|fix (?:the |this )?(?:small )?grammar(?: mistake)?|check (?:the |this )?grammar|grammar mistake)\b",
+    r"\b(small grammar|minor grammar|typo|spelling mistake|correct this typo|fix this typo|correct (?:this |the )?grammar|fix (?:the |this )?(?:small )?grammar(?: mistake)?|check (?:the |this )?grammar|grammar mistake)\b",
     re.IGNORECASE
 )
 
@@ -244,6 +258,24 @@ _CASUAL_GREETING_KEYWORDS = re.compile(
     r"^(hi|hello|hey|hola|namaste|sup|yo|good\s+(morning|afternoon|evening|night)|thanks|thank\s+you|thx|ok|okay|k|bye|cya|see\s+you|how\s+are\s+you|kya\s+haal|kem\s+cho|wassup)[\s\.\!\?]*$",
     re.IGNORECASE
 )
+
+_FOLLOWUP_KEYWORDS = re.compile(
+    r"\b(explain\s+(?:that|it|again)|give\s+(?:me\s+)?an?\s+example|make\s+it\s+simpler|what\s+about\s+(?:the\s+)?(?:second|first|third|last)\s+point|continue|why\s+does\s+this\s+happen|more\s+details|clarify|aur\s+samjhao|aur\s+batao|ek\s+aur\s+example|explain\s+further)\b",
+    re.IGNORECASE
+)
+
+
+def is_conversational_followup(text: str) -> bool:
+    """Detects whether a message is an immediate follow-up to the preceding conversation turn."""
+    if not text:
+        return False
+    t = text.strip()
+    if _FOLLOWUP_KEYWORDS.search(t):
+        return True
+    words = t.split()
+    if len(words) <= 3 and t.lower() in ("continue", "go on", "what next", "why?", "explain", "aur", "more", "next?"):
+        return True
+    return False
 
 
 def classify_task_multi(
@@ -321,6 +353,16 @@ def classify_task(
                 text = (m.get("content") or "").strip()
                 break
 
+    # Follow-up optimization: reuse prior task state for direct follow-ups without reclassifying from scratch
+    if is_conversational_followup(text) and messages and len(messages) > 1:
+        for m in reversed(messages[:-1]):
+            if m.get("role") == "user":
+                prev_text = (m.get("content") or "").strip()
+                if prev_text and not is_conversational_followup(prev_text):
+                    prev_task = classify_task(prompt=prev_text, context=context, depth=depth)
+                    if prev_task not in (TaskType.QUICK_CHAT, TaskType.CHAT_TITLE_GENERATION):
+                        return prev_task
+
     # 1. Document / PDF tasks (Academic Study Studio)
     is_doc_topic = has_pdf_context or "pdf" in text.lower() or "document" in text.lower()
     if is_doc_topic:
@@ -353,8 +395,8 @@ def classify_task(
             return TaskType.DIAGRAM_ANALYSIS
         return TaskType.IMAGE_QUESTION
 
-    # 4. Web Research
-    if _RESEARCH_KEYWORDS.search(text) and len(text.split()) < 25:
+    # 4. Web Research (excludes algorithmic terms like binary search or explicit code queries)
+    if _RESEARCH_KEYWORDS.search(text) and not _CODE_KEYWORDS.search(text) and not re.search(r"\b(?:binary|linear|depth[- ]first|breadth[- ]first|tree|graph)\s+search\b", text, re.IGNORECASE) and len(text.split()) < 25:
         return TaskType.WEB_RESEARCH
 
     # Route short, plain definition questions through Normal Use even when the
@@ -473,7 +515,7 @@ def classify_task_complexity(
     word_count = len(words)
 
     # 1. FAST: Casual greetings, single-word acknowledgments, quick conversational turns
-    if _CASUAL_GREETING_KEYWORDS.match(text) or (word_count <= 3 and _CASUAL_GREETING_KEYWORDS.search(text)):
+    if not is_conversational_followup(text) and (_CASUAL_GREETING_KEYWORDS.match(text) or (word_count <= 3 and _CASUAL_GREETING_KEYWORDS.search(text))):
         return TaskComplexity.FAST
 
     if resolved_task == TaskType.QUICK_CHAT and (word_count <= 6 or resolved_depth == ResponseDepth.FAST):
@@ -493,6 +535,9 @@ def classify_task_complexity(
         return TaskComplexity.DEEP
 
     # 3. LIGHT: Short definitions, basic facts, simple translations, brief explanations, minor grammar/typo fixes
+    if resolved_task == TaskType.TEXT_CORRECTION:
+        return TaskComplexity.LIGHT
+
     if _GRAMMAR_FIX_KEYWORDS.search(text):
         return TaskComplexity.LIGHT
 

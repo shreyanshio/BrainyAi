@@ -76,6 +76,18 @@ TASK_TO_PROMPT_FILE: Dict[TaskType, str] = {
     TaskType.CHAT_TITLE_GENERATION: "title_prompt.txt",
     TaskType.TRANSLATION: "translate_prompt.txt",
     TaskType.WRITING: "brainy_prompt.txt",
+    TaskType.TEXT_CORRECTION: "summarize_prompt.txt",
+    TaskType.GENERAL_STUDY: "brainy_prompt.txt",
+    TaskType.COMPLEX_MATH: "maths.txt",
+    TaskType.COMPLEX_DEBUGGING: "coding_prompt.txt",
+    TaskType.CODE_ARCHITECTURE: "coding_prompt.txt",
+    TaskType.LONG_DOC_SYNTHESIS: "pdf_notes_prompt.txt",
+    TaskType.PDF_EXTRACTION: "pdf_qa_prompt.txt",
+    TaskType.PDF_IMAGE: "image_prompt.txt",
+    TaskType.MCQ_GENERATION: "pdf_quiz_prompt.txt",
+    TaskType.SHORT_JSON_EXTRACTION: "summarize_prompt.txt",
+    TaskType.CURRENT_INFO: "search_prompt.txt",
+    TaskType.UNCERTAIN_COMPLEX: "brainy_prompt.txt",
 }
 
 # Slash Command / Intent String to Prompt File Mapping

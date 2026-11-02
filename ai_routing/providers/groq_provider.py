@@ -74,7 +74,7 @@ class GroqProvider(BaseProvider):
             raise RuntimeError("NO_KEYS: groq")
 
         primary_model = model_id or registry.groq_fast_model
-        model_chain = [primary_model, registry.groq_balanced_model, "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen/qwen3.8-27b"]
+        model_chain = [primary_model, registry.groq_balanced_model, "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
         # De-duplicate
         model_chain = list(dict.fromkeys(model_chain))
 
@@ -139,7 +139,7 @@ class GroqProvider(BaseProvider):
             raise RuntimeError("NO_KEYS: groq")
 
         primary_model = model_id or registry.groq_fast_model
-        model_chain = [primary_model, registry.groq_balanced_model, "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen/qwen3.8-27b"]
+        model_chain = [primary_model, registry.groq_balanced_model, "llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
         model_chain = list(dict.fromkeys(model_chain))
 
         last_exc = None

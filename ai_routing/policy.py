@@ -23,6 +23,8 @@ PDF_STUDY_TASKS = {
     TaskType.QUIZ_GENERATION,
     TaskType.FLASHCARD_GENERATION,
     TaskType.IMPORTANT_QUESTION_GENERATION,
+    TaskType.LONG_DOC_SYNTHESIS,
+    TaskType.MCQ_GENERATION,
 }
 
 CODING_TASKS = {
@@ -31,6 +33,8 @@ CODING_TASKS = {
     TaskType.CODING_EXPLANATION,
     TaskType.DSA,
     TaskType.SQL,
+    TaskType.COMPLEX_DEBUGGING,
+    TaskType.CODE_ARCHITECTURE,
 }
 
 MATH_TASKS = {
@@ -40,6 +44,7 @@ MATH_TASKS = {
     TaskType.CALCULUS,
     TaskType.STATISTICS,
     TaskType.MATH_AND_LOGIC,
+    TaskType.COMPLEX_MATH,
 }
 
 SCIENCE_TASKS = {
@@ -52,6 +57,7 @@ SCIENCE_TASKS = {
 MULTIMODAL_TASKS = {
     TaskType.IMAGE_QUESTION,
     TaskType.DIAGRAM_ANALYSIS,
+    TaskType.PDF_IMAGE,
 }
 
 
@@ -187,9 +193,9 @@ def get_routing_candidates(
         ]
         return _filter_eligible(candidates)
 
-    # ── 3. Light Tier: Short Definitions, Quick Facts, Simple Translations ──
-    if (complexity == TaskComplexity.LIGHT or depth == ResponseDepth.FAST) and task not in (
-        CODING_TASKS | MATH_TASKS | SCIENCE_TASKS | MULTIMODAL_TASKS | PDF_STUDY_TASKS | {TaskType.DEEP_REASONING}
+    # ── 3. Light Tier: Short Definitions, Quick Facts, Simple Translations, Text Correction ──
+    if (complexity == TaskComplexity.LIGHT or depth == ResponseDepth.FAST or task in (TaskType.TEXT_CORRECTION, TaskType.SHORT_JSON_EXTRACTION)) and task not in (
+        CODING_TASKS | MATH_TASKS | SCIENCE_TASKS | MULTIMODAL_TASKS | PDF_STUDY_TASKS | {TaskType.DEEP_REASONING, TaskType.UNCERTAIN_COMPLEX}
     ):
         candidates = [
             ("groq", groq_fast),
@@ -252,7 +258,7 @@ def get_routing_candidates(
         return _filter_eligible(candidates)
 
     # ── 8. Web Research Synthesis ──
-    if task == TaskType.WEB_RESEARCH:
+    if task in (TaskType.WEB_RESEARCH, TaskType.CURRENT_INFO):
         candidates = [
             ("gemini", gemini_reason),
             ("gemini", gemini_balanced),
@@ -262,8 +268,8 @@ def get_routing_candidates(
         ]
         return _filter_eligible(candidates)
 
-    # ── 9. Deep Reasoning / Complex Architecture ──
-    if task == TaskType.DEEP_REASONING or depth == ResponseDepth.DEEP or complexity == TaskComplexity.DEEP:
+    # ── 9. Deep Reasoning / Complex Architecture / Uncertain Complex ──
+    if task in (TaskType.DEEP_REASONING, TaskType.UNCERTAIN_COMPLEX) or depth == ResponseDepth.DEEP or complexity == TaskComplexity.DEEP:
         candidates = [
             ("gemini", gemini_reason),
             ("gemini", gemini_balanced),

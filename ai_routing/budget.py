@@ -33,6 +33,15 @@ TASK_MIN_BUDGETS = {
     TaskType.SIMPLE_EXPLANATION: 1536,
     TaskType.TRANSLATION: 1536,
     TaskType.WRITING: 2048,
+    TaskType.TEXT_CORRECTION: 512,
+    TaskType.SHORT_JSON_EXTRACTION: 512,
+    TaskType.GENERAL_STUDY: 2048,
+    TaskType.COMPLEX_MATH: 4096,
+    TaskType.COMPLEX_DEBUGGING: 4096,
+    TaskType.CODE_ARCHITECTURE: 4096,
+    TaskType.LONG_DOC_SYNTHESIS: 4096,
+    TaskType.CURRENT_INFO: 3072,
+    TaskType.UNCERTAIN_COMPLEX: 4096,
     TaskType.QUICK_CHAT: 1024,
     TaskType.CHAT_TITLE_GENERATION: 256,
 }
@@ -90,4 +99,5 @@ class OutputBudgetManager:
             if headroom > 512:
                 chosen_budget = min(chosen_budget, headroom)
 
-        return max(512, chosen_budget)
+        floor = 256 if task in (TaskType.CHAT_TITLE_GENERATION, TaskType.SHORT_JSON_EXTRACTION) else 512
+        return max(floor, chosen_budget)
