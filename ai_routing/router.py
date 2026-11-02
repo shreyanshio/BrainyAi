@@ -183,6 +183,8 @@ class AIRouter:
             f"{resolved_task.value.lower()} classified {resolved_complexity.value.lower()} with no specialist or document requirement"
             if normal_use else "Normal Use prompt unavailable; existing full prompt path retained" if not normal_template_available else f"{resolved_task.value.lower()} classified {resolved_complexity.value.lower()} or requires specialist context"
         )
+        if normal_use and len(call_messages) > 12:
+            call_messages = call_messages[-12:]
 
         # ── Fast-Path 1: Local Mathematics Engine ──
         enable_local_math = os.getenv("ENABLE_LOCAL_MATH_ENGINE", "true").lower() in ("true", "1", "yes")
@@ -437,6 +439,8 @@ class AIRouter:
             f"{resolved_task.value.lower()} classified {resolved_complexity.value.lower()} with no specialist or document requirement"
             if normal_use else "Normal Use prompt unavailable; existing full prompt path retained" if not normal_template_available else f"{resolved_task.value.lower()} classified {resolved_complexity.value.lower()} or requires specialist context"
         )
+        if normal_use and len(call_messages) > 12:
+            call_messages = call_messages[-12:]
 
         # ── Fast-Path: Local Mathematics Engine for Streaming ──
         enable_local_math = os.getenv("ENABLE_LOCAL_MATH_ENGINE", "true").lower() in ("true", "1", "yes")

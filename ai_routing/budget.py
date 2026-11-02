@@ -30,8 +30,10 @@ TASK_MIN_BUDGETS = {
     TaskType.QUIZ_GENERATION: 3072,
     TaskType.FLASHCARD_GENERATION: 3072,
     TaskType.WEB_RESEARCH: 3072,
-    TaskType.SIMPLE_EXPLANATION: 2048,
-    TaskType.QUICK_CHAT: 1536,
+    TaskType.SIMPLE_EXPLANATION: 1536,
+    TaskType.TRANSLATION: 1536,
+    TaskType.WRITING: 2048,
+    TaskType.QUICK_CHAT: 1024,
     TaskType.CHAT_TITLE_GENERATION: 256,
 }
 
@@ -69,9 +71,14 @@ class OutputBudgetManager:
         if depth == ResponseDepth.DEEP:
             depth_budget = prov_limit  # Maximize model capacity for deep academic reasoning
         elif depth == ResponseDepth.FAST:
-            depth_budget = min(task_base, 2048)
+            depth_budget = min(task_base, 1024)
         else:  # BALANCED
-            depth_budget = min(max(task_base, 3072), prov_limit)
+            if task in (TaskType.QUICK_CHAT, TaskType.CHAT_TITLE_GENERATION):
+                depth_budget = task_base
+            elif task in (TaskType.SIMPLE_EXPLANATION, TaskType.TRANSLATION):
+                depth_budget = min(task_base, 2048)
+            else:
+                depth_budget = min(max(task_base, 3072), prov_limit)
 
         chosen_budget = max(task_base, depth_budget)
         chosen_budget = min(chosen_budget, prov_limit)

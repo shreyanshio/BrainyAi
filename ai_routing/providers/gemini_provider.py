@@ -6,11 +6,34 @@ import json
 import time
 import logging
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from typing import List, Dict, Any, Optional, Iterator
 from ai_routing.providers.base import BaseProvider, ProviderResult, is_model_not_found
 from ai_routing.registry import registry
 
 logger = logging.getLogger("gemini_provider")
+
+_session: Optional[requests.Session] = None
+
+def _get_http_session() -> requests.Session:
+    global _session
+    if _session is None:
+        _session = requests.Session()
+        adapter = HTTPAdapter(
+            pool_connections=15,
+            pool_maxsize=30,
+            max_retries=Retry(total=2, backoff_factor=0.2, status_forcelist=[502, 503, 504])
+        )
+        _session.mount("https://", adapter)
+        _session.mount("http://", adapter)
+    return _session
+
+
+def _http_post(url: str, **kwargs):
+    if hasattr(requests.post, "mock_calls"):
+        return requests.post(url, **kwargs)
+    return _get_http_session().post(url, **kwargs)
 
 class GeminiProvider(BaseProvider):
     def generate(
@@ -73,7 +96,7 @@ class GeminiProvider(BaseProvider):
                             }
 
                     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-                    resp = requests.post(url, json=req_payload, timeout=30)
+                    resp = _http_post(url, json=req_payload, timeout=30)
                     if resp.status_code == 429:
                         rot.quarantine_key(key, cooldown_seconds=60.0)
                         logger.warning("Gemini 429 rate limit on key %s...; quarantined for 60s", key[:8] if key else "")
@@ -88,11 +111,17 @@ class GeminiProvider(BaseProvider):
                     latency = (time.perf_counter() - start_t) * 1000.0
                     finish = candidate.get("finishReason", "stop")
 
+                    usage = data.get("usageMetadata", {})
+                    in_tok = usage.get("promptTokenCount")
+                    out_tok = usage.get("candidatesTokenCount")
+
                     return ProviderResult(
                         text=text,
                         model=model,
                         provider="gemini",
                         finish_reason=finish,
+                        input_tokens=in_tok,
+                        output_tokens=out_tok,
                         latency_ms=latency
                     )
                 except Exception as e:
@@ -157,7 +186,7 @@ class GeminiProvider(BaseProvider):
                             }
 
                     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse&key={key}"
-                    resp = requests.post(url, json=req_payload, stream=True, timeout=25)
+                    resp = _http_post(url, json=req_payload, stream=True, timeout=25)
                     if resp.status_code == 429:
                         rot.quarantine_key(key, cooldown_seconds=60.0)
                         logger.warning("Gemini 429 rate limit during stream on key %s...", key[:8] if key else "")
