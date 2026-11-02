@@ -79,6 +79,7 @@ SECTION B — BROAD EVERYDAY CAPABILITY COVERAGE
 10. Routine Mathematics & Calculations:
     - Handle percentages, discounts, unit conversions, and everyday arithmetic accurately.
     - State the final verified number upfront with clean working. Never guess numerical values.
+    - Format mathematical expressions using standard KaTeX syntax ($...$ for inline, $$...$$ for standalone display equations). NEVER use brackets [ ... ] or parentheses ( ... ) as equation delimiters.
 
 11. Lightweight Coding:
     - Provide clean, language-tagged code snippets (Python, JS, HTML, SQL) using standard libraries.

@@ -50,7 +50,41 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
   )
 }
 
+export function normalizeMathDelimiters(content: string): string {
+  if (!content) return ''
+
+  let s = content
+
+  // 1. Standard LaTeX display delimiters: \[ ... \] -> $$ ... $$
+  s = s.replace(/\\\[([\s\S]*?)\\\]/g, (_match, inner) => `\n\n$$${inner.trim()}$$\n\n`)
+
+  // 2. Standard LaTeX inline delimiters: \( ... \) -> $ ... $
+  s = s.replace(/\\\(([\s\S]*?)\\\)/g, (_match, inner) => `$${inner.trim()}$`)
+
+  // 3. Isolated bracket display math: [ \command ... ] -> $$ \command ... $$
+  // Only matches when inner text contains LaTeX commands (e.g. \sin, \frac) and is not followed by '(' (markdown link)
+  s = s.replace(/\[\s*(\\[a-zA-Z]+[\s\S]*?)\s*\](?!\s*\()/g, (_match, inner) => {
+    return `\n\n$$${inner.trim()}$$\n\n`
+  })
+
+  // 4. Standalone parenthesized LaTeX expressions: (\command ...) -> $ \command ... $
+  // Example: (Equivalently, (\sin(\pi/6)=0.5).) -> (Equivalently, $\sin(\pi/6)=0.5$.)
+  s = s.replace(/\(([\s]*\\[a-zA-Z]+(?:[^()]|\([^()]*\))*?)\)/g, (_match, inner) => {
+    let trimmed = inner.trim()
+    let trail = ''
+    if (/[.,;:]$/.test(trimmed)) {
+      trail = trimmed.slice(-1)
+      trimmed = trimmed.slice(0, -1).trim()
+    }
+    return `$${trimmed}$${trail}`
+  })
+
+  return s
+}
+
 export function MarkdownRenderer({ content, className = '' }: MarkdownRendererProps) {
+  const processedContent = normalizeMathDelimiters(content)
+
   return (
     <div className={`prose-container overflow-hidden break-words text-sm leading-relaxed ${className}`}>
       <ReactMarkdown
@@ -134,7 +168,7 @@ export function MarkdownRenderer({ content, className = '' }: MarkdownRendererPr
           },
         }}
       >
-        {content}
+        {processedContent}
       </ReactMarkdown>
     </div>
   )
