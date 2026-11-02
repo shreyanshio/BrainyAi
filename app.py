@@ -38,7 +38,7 @@ from security import (
     security_guard, login_required, sanitize_input,
     is_blacklisted, check_rate_limit, rate_limit_retry_after, log_security_event, security_headers,
     create_auth_token, verify_auth_token, _get_auth_secret_key, RateLimitStoreUnavailable,
-    validate_csrf_origin
+    validate_csrf_origin, revoke_auth_token, revoke_user_tokens
 )
 from security import _is_production
 
@@ -2015,8 +2015,22 @@ def auth_student_pass():
 
 @app.route("/api/auth/logout", methods=["POST"])
 def auth_logout():
+    user_id = session.get("user_id")
+    auth_header = request.headers.get("Authorization", "").strip()
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header[7:].strip()
+        revoke_auth_token(token)
+
+    data = request.get_json(silent=True) or {}
+    req_token = data.get("token")
+    if req_token and isinstance(req_token, str):
+        revoke_auth_token(req_token)
+
+    if user_id:
+        revoke_user_tokens(user_id)
+
     session.clear()
-    return jsonify({"status": "logged_out"})
+    return jsonify({"status": "logged_out", "revoked": True})
 
 
 # ── ADMIN DASHBOARD APIS ──
@@ -3222,17 +3236,39 @@ def get_user_preferences():
     return jsonify(prefs)
 
 
+ALLOWED_PREFERENCE_KEYS = {
+    "theme", "font_size", "model_preference", "language",
+    "depth_preference", "study_reminders", "math_rendering", "sound_effects"
+}
+
 @app.route("/api/user/preferences", methods=["POST"])
 @login_required
 def update_user_preferences():
     user_id = session["user_id"]
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Invalid request body: expected JSON object"}), 400
+
+    # Whitelist & validate preference keys to prevent mass assignment / prototype pollution
+    filtered_preferences = {}
+    for key, val in data.items():
+        if key not in ALLOWED_PREFERENCE_KEYS:
+            continue
+        if isinstance(val, str):
+            if len(val) > 64:
+                continue
+            filtered_preferences[key] = val
+        elif isinstance(val, bool):
+            filtered_preferences[key] = val
+        elif isinstance(val, (int, float)) and not isinstance(val, bool):
+            filtered_preferences[key] = val
+
     try:
-        study_bot.load_user_into_memory(user_id, session["first_name"], session["username"])
+        study_bot.load_user_into_memory(user_id, session.get("first_name", "Student"), session.get("username", ""))
         profile = study_bot.get_user_data(user_id)
         previous_preferences = dict(profile.get("preferences") or {})
         updated_preferences = dict(previous_preferences)
-        updated_preferences.update(data)
+        updated_preferences.update(filtered_preferences)
         profile["preferences"] = updated_preferences
         study_bot.save_user_memory_async(user_id)
     except RuntimeError as exc:
@@ -3248,7 +3284,7 @@ def update_user_preferences():
 
 @app.route("/api/admin/ai-health", methods=["GET"])
 @app.route("/api/admin/ai-telemetry", methods=["GET"])
-@login_required
+@admin_required
 def admin_ai_health():
     """Provides real-time health telemetry across all pooled AI providers."""
     try:

@@ -333,9 +333,71 @@ def verify_auth_token(token: str) -> dict | None:
         if iat and isinstance(iat, (int, float)) and iat > time.time() + 300:
             return None
 
+        # Check token and user revocation status
+        if is_token_revoked(token, payload):
+            return None
+
         return payload
     except Exception:
         return None
+
+
+# ── 4B. TOKEN REVOCATION STORE ──────────────────────────────
+_revoked_token_signatures: dict[str, float] = {}  # {sig_b64: exp_timestamp}
+_user_revoked_before: dict[int, float] = {}  # {user_id: timestamp}
+
+
+def revoke_auth_token(token: str) -> bool:
+    """Revoke a specific JWT token until its expiration."""
+    if not token or not isinstance(token, str):
+        return False
+    try:
+        parts = token.strip().split(".")
+        if len(parts) == 3:
+            sig = parts[2]
+            payload = verify_auth_token(token)
+            exp = payload.get("exp") if payload else (time.time() + 86400 * 7)
+            _revoked_token_signatures[sig] = float(exp)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def revoke_user_tokens(user_id: int) -> None:
+    """Revoke all tokens issued for a user up to current timestamp."""
+    try:
+        _user_revoked_before[int(user_id)] = time.time()
+    except (ValueError, TypeError):
+        pass
+
+
+def is_token_revoked(token: str, payload: dict = None) -> bool:
+    """Check if token signature or user ID is revoked."""
+    now = time.time()
+    try:
+        parts = token.strip().split(".")
+        if len(parts) == 3:
+            sig = parts[2]
+            if sig in _revoked_token_signatures:
+                if _revoked_token_signatures[sig] > now:
+                    return True
+                else:
+                    del _revoked_token_signatures[sig]
+    except Exception:
+        pass
+
+    if payload:
+        sub = payload.get("sub")
+        iat = payload.get("iat", 0)
+        if sub is not None:
+            try:
+                sub_id = int(sub)
+                if sub_id in _user_revoked_before and iat <= _user_revoked_before[sub_id]:
+                    return True
+            except (ValueError, TypeError):
+                pass
+    return False
 
 
 # ── 5. SECURITY DECORATORS ───────────────────────────────
@@ -583,7 +645,9 @@ def security_headers(response):
         "img-src 'self' data: https://*.googleusercontent.com https://lh3.googleusercontent.com; "
         "frame-src https://accounts.google.com; "
         "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org; "
-        "connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com"
+        "connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com; "
+        "object-src 'none'; "
+        "base-uri 'self'"
     )
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
     response.headers['X-Content-Type-Options'] = 'nosniff'

@@ -279,6 +279,96 @@ class TestSecurityHardening(unittest.TestCase):
         self.assertIn("no-store", cache_control)
         self.assertEqual(resp.headers.get("Pragma"), "no-cache")
 
+    # ── 8. TOKEN REVOCATION & SESSION LIFECYCLE TESTS ─────────────────────
+
+    def test_token_revocation_on_logout(self):
+        """Logging out with Bearer token must revoke that token immediately."""
+        token = create_auth_token(user_id=888, username="student_test", first_name="Student")
+        # Verify valid before logout
+        self.assertIsNotNone(verify_auth_token(token))
+
+        # Logout with Bearer token
+        resp = self.client.post("/api/auth/logout", headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.get_json().get("revoked"))
+
+        # Token must now be rejected
+        self.assertIsNone(verify_auth_token(token))
+
+        # Authenticated endpoint must return 401
+        protected_resp = self.client.get("/api/usage", headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(protected_resp.status_code, 401)
+
+    def test_user_wide_revocation_invalidates_earlier_tokens(self):
+        """User-wide revocation on logout invalidates earlier-issued tokens."""
+        from security import revoke_user_tokens
+        token1 = create_auth_token(user_id=777, username="student_multi", first_name="Student")
+        self.assertIsNotNone(verify_auth_token(token1))
+
+        # Revoke user
+        revoke_user_tokens(777)
+
+        # Existing token is now rejected
+        self.assertIsNone(verify_auth_token(token1))
+
+    # ── 9. MASS ASSIGNMENT & PREFERENCE TAMPERING TESTS ───────────────────
+
+    def test_preference_mass_assignment_disallowed_keys_ignored(self):
+        """POST /api/user/preferences must ignore unwhitelisted keys (e.g. role, is_admin)."""
+        token = create_auth_token(user_id=654, username="student_pref", first_name="PrefUser")
+        tampered_payload = {
+            "theme": "dark",
+            "model_preference": "gemini",
+            "role": "admin",
+            "is_admin": True,
+            "quota": 999999,
+            "secret_token": "injected_token"
+        }
+        resp = self.client.post(
+            "/api/user/preferences",
+            headers={"Authorization": f"Bearer {token}"},
+            json=tampered_payload
+        )
+        self.assertEqual(resp.status_code, 200)
+        prefs = resp.get_json().get("preferences", {})
+        self.assertEqual(prefs.get("theme"), "dark")
+        self.assertEqual(prefs.get("model_preference"), "gemini")
+        # Verify disallowed keys were not merged
+        self.assertNotIn("role", prefs)
+        self.assertNotIn("is_admin", prefs)
+        self.assertNotIn("quota", prefs)
+        self.assertNotIn("secret_token", prefs)
+
+    def test_preference_rejects_non_dict_body(self):
+        """POST /api/user/preferences with non-object JSON must return 400."""
+        token = create_auth_token(user_id=655, username="student_pref2", first_name="PrefUser2")
+        resp = self.client.post(
+            "/api/user/preferences",
+            headers={"Authorization": f"Bearer {token}"},
+            json="invalid string payload"
+        )
+        self.assertEqual(resp.status_code, 400)
+
+    # ── 10. BFLA PROTECTION ON ADMIN AI HEALTH ───────────────────────────
+
+    def test_student_user_forbidden_from_admin_ai_health(self):
+        """Regular student token calling /api/admin/ai-health must receive 403 Forbidden."""
+        student_token = create_auth_token(user_id=555, username="student_regular", first_name="Regular", role="student")
+        resp = self.client.get(
+            "/api/admin/ai-health",
+            headers={"Authorization": f"Bearer {student_token}"}
+        )
+        self.assertEqual(resp.status_code, 403)
+
+    # ── 11. ENHANCED CSP DIRECTIVES ───────────────────────────────────────
+
+    def test_csp_includes_object_src_none_and_base_uri_self(self):
+        """CSP must restrict object-src to none and base-uri to self."""
+        resp = self.client.get("/api/health")
+        csp = resp.headers.get("Content-Security-Policy", "")
+        self.assertIn("object-src 'none'", csp)
+        self.assertIn("base-uri 'self'", csp)
+
 
 if __name__ == "__main__":
     unittest.main()
