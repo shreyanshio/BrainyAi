@@ -1,0 +1,390 @@
+# ==============================================================================
+# BRAINY CENTRAL PROMPT REGISTRY
+# Authoritative specification of all registered prompts, workflows, and policies.
+# ==============================================================================
+version: "2.0.0"
+
+prompts:
+  # ── 1. Core Base & Universal ──
+  system_base:
+    file: prompts/system_prompt.txt
+    workflow: system_base
+    purpose: Universal foundational assistant core identity, platform-wide safety, formatting conventions, and tone.
+    trigger_intents: ["system_base", "default"]
+    excluded_intents: ["normal_chat"]
+    applicable_model_categories: ["main_intelligence", "general", "reasoning", "fast"]
+    required_context: []
+    optional_context: ["user_profile", "quota_status"]
+    permitted_tools: []
+    expected_output_behavior: Comprehensive, structured academic assistant tone.
+    version: 2
+    enabled: true
+
+  normal_chat:
+    file: prompts/normal_use.txt
+    workflow: normal_chat
+    purpose: Lightweight everyday conversation, short definitions, greetings, and general non-specialist queries with minimal prompt overhead.
+    trigger_intents: ["normal_chat", "casual", "quick_chat", "simple_definition"]
+    excluded_intents: ["coding", "mathematics", "web_search", "pdf_notes"]
+    applicable_model_categories: ["fast", "lightweight", "main_intelligence"]
+    required_context: []
+    optional_context: ["user_profile"]
+    permitted_tools: []
+    expected_output_behavior: Concise, direct, friendly, minimal prompt tokens.
+    version: 2
+    enabled: true
+
+  brainy_comprehensive:
+    file: prompts/brainy_prompt.txt
+    workflow: educational
+    purpose: Deep academic reasoning, complex science explanations (Physics, Chemistry, Biology), and structured learning walkthroughs.
+    trigger_intents: ["educational", "deep_reasoning", "detailed_explanation", "science", "biology", "chemistry"]
+    excluded_intents: ["quick_chat"]
+    applicable_model_categories: ["main_intelligence", "reasoning"]
+    required_context: []
+    optional_context: ["user_profile", "learning_preferences"]
+    permitted_tools: []
+    expected_output_behavior: In-depth pedagogical structure with clear headings, real-world examples, and conceptual breakdowns.
+    version: 2
+    enabled: true
+
+  # ── 2. Web Search & Verification ──
+  web_search:
+    file: prompts/search_prompt.txt
+    workflow: web_search
+    purpose: Real-time web research, current events, official documentation verification, price/version lookups, and multi-source evidence synthesis.
+    trigger_intents: ["web_search", "current_info", "verification", "research", "news", "documentation_search"]
+    excluded_intents: ["normal_chat", "static_definition"]
+    applicable_model_categories: ["main_intelligence", "reasoning"]
+    required_context: ["search_evidence"]
+    optional_context: ["planned_queries", "search_metadata"]
+    permitted_tools: ["tavily", "duckduckgo"]
+    expected_output_behavior: Grounded synthesis with direct answer upfront, structured facts, conflicting source analysis, and clickable markdown citations [Title](URL).
+    version: 2
+    enabled: true
+
+  # ── 3. Technical & STEM Workflows ──
+  coding:
+    file: prompts/coding_prompt.txt
+    workflow: coding
+    purpose: Programming assistance, code generation, bug fixing, complexity analysis, algorithmic design (DSA), and software architecture.
+    trigger_intents: ["coding", "debugging", "dsa", "sql", "architecture", "refactoring"]
+    excluded_intents: ["creative_writing"]
+    applicable_model_categories: ["main_intelligence", "reasoning", "fast"]
+    required_context: []
+    optional_context: ["search_evidence"]
+    permitted_tools: ["tavily", "duckduckgo"]
+    expected_output_behavior: Production-ready code blocks with language tags, concise line comments, optimal time/space complexity, and edge-case handling.
+    version: 2
+    enabled: true
+
+  mathematics:
+    file: prompts/maths.txt
+    workflow: mathematics
+    purpose: Mathematical problem solving, calculus, algebra, geometry, statistics, step-by-step proofs, and physics derivations.
+    trigger_intents: ["mathematics", "calculus", "algebra", "statistics", "physics", "numerical_problem"]
+    excluded_intents: ["casual_chat"]
+    applicable_model_categories: ["reasoning", "main_intelligence"]
+    required_context: []
+    optional_context: ["formula_references"]
+    permitted_tools: ["local_math_engine"]
+    expected_output_behavior: Rigorous step-by-step mathematical working with inline LaTeX $...$ and block display $$...$$, verifying units and edge cases.
+    version: 2
+    enabled: true
+
+  # ── 4. Document & PDF Study Studio ──
+  pdf_notes:
+    file: prompts/pdf_notes_prompt.txt
+    workflow: pdf_notes
+    purpose: Generating comprehensive, structured, revision-ready study notes from uploaded documents and multi-page textbooks.
+    trigger_intents: ["pdf_notes", "note_generation", "chapter_summary"]
+    excluded_intents: []
+    applicable_model_categories: ["main_intelligence", "reasoning"]
+    required_context: ["document_text"]
+    optional_context: ["page_metadata"]
+    permitted_tools: []
+    expected_output_behavior: Hierarchical study notes with key definitions, formulas, memory mnemonics, and exam warnings.
+    version: 2
+    enabled: true
+
+  pdf_qa:
+    file: prompts/pdf_qa_prompt.txt
+    workflow: pdf_qa
+    purpose: Question answering strictly grounded in uploaded PDF documents with exact page-number citations.
+    trigger_intents: ["pdf_qa", "document_question", "find_in_doc"]
+    excluded_intents: ["web_search"]
+    applicable_model_categories: ["main_intelligence", "fast"]
+    required_context: ["document_context", "matched_chunks"]
+    optional_context: ["page_numbers"]
+    permitted_tools: []
+    expected_output_behavior: Factual answers drawn strictly from supplied text with explicit [Page X] academic citations.
+    version: 2
+    enabled: true
+
+  pdf_quiz:
+    file: prompts/pdf_quiz_prompt.txt
+    workflow: pdf_quiz
+    purpose: Generating four-option multiple choice revision quizzes from document contents with explanations and page references.
+    trigger_intents: ["pdf_quiz", "mcq_generation"]
+    excluded_intents: []
+    applicable_model_categories: ["main_intelligence", "fast"]
+    required_context: ["document_text"]
+    optional_context: []
+    permitted_tools: []
+    expected_output_behavior: Strict structured JSON with questions, 4 distinct options, correct_index (0-3), explanation, and page_ref.
+    version: 2
+    enabled: true
+
+  pdf_flashcards:
+    file: prompts/pdf_flashcards_prompt.txt
+    workflow: pdf_flashcards
+    purpose: Extracting high-yield study flashcards from documents for spaced repetition and revision.
+    trigger_intents: ["pdf_flashcards", "flashcard_generation"]
+    excluded_intents: []
+    applicable_model_categories: ["main_intelligence", "fast"]
+    required_context: ["document_text"]
+    optional_context: []
+    permitted_tools: []
+    expected_output_behavior: Strict JSON with front (concept/question), back (concise answer), difficulty, and page_ref.
+    version: 2
+    enabled: true
+
+  pdf_important_questions:
+    file: prompts/pdf_important_questions_prompt.txt
+    workflow: pdf_important_questions
+    purpose: Identifying and generating exam-critical questions (Short Answer, Long Answer, Conceptual, Numerical) with marking schemes.
+    trigger_intents: ["pdf_important_questions", "exam_questions", "high_yield_revision"]
+    excluded_intents: []
+    applicable_model_categories: ["main_intelligence", "reasoning"]
+    required_context: ["document_text"]
+    optional_context: ["target_category", "question_count"]
+    permitted_tools: []
+    expected_output_behavior: Strict JSON with question, category, priority (HIGH/MEDIUM/LOW), marks, and answer_outline.
+    version: 2
+    enabled: true
+
+  # ── 5. Specialist Educational Workflows ──
+  ask5:
+    file: prompts/ask5_prompt.txt
+    workflow: ask5
+    purpose: Socratic 5-question deep inquiry guiding students through first-principles understanding.
+    trigger_intents: ["ask5", "socratic_dialogue"]
+    excluded_intents: []
+    applicable_model_categories: ["main_intelligence"]
+    required_context: []
+    optional_context: ["topic"]
+    permitted_tools: []
+    expected_output_behavior: Five progressive, thought-provoking questions escalating in depth.
+    version: 2
+    enabled: true
+
+  define:
+    file: prompts/define_prompt.txt
+    workflow: define
+    purpose: Crisp, academically sound definitions of scientific, mathematical, or literary concepts.
+    trigger_intents: ["define", "concept_definition"]
+    excluded_intents: []
+    applicable_model_categories: ["fast", "lightweight", "main_intelligence"]
+    required_context: []
+    optional_context: []
+    permitted_tools: []
+    expected_output_behavior: Core definition, origin/etymology if helpful, key properties, and a clear clarifying example.
+    version: 2
+    enabled: true
+
+  fact:
+    file: prompts/fact_prompt.txt
+    workflow: fact
+    purpose: Fascinating, lesser-known scientific and historical educational facts.
+    trigger_intents: ["fact", "fun_fact"]
+    excluded_intents: []
+    applicable_model_categories: ["fast", "lightweight"]
+    required_context: []
+    optional_context: ["category"]
+    permitted_tools: []
+    expected_output_behavior: Single compelling fact with concise explanation of why it happens.
+    version: 2
+    enabled: true
+
+  summarize:
+    file: prompts/summarize_prompt.txt
+    workflow: summarize
+    purpose: Compressing long articles, textbook passages, or lecture notes into high-density summaries.
+    trigger_intents: ["summarize", "tldr", "digest"]
+    excluded_intents: []
+    applicable_model_categories: ["fast", "main_intelligence"]
+    required_context: []
+    optional_context: []
+    permitted_tools: []
+    expected_output_behavior: Executive summary, bulleted key takeaways, and critical terminology.
+    version: 2
+    enabled: true
+
+  plan:
+    file: prompts/plan_prompt.txt
+    workflow: plan
+    purpose: Structured study timetable and exam revision scheduling.
+    trigger_intents: ["plan", "study_schedule", "timetable"]
+    excluded_intents: []
+    applicable_model_categories: ["main_intelligence"]
+    required_context: []
+    optional_context: ["student_goals", "exam_date"]
+    permitted_tools: []
+    expected_output_behavior: Realistic daily or weekly study block breakdown with break buffers and review checkpoints.
+    version: 2
+    enabled: true
+
+  tip:
+    file: prompts/tip_prompt.txt
+    workflow: tip
+    purpose: High-leverage exam strategies, memorization techniques (Feynman, active recall), and productivity guidance.
+    trigger_intents: ["tip", "study_hack", "exam_strategy"]
+    excluded_intents: []
+    applicable_model_categories: ["fast", "lightweight"]
+    required_context: []
+    optional_context: []
+    permitted_tools: []
+    expected_output_behavior: Actionable, practical tip explained in under 150 words.
+    version: 2
+    enabled: true
+
+  translate:
+    file: prompts/translate_prompt.txt
+    workflow: translate
+    purpose: Accurate academic translation preserving technical terminology and conceptual nuance.
+    trigger_intents: ["translate", "translation"]
+    excluded_intents: []
+    applicable_model_categories: ["fast", "main_intelligence"]
+    required_context: []
+    optional_context: ["target_language"]
+    permitted_tools: []
+    expected_output_behavior: Fluent natural translation followed by technical terms glossary if appropriate.
+    version: 2
+    enabled: true
+
+  image_analysis:
+    file: prompts/image_prompt.txt
+    workflow: image_analysis
+    purpose: Visual interpretation of diagrams, charts, circuit diagrams, geometric figures, and handwritten notes.
+    trigger_intents: ["image_question", "diagram_analysis", "visual_reasoning"]
+    excluded_intents: []
+    applicable_model_categories: ["multimodal", "main_intelligence"]
+    required_context: ["image_payload"]
+    optional_context: []
+    permitted_tools: []
+    expected_output_behavior: Structural breakdown of visual elements, identification of key labels, and conceptual explanation.
+    version: 2
+    enabled: true
+
+  title_generation:
+    file: prompts/title_prompt.txt
+    workflow: title_generation
+    purpose: Generating short 3-5 word conversation titles for chat session sidebars.
+    trigger_intents: ["title", "chat_title"]
+    excluded_intents: []
+    applicable_model_categories: ["fast", "lightweight"]
+    required_context: ["first_exchange"]
+    optional_context: []
+    permitted_tools: []
+    expected_output_behavior: 3 to 5 words title without quotes or punctuation.
+    version: 2
+    enabled: true
+
+  # ── 6. Engagement & Community Protocols ──
+  banter:
+    file: prompts/banter_prompt.txt
+    workflow: banter
+    purpose: Friendly, witty, encouraging conversation with a relatable student companion tone.
+    trigger_intents: ["banter", "friendly_chat", "smalltalk"]
+    excluded_intents: ["academic_exam"]
+    applicable_model_categories: ["fast", "lightweight"]
+    required_context: []
+    optional_context: ["user_first_name"]
+    permitted_tools: []
+    expected_output_behavior: Witty, warm, relatable Hinglish/English banter.
+    version: 2
+    enabled: true
+
+  joke:
+    file: prompts/joke_prompt.txt
+    workflow: joke
+    purpose: Witty STEM, coding, physics, or student life humor.
+    trigger_intents: ["joke", "humor"]
+    excluded_intents: []
+    applicable_model_categories: ["fast", "lightweight"]
+    required_context: []
+    optional_context: []
+    permitted_tools: []
+    expected_output_behavior: One clever, clean, relatable joke.
+    version: 2
+    enabled: true
+
+  motivate:
+    file: prompts/motivate_prompt.txt
+    workflow: motivate
+    purpose: Genuine, grounded student motivation without toxic positivity.
+    trigger_intents: ["motivate", "encouragement", "burnout_support"]
+    excluded_intents: []
+    applicable_model_categories: ["fast", "lightweight", "main_intelligence"]
+    required_context: []
+    optional_context: ["student_performance", "user_first_name"]
+    permitted_tools: []
+    expected_output_behavior: Direct, empathetic, realistic encouragement mixed with practical next steps.
+    version: 2
+    enabled: true
+
+  roast:
+    file: prompts/roast_command_prompt.txt
+    workflow: roast
+    purpose: Lighthearted, affectionate academic roasting requested explicitly by students.
+    trigger_intents: ["roast", "playful_burn"]
+    excluded_intents: []
+    applicable_model_categories: ["fast", "lightweight"]
+    required_context: []
+    optional_context: ["study_habits"]
+    permitted_tools: []
+    expected_output_behavior: Good-natured, funny teasing about study procrastination without cruelty.
+    version: 2
+    enabled: true
+
+  roast_defense:
+    file: prompts/roast_prompt.txt
+    workflow: roast_defense
+    purpose: Defending against user harassment or owner abuse with sharp, self-respecting wit.
+    trigger_intents: ["abuse_defense", "owner_protection"]
+    excluded_intents: []
+    applicable_model_categories: ["fast", "lightweight"]
+    required_context: []
+    optional_context: []
+    permitted_tools: []
+    expected_output_behavior: Sharp, dignified shutdown of abusive remarks without profanity.
+    version: 2
+    enabled: true
+
+  group_study:
+    file: prompts/group_prompt.txt
+    workflow: group_study
+    purpose: Moderating and answering questions in multi-student Telegram group chats.
+    trigger_intents: ["group_chat", "telegram_group"]
+    excluded_intents: ["private_counseling"]
+    applicable_model_categories: ["fast", "main_intelligence"]
+    required_context: []
+    optional_context: ["group_title"]
+    permitted_tools: []
+    expected_output_behavior: High-signal, concise replies (under 10 lines) designed for group readability.
+    version: 2
+    enabled: true
+
+  quiz_telegram:
+    file: prompts/quiz_prompt.txt
+    workflow: quiz_telegram
+    purpose: Formatting multiple-choice questions for native Telegram poll interfaces.
+    trigger_intents: ["quiz_telegram", "telegram_poll"]
+    excluded_intents: []
+    applicable_model_categories: ["fast"]
+    required_context: []
+    optional_context: []
+    permitted_tools: []
+    expected_output_behavior: Strict format ready for Telegram SendPoll API.
+    version: 2
+    enabled: true

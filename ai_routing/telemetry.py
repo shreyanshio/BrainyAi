@@ -9,7 +9,7 @@ import time
 import logging
 import threading
 from collections import deque
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 
@@ -45,6 +45,14 @@ class TelemetryRecord:
     cost_usd: float = 0.0
     is_estimated: bool = False
     timestamp: float = 0.0
+    workflow: Optional[str] = None
+    prompt_id: Optional[str] = None
+    prompt_version: int = 1
+    search_required: bool = False
+    search_providers_attempted: List[str] = field(default_factory=list)
+    search_providers_succeeded: List[str] = field(default_factory=list)
+    search_result_count: int = 0
+    search_latency_ms: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)

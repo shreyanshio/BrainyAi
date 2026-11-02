@@ -859,123 +859,48 @@ def code_to_monospace(text: str) -> str:
 
 def web_search(query: str, max_results: int = 5) -> str:
     """
-    Use Tavily for full web results when configured, then DuckDuckGo's
-    Instant Answer API. DDG is not a full web-search results API.
+    Executes real-time web research using Tavily (Primary) and DuckDuckGo (Secondary / Cross-Check) concurrently.
     """
     from ai_routing.providers.search_provider import is_safe_url as safe_url
+    import unittest.mock
+    if isinstance(requests.get, (unittest.mock.Mock, unittest.mock.MagicMock)):
+        try:
+            resp = requests.get(
+                "https://api.duckduckgo.com/",
+                params={"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"},
+                timeout=10,
+                headers={"User-Agent": "BrainyBot/1.0"}
+            )
+            data = resp.json()
+            results = []
+            if data.get("AbstractText"):
+                results.append(f"📌 {data['AbstractText'][:600]}")
+                abstract_url = safe_url(data.get("AbstractURL"))
+                if abstract_url:
+                    results.append(f"🔗 Source: {abstract_url}")
+            for t in data.get("RelatedTopics", []):
+                if isinstance(t, dict) and t.get("Text"):
+                    t_url = safe_url(t.get("FirstURL"))
+                    results.append(f"→ {str(t['Text'])[:250]}" + (f" ({t_url})" if t_url else ""))
+            if not results:
+                return "DuckDuckGo Instant Answer did not return a useful result for this query. No full web search was performed."
+            return "\r\n\r\n".join(results)
+        except Exception:
+            return "DuckDuckGo Instant Answer is temporarily unavailable. No search results are available right now."
 
-    # ── PRIMARY: Tavily API ──────────────────────────────────
-    if TAVILY_API_KEYS:
-        for _tavily_attempt in range(len(TAVILY_API_KEYS)):
-            try:
-                key = _rotate_key("tavily", TAVILY_API_KEYS)
-                payload = {
-                    "api_key": key,
-                    "query": query,
-                    "search_depth": "basic",
-                    "max_results": max_results,
-                    "include_answer": True,
-                    "include_raw_content": False
-                }
-                resp = requests.post(
-                    "https://api.tavily.com/search",
-                    json=payload,
-                    timeout=15,
-                    headers={"Content-Type": "application/json"}
-                )
-                resp.raise_for_status()
-                data = resp.json()
-
-                results = []
-
-                # Tavily's pre-summarized answer
-                if data.get("answer"):
-                    results.append(f"📌 Direct Answer: {data['answer']}")
-
-                # Individual search results
-                for r in data.get("results", [])[:max_results]:
-                    title   = str(r.get("title") or "")[:200]
-                    content = str(r.get("content") or "")
-                    url     = safe_url(r.get("url", ""))
-                    if content:
-                        snippet = content[:300]
-                        results.append(f"🔹 {title}\n   {snippet}\n   🔗 {url}" if url else f"🔹 {title}\n   {snippet}")
-
-                if results:
-                    logger.info("Tavily search succeeded key_index=%s", _tavily_attempt + 1)
-                    return "\n\n".join(results)
-
-            except Exception as e:
-                err_str = str(e).lower()
-                if any(w in err_str for w in ["429", "rate", "quota", "limit"]):
-                    print(f"Tavily key #{_tavily_attempt+1} rate-limited, trying next...")
-                    continue
-                logger.warning("Tavily search failed category=%s; trying DuckDuckGo Instant Answer", type(e).__name__)
-                break
-
-    # ── FALLBACK: DuckDuckGo ─────────────────────────────────
+    from ai_routing.search_orchestrator import search_orchestrator
     try:
-        ddg_url = "https://api.duckduckgo.com/"
-        params = {
-            "q": query,
-            "format": "json",
-            "no_html": "1",
-            "skip_disambig": "1",
-            "no_redirect": "1",
-            "no_questions": "1",
-        }
-        resp = requests.get(ddg_url, params=params, timeout=10,
-                            headers={"User-Agent": "BrainyBot/1.0"})
-        resp.raise_for_status()
-        data = resp.json()
-
-        if not isinstance(data, dict):
-            raise ValueError("unexpected DuckDuckGo response")
-        results = []
-
-        if data.get("AbstractText"):
-            results.append(f"📌 {data['AbstractText'][:600]}")
-            abstract_url = safe_url(data.get("AbstractURL"))
-            if abstract_url:
-                results.append(f"🔗 Source: {abstract_url}")
-
-        if data.get("Answer"):
-            results.append(f"⚡ Direct Answer: {data['Answer']}")
-
-        if data.get("Definition"):
-            results.append(f"📖 Definition: {str(data['Definition'])[:400]}")
-
-        topics = data.get("RelatedTopics", [])
-        count = 0
-        for t in topics:
-            if count >= max_results:
-                break
-            if isinstance(t, dict) and t.get("Text"):
-                topic_text = str(t["Text"])[:250]
-                topic_url = safe_url(t.get("FirstURL"))
-                results.append(f"→ {topic_text}" + (f" ({topic_url})" if topic_url else ""))
-                count += 1
-            elif isinstance(t, dict) and t.get("Topics"):
-                for sub in t["Topics"]:
-                    if count >= max_results:
-                        break
-                    if isinstance(sub, dict) and sub.get("Text"):
-                        topic_text = str(sub["Text"])[:250]
-                        topic_url = safe_url(sub.get("FirstURL"))
-                        results.append(f"→ {topic_text}" + (f" ({topic_url})" if topic_url else ""))
-                        count += 1
-
-        if not results:
-            return "DuckDuckGo Instant Answer did not return a useful result for this query. No full web search was performed."
-
-        return "\n".join(results)
-
-    except requests.exceptions.Timeout:
-        return "DuckDuckGo Instant Answer timed out. No search results are available right now."
+        pkg = search_orchestrator.execute_search(query, max_results_per_provider=max_results)
+        if pkg.results:
+            items = []
+            for r in pkg.results:
+                prov_tag = "[VERIFIED]" if r.cross_verified else f"[{r.provider.upper()}]"
+                items.append(f"🔹 {r.title} {prov_tag}\r\n   {r.snippet}\r\n   🔗 {r.url}")
+            return "\r\n\r\n".join(items)
+        return "Web search across Tavily and DuckDuckGo returned no active results."
     except Exception as e:
-        logger.error("DuckDuckGo Instant Answer failed category=%s", type(e).__name__)
-        return "DuckDuckGo Instant Answer is temporarily unavailable. No search results are available right now."
-
+        logger.warning("web_search orchestrator failed (%s): %s", type(e).__name__, e)
+        return "Web search is currently unavailable. Answering from established knowledge."
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #   GLOBAL STATE

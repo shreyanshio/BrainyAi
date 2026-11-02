@@ -2606,19 +2606,44 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
                 ]
             }
 
-    web_search_active = bool(data.get("web_search"))
-    if web_search_active and intent not in ("search", "fact"):
-        intent = "search"
+    # ── Strict AI Workflow Orchestration & Search Planning ──
+    from ai_routing.workflow_router import workflow_router
+    from ai_routing.prompt_registry import prompt_resolver
+    from ai_routing.search_orchestrator import search_orchestrator
 
-    active_intent = intent
-    if active_intent in ("chat", None, "") and study_bot.is_offtopic_chat(content):
-        active_intent = "banter"
-
-    system_prompt = prompt_registry.compose_prompt(
-        task=active_intent,
-        platform=Platform.WEB,
-        include_completeness=False
+    explicit_search = bool(data.get("web_search")) or intent == "search"
+    routing_decision = workflow_router.route(
+        content=content,
+        messages=messages_context,
+        document_context=document_context,
+        explicit_intent="search" if explicit_search else (intent if intent not in ("chat", "normal", None, "") else None)
     )
+
+    citations = []
+    # If the workflow strictly requires web search, run Tavily + DuckDuckGo concurrently
+    if routing_decision.search_required:
+        try:
+            logger.info("Executing mandatory web search for workflow '%s' (Tavily + DuckDuckGo) planned=%s",
+                        routing_decision.workflow, routing_decision.planned_queries)
+            is_news = bool(re.search(r"\b(news|today|latest|current|recent)\b", content, re.I))
+            search_pkg = search_orchestrator.execute_search(
+                content,
+                is_news=is_news
+            )
+            citations = search_pkg.citations
+            if search_pkg.formatted_evidence and messages_context and messages_context[-1].get("role") == "user":
+                messages_context[-1]["content"] = f"{content}\n\n{search_pkg.formatted_evidence}"
+        except Exception as e:
+            logger.warning("Web search execution failed (%s): %s", type(e).__name__, e)
+
+    # Resolve exact registered prompt for workflow
+    resolved_prompt = prompt_resolver.resolve(
+        task=routing_decision.prompt_id,
+        platform="web",
+        normal_use=routing_decision.normal_use,
+        include_completeness=not routing_decision.normal_use
+    )
+    system_prompt = resolved_prompt.system_prompt
     max_tok = None
 
     # Model capability overrides
@@ -2669,7 +2694,6 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
         )
         max_tok = 2048
     else:
-        # Default: adaptive task budget determined dynamically by output budget manager
         max_tok = None
 
     # Ground the model in real facts about this user's quota
@@ -2705,34 +2729,6 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
             "Make it punchy, real, personal — not generic quotes. Mix English + Hinglish."
         )
         system_prompt += "\n\nFor this turn, follow these instructions while answering the user's latest message:\n" + prompt
-    elif intent == "search":
-        query = payload or content
-        try:
-            search_results = study_bot.web_search(query, max_results=5)
-            ai_prompt = (
-                f"User ne search kiya: '{query}'\n\n"
-                f"Internet se yeh results aaye hain:\n\n"
-                f"{search_results}\n\n"
-                f"In results ke basis pe ek clear, accurate, engaging answer do Hinglish mein. "
-                f"Agar results mein kafi info nahi hai, toh honestly batao. "
-                f"Cite only exact HTTP(S) source URLs present in the results; never invent citations or links. "
-                f"Use standard markdown formatting, bolding, and bullet points. Format citations as [Source Name](url)."
-            )
-            if search_results.startswith("DuckDuckGo Instant Answer"):
-                ai_prompt += (
-                    "\nThis is an unavailable/empty Instant Answer result, not full web search. "
-                    "Tell the user no useful search result is available right now; do not answer from memory "
-                    "or invent sources, citations, titles, or links."
-                )
-            # Keep the user's actual question and the preceding turns intact;
-            # add retrieved web material to the latest turn for grounding.
-            if messages_context and messages_context[-1].get("role") == "user":
-                messages_context[-1] = {
-                    "role": "user",
-                    "content": f"{content}\n\n{ai_prompt}",
-                }
-        except Exception as e:
-            print(f"Web search failed: {e}")
 
     # Phase 7 Completeness Directive
     system_prompt += (
@@ -2790,6 +2786,10 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
         "fast_greeting": fast_greeting,
         "document_context": document_context,
         "persistence_warning": persistence_warning,
+        "citations": citations,
+        "workflow": routing_decision.workflow,
+        "prompt_id": routing_decision.prompt_id,
+        "search_required": routing_decision.search_required,
         "latency_ms": {
             "auth_ms": getattr(g, "auth_validation_ms", None) if has_request_context() else None,
             "security_validation_ms": getattr(g, "security_validation_ms", None) if has_request_context() else None,
@@ -2910,7 +2910,10 @@ def send_message():
         "user_message_count": quota_status["used"],
         "message_limit": GLOBAL_MESSAGE_LIMIT,
         "persistence_warning": prep["persistence_warning"] or not assistant_saved,
-        "request_id": getattr(g, "request_id", None)
+        "request_id": getattr(g, "request_id", None),
+        "citations": prep.get("citations", []),
+        "workflow": prep.get("workflow"),
+        "prompt_id": prep.get("prompt_id")
     })
 
 
@@ -2989,6 +2992,16 @@ def stream_message():
         }) + "\n"
 
         # Yield status event
+        if prep.get("search_required"):
+            yield json.dumps({
+                "type": "status",
+                "stage": "searching"
+            }) + "\n"
+        if prep.get("citations"):
+            yield json.dumps({
+                "type": "citations",
+                "citations": prep["citations"]
+            }) + "\n"
         yield json.dumps({
             "type": "status",
             "stage": "generating"
@@ -3095,7 +3108,10 @@ def stream_message():
                 "usage": quota_status,
                 "persistence_warning": persistence_warning or not assistant_saved,
                 "request_id": request_id,
-                "latency_ms": latency_metrics
+                "latency_ms": latency_metrics,
+                "citations": prep.get("citations", []),
+                "workflow": prep.get("workflow"),
+                "prompt_id": prep.get("prompt_id")
             }) + "\n"
 
         except Exception as e:
