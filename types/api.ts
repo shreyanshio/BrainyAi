@@ -920,6 +920,10 @@ export interface AIRequestLog {
 
   fallback_from?: string | null
 
+  fallback_model?: string | null
+
+  selection_reason?: string | null
+
   error_category?: string | null
 
   continuation_used?: boolean

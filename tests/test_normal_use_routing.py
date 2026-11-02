@@ -32,7 +32,7 @@ class NormalUseRoutingTests(unittest.TestCase):
                 task, complexity = classify_task_with_complexity(text)
                 self.assertEqual(task, expected_task)
                 self.assertIn(complexity, (TaskComplexity.FAST, TaskComplexity.LIGHT))
-                self.assertEqual(get_routing_candidates(task, ResponseDepth.BALANCED, complexity)[0][0], "groq")
+                self.assertEqual(get_routing_candidates(task, ResponseDepth.BALANCED, complexity)[0][0], "gemini")
 
     def test_local_arithmetic_fast_path_is_preserved(self):
         router = AIRouter()

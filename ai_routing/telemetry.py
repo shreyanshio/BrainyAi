@@ -33,6 +33,7 @@ class TelemetryRecord:
     total_tokens: Optional[int] = None
     fallback_used: bool = False
     fallback_from: Optional[str] = None
+    fallback_model: Optional[str] = None
     error_category: Optional[str] = None
     status: str = "success"  # success, error, fallback_recovered
     continuation_used: bool = False

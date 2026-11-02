@@ -23,7 +23,7 @@ from ai_routing.tasks import (
 from ai_routing.policy import get_routing_candidates, MATH_TASKS
 from ai_routing.registry import registry
 from ai_routing.telemetry import global_telemetry, TelemetryRecord
-from ai_routing.providers.base import BaseProvider, ProviderResult
+from ai_routing.providers.base import BaseProvider, ProviderResult, categorize_provider_error
 from ai_routing.providers.groq_provider import GroqProvider
 from ai_routing.providers.gemini_provider import GeminiProvider
 from ai_routing.providers.sambanova_provider import SambaNovaProvider
@@ -74,6 +74,19 @@ def _sanitize_grounding_text(text: str) -> str:
     cleaned = str(text).replace("---", " - - ")
     cleaned = cleaned.replace("```", "'''")
     return cleaned
+
+
+def _estimate_request_tokens(messages: List[Dict[str, Any]], document_context: Optional[Dict[str, Any]]) -> int:
+    """Roughly estimate text tokens while excluding encoded image/PDF bytes."""
+    chars = len(str(messages))
+    context = document_context or {}
+    for key in ("pdf_text", "document_pages", "document_text"):
+        value = context.get(key)
+        if isinstance(value, str):
+            chars += len(value)
+        elif isinstance(value, list):
+            chars += sum(len(item) if isinstance(item, str) else len(str(item.get("text", ""))) if isinstance(item, dict) else 0 for item in value)
+    return chars // 4
 
 
 class AIRouter:
@@ -312,13 +325,15 @@ class AIRouter:
         if resolved_task in (TaskType.WEB_RESEARCH, TaskType.CURRENT_INFO):
             citations = self._apply_search_grounding(call_messages, prompt)
 
-        candidates = candidate_chain or get_routing_candidates(resolved_task, resolved_depth, resolved_complexity)
-        # Context-aware candidate reordering: if prompt is large (> 4,500 tokens), elevate Gemini to the front to prevent Groq ITPM 413
-        est_prompt_tokens = len(str(call_messages)) // 4
-        if est_prompt_tokens > 4500 and not candidate_chain:
-            gemini_cand = [c for c in candidates if c[0] == "gemini"]
-            other_cand = [c for c in candidates if c[0] != "gemini"]
-            candidates = gemini_cand + other_cand
+        est_prompt_tokens = _estimate_request_tokens(call_messages, document_context)
+        candidates = candidate_chain or get_routing_candidates(
+            resolved_task, resolved_depth, resolved_complexity, document_context, est_prompt_tokens
+        )
+        selected_candidate = candidates[0] if candidates else ("none", "none")
+        selection_reason = (
+            f"{resolved_task.value.lower()} classified {resolved_complexity.value.lower()}; "
+            f"selected {selected_candidate[0]}/{selected_candidate[1]} before provider request"
+        )
         fallback_used = False
         fallback_from = None
         last_exc = None
@@ -432,12 +447,14 @@ class AIRouter:
                     output_tokens=tot_out_tokens or None,
                     fallback_used=fallback_used,
                     fallback_from=fallback_from,
+                    fallback_model=res.model if fallback_used or (provider_name == "gemini" and res.model != model_id) else None,
+                    error_category=categorize_provider_error(last_exc) if fallback_used else None,
                     status="success" if not fallback_used else "fallback_recovered",
                     continuation_used=continuation_used,
                     continuation_rounds=continuation_rounds,
                     mode=mode,
                     workflow=workflow_val,
-                    selection_reason="SymPy solved deterministically; LLM provided conceptual explanation" if math_hybrid_active else mode_reason,
+                    selection_reason="SymPy solved deterministically; LLM provided conceptual explanation" if math_hybrid_active else selection_reason,
                     escalation_reason=(f"{fallback_from} unavailable; existing fallback chain selected {provider_name}/{res.model}" if fallback_used and normal_use else None),
                     prompt_tokens=max(1, len(sys_prompt) // 4) if sys_prompt else 0,
                     prompt_tokens_estimated=True,
@@ -513,10 +530,10 @@ class AIRouter:
             latency_ms=(time.perf_counter() - start_all) * 1000.0,
             fallback_used=fallback_used,
             fallback_from=fallback_from,
-            error_category=type(last_exc).__name__ if last_exc else "Exhausted",
+            error_category=categorize_provider_error(last_exc) if last_exc else "exhausted_candidates",
             status="error",
             mode=mode,
-            selection_reason=mode_reason,
+            selection_reason=selection_reason,
             prompt_tokens=max(1, len(sys_prompt) // 4) if sys_prompt else 0,
             prompt_tokens_estimated=True
         ))
@@ -665,13 +682,15 @@ class AIRouter:
         if resolved_task in (TaskType.WEB_RESEARCH, TaskType.CURRENT_INFO):
             self._apply_search_grounding(call_messages, prompt)
 
-        candidates = candidate_chain or get_routing_candidates(resolved_task, resolved_depth, resolved_complexity)
-        # Context-aware candidate reordering: if prompt is large (> 4,500 tokens), elevate Gemini to the front to prevent Groq ITPM 413
-        est_prompt_tokens = len(str(call_messages)) // 4
-        if est_prompt_tokens > 4500 and not candidate_chain:
-            gemini_cand = [c for c in candidates if c[0] == "gemini"]
-            other_cand = [c for c in candidates if c[0] != "gemini"]
-            candidates = gemini_cand + other_cand
+        est_prompt_tokens = _estimate_request_tokens(call_messages, document_context)
+        candidates = candidate_chain or get_routing_candidates(
+            resolved_task, resolved_depth, resolved_complexity, document_context, est_prompt_tokens
+        )
+        selected_candidate = candidates[0] if candidates else ("none", "none")
+        selection_reason = (
+            f"{resolved_task.value.lower()} classified {resolved_complexity.value.lower()}; "
+            f"selected {selected_candidate[0]}/{selected_candidate[1]} before provider request"
+        )
         fallback_used = False
         fallback_from = None
         last_exc = None
@@ -767,6 +786,9 @@ class AIRouter:
                 if started:
                     # Successfully completed stream
                     total_lat = (time.perf_counter() - start_t) * 1000.0
+                    stream_model = getattr(provider, "last_stream_model", model_id)
+                    if not isinstance(stream_model, str) or not stream_model:
+                        stream_model = model_id
                     if math_hybrid_active:
                         workflow_val = "sympy_then_llm"
                         global_telemetry.record_math_call(is_local=False, workflow="sympy_then_llm")
@@ -785,7 +807,7 @@ class AIRouter:
                         task=resolved_task.value,
                         depth=resolved_depth.value,
                         provider=provider_name,
-                        model=model_id,
+                        model=stream_model,
                         latency_ms=total_lat,
                         ttft_ms=first_token_t,
                         input_tokens=est_in_tokens or None,
@@ -793,11 +815,13 @@ class AIRouter:
                         fallback_used=fallback_used,
                         workflow=workflow_val,
                         fallback_from=fallback_from,
+                        fallback_model=stream_model if fallback_used or (provider_name == "gemini" and stream_model != model_id) else None,
+                        error_category=categorize_provider_error(last_exc) if fallback_used else None,
                         status="success" if not fallback_used else "fallback_recovered",
                         continuation_used=continuation_used,
                         continuation_rounds=continuation_rounds,
                         mode=mode,
-                        selection_reason=mode_reason,
+                        selection_reason=(selection_reason + (f"; Gemini model-specific fallback used {stream_model}" if provider_name == "gemini" and stream_model != model_id else "")),
                         escalation_reason=(f"{fallback_from} unavailable; existing fallback chain selected {provider_name}/{model_id}" if fallback_used and normal_use else None),
                         prompt_tokens=max(1, len(sys_prompt) // 4) if sys_prompt else 0,
                         prompt_tokens_estimated=True
@@ -827,10 +851,10 @@ class AIRouter:
             latency_ms=(time.perf_counter() - start_t) * 1000.0,
             fallback_used=fallback_used,
             fallback_from=fallback_from,
-            error_category=type(last_exc).__name__ if last_exc else "Exhausted",
+            error_category=categorize_provider_error(last_exc) if last_exc else "exhausted_candidates",
             status="error",
             mode=mode,
-            selection_reason=mode_reason,
+            selection_reason=selection_reason,
             prompt_tokens=max(1, len(sys_prompt) // 4) if sys_prompt else 0,
             prompt_tokens_estimated=True
         ))

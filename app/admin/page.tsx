@@ -1320,6 +1320,18 @@ export default function AdminPage() {
                       <span className="text-slate-500">Provider & Model:</span>
                       <span className="text-slate-200">{selectedLog.provider} / {selectedLog.model}</span>
                     </div>
+                    {selectedLog.fallback_model && (
+                      <div className="flex justify-between py-1 border-b border-slate-800/60">
+                        <span className="text-slate-500">Gemini Model Fallback:</span>
+                        <span className="text-slate-200">{selectedLog.fallback_model}</span>
+                      </div>
+                    )}
+                    {selectedLog.selection_reason && (
+                      <div className="py-1 border-b border-slate-800/60">
+                        <div className="text-slate-500 mb-1">Selection Reason:</div>
+                        <div className="text-slate-200 whitespace-normal">{selectedLog.selection_reason}</div>
+                      </div>
+                    )}
                     <div className="flex justify-between py-1 border-b border-slate-800/60">
                       <span className="text-slate-500">Task Classification:</span>
                       <span className="text-slate-200">{selectedLog.task} ({selectedLog.depth})</span>

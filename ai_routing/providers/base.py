@@ -57,6 +57,30 @@ def is_model_context_or_limit_error(exc: Exception) -> bool:
         "maximum context length", "itpm", "input tokens per minute", "tokens per minute (itpm)"
     ]) or is_model_not_found(exc)
 
+def categorize_provider_error(exc: Optional[Exception]) -> str:
+    """Normalize provider failures for diagnostics without recording raw response bodies."""
+    if exc is None:
+        return "unknown"
+    text = str(exc).lower()
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if is_model_not_found(exc):
+        return "model_unavailable"
+    if status == 403 or "project access denied" in text:
+        return "model_access_denied"
+    if "invalid api key" in text or "api key not valid" in text or status == 401:
+        return "api_key_invalid"
+    if is_model_context_or_limit_error(exc):
+        return "context_length_violation"
+    if status == 429:
+        return "project_quota_exhausted" if any(s in text for s in ("quota", "resource_exhausted")) else "temporary_rate_limit"
+    if any(s in text for s in ("unsupported", "invalid argument", "unknown parameter", "bad request")):
+        return "unsupported_request_parameter"
+    if status in (500, 502, 503, 504) or any(s in text for s in ("timeout", "connection", "overloaded")):
+        return "temporary_provider_outage"
+    if is_auth_error(exc):
+        return "provider_access_denied"
+    return "request_failed"
+
 class BaseProvider(ABC):
     def __init__(self):
         self.last_stream_finish_reason: Optional[str] = None

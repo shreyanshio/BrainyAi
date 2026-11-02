@@ -17,25 +17,29 @@ from ai_routing.policy import get_routing_candidates
 from ai_routing.router import AIRouter
 from ai_routing.providers.base import BaseProvider, ProviderResult
 from ai_routing.prompts import prompt_registry, Platform
+from ai_routing.registry import registry
 
 
 class GeminiRoutingMatrixTests(unittest.TestCase):
     def setUp(self):
         self.router = AIRouter()
+        eligibility = patch.object(registry, "is_model_eligible", return_value=True)
+        eligibility.start()
+        self.addCleanup(eligibility.stop)
 
     def test_20_routing_scenarios_matrix(self):
         """
         Validates the 20 benchmark user requests defined in Section 10:
-        1. Hello -> Lightweight path (Groq)
-        2. Thanks -> Lightweight response (Groq)
-        3. What is HTTP? -> Groq + normal-use
-        4. What is an operating system? (fast vs balanced) -> Depth-aware Groq/Gemini
+        1. Hello -> Lightweight local path in the API; Gemini policy fallback
+        2. Thanks -> Lightweight local path in the API; Gemini policy fallback
+        3. What is HTTP? -> Gemini Flash-Lite + normal-use
+        4. What is an operating system? -> Depth-aware Gemini Flash / Flash-Lite
         5. Explain operating systems with examples -> Gemini
         6. Explain gradient descent simply -> Gemini
         7. Teach me SQL joins -> Gemini
-        8. Translate this short sentence -> Groq + normal-use
+        8. Translate this short sentence -> Gemini Flash-Lite + normal-use
         9. Rewrite this paragraph professionally -> Gemini
-        10. Fix this small grammar mistake -> Lightweight path (Groq)
+        10. Fix this small grammar mistake -> Gemini Flash-Lite
         11. Debug this React component -> Gemini
         12. Explain this Python error -> Gemini
         13. Give me a detailed project roadmap -> Gemini
@@ -44,18 +48,18 @@ class GeminiRoutingMatrixTests(unittest.TestCase):
         16. Summarize this PDF -> PDF extraction + Gemini
         17. Generate notes from my PDF -> PDF pipeline + Gemini
         18. Analyze this uploaded image -> Gemini multimodal
-        19. Give me a one-line answer -> Lightweight path (Groq)
+        19. Give me a one-line answer -> Gemini Flash-Lite
         20. Explain this in detailed Hinglish -> Gemini
         """
         scenarios = [
             # 1. Hello (Lightweight path)
-            ("Hello", {"depth": ResponseDepth.BALANCED}, "groq"),
+            ("Hello", {"depth": ResponseDepth.BALANCED}, "gemini"),
             # 2. Thanks (Lightweight response)
-            ("Thanks", {"depth": ResponseDepth.BALANCED}, "groq"),
+            ("Thanks", {"depth": ResponseDepth.BALANCED}, "gemini"),
             # 3. What is HTTP? (Groq + normal-use)
-            ("What is HTTP?", {"depth": ResponseDepth.BALANCED}, "groq"),
+            ("What is HTTP?", {"depth": ResponseDepth.BALANCED}, "gemini"),
             # 4a. What is an operating system? (Depth-aware: FAST -> Groq)
-            ("What is an operating system? [Fast]", {"depth": ResponseDepth.FAST, "query": "What is an operating system?"}, "groq"),
+            ("What is an operating system? [Fast]", {"depth": ResponseDepth.FAST, "query": "What is an operating system?"}, "gemini"),
             # 4b. What is an operating system? (Depth-aware: BALANCED -> Gemini)
             ("What is an operating system? [Balanced]", {"depth": ResponseDepth.BALANCED, "query": "What is an operating system?"}, "gemini"),
             # 5. Explain operating systems with examples (Gemini)
@@ -65,11 +69,11 @@ class GeminiRoutingMatrixTests(unittest.TestCase):
             # 7. Teach me SQL joins (Gemini)
             ("Teach me SQL joins", {"depth": ResponseDepth.BALANCED}, "gemini"),
             # 8. Translate this short sentence (Groq + normal-use)
-            ("Translate this short sentence: The library closes at 8 PM", {"depth": ResponseDepth.BALANCED}, "groq"),
+            ("Translate this short sentence: The library closes at 8 PM", {"depth": ResponseDepth.BALANCED}, "gemini"),
             # 9. Rewrite this paragraph professionally (Gemini)
             ("Rewrite this paragraph professionally: We need this done as soon as possible because the clients are getting upset.", {"depth": ResponseDepth.BALANCED}, "gemini"),
             # 10. Fix this small grammar mistake (Lightweight path)
-            ("Fix this small grammar mistake: She do not like apples", {"depth": ResponseDepth.BALANCED}, "groq"),
+            ("Fix this small grammar mistake: She do not like apples", {"depth": ResponseDepth.BALANCED}, "gemini"),
             # 11. Debug this React component (Gemini)
             ("Debug this React component: function App() { return <div/>; }", {"depth": ResponseDepth.BALANCED}, "gemini"),
             # 12. Explain this Python error (Gemini)
@@ -87,7 +91,7 @@ class GeminiRoutingMatrixTests(unittest.TestCase):
             # 18. Analyze this uploaded image (Gemini multimodal)
             ("Analyze this uploaded image", {"depth": ResponseDepth.BALANCED, "context": {"has_image": True}}, "gemini"),
             # 19. Give me a one-line answer (Lightweight path)
-            ("Give me a one-line answer: What is the capital of France?", {"depth": ResponseDepth.BALANCED}, "groq"),
+            ("Give me a one-line answer: What is the capital of France?", {"depth": ResponseDepth.BALANCED}, "gemini"),
             # 20. Explain this in detailed Hinglish (Gemini)
             ("Explain this in detailed Hinglish: What is quantum computing?", {"depth": ResponseDepth.BALANCED}, "gemini"),
         ]

@@ -1,9 +1,9 @@
 """
 Tests for BrainyAi Intelligent Gemini + Groq Routing Architecture
 Verifies:
-  1. Groq = Speed (Instant response layer for casual conversations, greetings, and definitions)
-  2. Gemini = Intelligence (Gemini 3.8 Flash primary for coding, math, science, and deep reasoning)
-  3. Gemini 3.6 Flash as balanced secondary intelligence and fallback
+  1. Gemini = Primary for normal conversation and specialist tasks
+  2. Gemini 3.5 Flash-Lite handles lightweight task routing
+  3. Groq and OpenRouter are provider-level secondary and tertiary failover
   4. Task Complexity Classification (FAST, LIGHT, STANDARD, COMPLEX, DEEP)
   5. Thinking level adaptation (low, medium, high) without deprecated parameters
   6. Multimodal support and capability checks
@@ -87,52 +87,54 @@ class TestTaskComplexityClassification(unittest.TestCase):
 
 
 class TestRoutingPolicyGroqSpeedGeminiIntelligence(unittest.TestCase):
-    """Verifies that Groq handles speed and Gemini handles intelligence."""
+    """Verifies Gemini model selection is separate from provider failover."""
 
-    def test_casual_chat_routes_to_groq_first_never_gemini_38(self):
+    def setUp(self):
+        self.eligibility = patch.object(registry, "is_model_eligible", return_value=True)
+        self.eligibility.start()
+        self.addCleanup(self.eligibility.stop)
+
+    def test_casual_chat_uses_gemini_lite_before_provider_failover(self):
         candidates = get_routing_candidates(TaskType.QUICK_CHAT, complexity=TaskComplexity.FAST)
         self.assertTrue(len(candidates) > 0)
         first_prov, first_model = candidates[0]
-        self.assertEqual(first_prov, "groq", f"First provider should be groq for FAST chat, got {first_prov}")
-        self.assertIn("8b", first_model, f"First model should be 8B instant, got {first_model}")
+        self.assertEqual(first_prov, "gemini", f"Gemini remains primary for normal chat, got {first_prov}")
+        self.assertEqual(first_model, "gemini-3.5-flash-lite")
 
         # Ensure gemini-3.8-flash is NEVER selected for casual chat
         models = [m for p, m in candidates if p == "gemini"]
-        self.assertNotIn("gemini-3.8-flash", models, "Casual chat must NEVER route to Gemini 3.8 Flash")
+        self.assertEqual(models, ["gemini-3.5-flash-lite"], "Choose one Gemini model before provider failover")
 
-    def test_coding_routes_to_gemini_38_flash_primary_and_36_flash_secondary(self):
+    def test_coding_routes_to_one_gemini_38_flash_before_provider_failover(self):
         for task in CODING_TASKS:
             candidates = get_routing_candidates(task, complexity=TaskComplexity.COMPLEX)
-            self.assertTrue(len(candidates) >= 2)
-            # Primary: Gemini 3.8 Flash
+            self.assertGreaterEqual(len(candidates), 2)
             self.assertEqual(candidates[0], ("gemini", "gemini-3.8-flash"), f"Primary for {task} must be gemini-3.8-flash")
-            # Secondary: Gemini 3.6 Flash
-            self.assertEqual(candidates[1], ("gemini", "gemini-3.6-flash"), f"Secondary for {task} must be gemini-3.6-flash")
+            self.assertEqual([p for p, _ in candidates if p == "gemini"], ["gemini"])
 
     def test_math_routes_to_gemini_38_flash_primary(self):
         for task in MATH_TASKS:
             candidates = get_routing_candidates(task, complexity=TaskComplexity.COMPLEX)
             self.assertTrue(len(candidates) >= 2)
             self.assertEqual(candidates[0], ("gemini", "gemini-3.8-flash"))
-            self.assertEqual(candidates[1], ("gemini", "gemini-3.6-flash"))
+            self.assertEqual([p for p, _ in candidates if p == "gemini"], ["gemini"])
 
     def test_science_routes_to_gemini_38_flash_primary(self):
         for task in SCIENCE_TASKS:
             candidates = get_routing_candidates(task, complexity=TaskComplexity.COMPLEX)
             self.assertTrue(len(candidates) >= 2)
             self.assertEqual(candidates[0], ("gemini", "gemini-3.8-flash"))
-            self.assertEqual(candidates[1], ("gemini", "gemini-3.6-flash"))
+            self.assertEqual([p for p, _ in candidates if p == "gemini"], ["gemini"])
 
     def test_web_research_routes_to_gemini_38_flash_primary(self):
         candidates = get_routing_candidates(TaskType.WEB_RESEARCH, complexity=TaskComplexity.STANDARD)
         self.assertEqual(candidates[0], ("gemini", "gemini-3.8-flash"))
-        self.assertEqual(candidates[1], ("gemini", "gemini-3.6-flash"))
+        self.assertEqual([p for p, _ in candidates if p == "gemini"], ["gemini"])
 
     def test_multimodal_routes_to_gemini_flash_models(self):
         candidates = get_routing_candidates(TaskType.IMAGE_QUESTION)
         self.assertEqual(candidates[0], ("gemini", "gemini-3.8-flash"))
-        self.assertEqual(candidates[1], ("gemini", "gemini-3.6-flash"))
-        self.assertEqual(candidates[2], ("gemini", "gemini-3.5-flash-lite"))
+        self.assertEqual([p for p, _ in candidates if p == "gemini"], ["gemini"])
 
     def test_strict_non_gemini_invariant_for_pdf_tasks(self):
         for task in PDF_STUDY_TASKS:
@@ -141,6 +143,7 @@ class TestRoutingPolicyGroqSpeedGeminiIntelligence(unittest.TestCase):
             # Gemini is allowed and present in routing candidates for PDF study tasks
             providers = [p.lower() for p, _ in candidates]
             self.assertIn("gemini", providers)
+            self.assertEqual(providers[:3], ["gemini", "groq", "openrouter"])
 
 
 class TestThinkingLevelSelection(unittest.TestCase):

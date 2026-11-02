@@ -12,6 +12,7 @@ Enforces:
 from typing import List, Tuple, Dict, Any, Optional
 from ai_routing.tasks import TaskType, ResponseDepth, TaskComplexity
 from ai_routing.registry import registry, CostCategory
+from ai_routing.gemini_selection import select_gemini_model
 
 Candidate = Tuple[str, str]  # (provider_name, model_id)
 
@@ -119,199 +120,62 @@ def compute_routing_score(
 def get_routing_candidates(
     task: TaskType,
     depth: ResponseDepth = ResponseDepth.BALANCED,
-    complexity: Optional[TaskComplexity] = None
+    complexity: Optional[TaskComplexity] = None,
+    document_context: Optional[Dict[str, Any]] = None,
+    estimated_input_tokens: int = 0,
 ) -> List[Candidate]:
     """
-    Returns an ordered list of (provider, model_id) candidates according to the
-    specialist routing policy, task classification, modalities, and response depth.
-    Enforces:
-      - Groq = Speed: Instant routing for casual chit-chat, simple definitions, and greetings.
-      - Gemini = Intelligence: Gemini 3.8 Flash primary for coding, math, science, and reasoning.
-      - Gemini 3.6 Flash: High-quality secondary balanced intelligence and fallback.
-      - Gemini primary for PDF Study Studio with Groq / Cerebras / SambaNova failover.
+    Returns one selected Gemini model followed by provider-level backups.
+    Gemini model changes happen only inside the Gemini adapter after a
+    model-specific failure; this list never fans an ordinary request across models.
     """
+    return _get_provider_failover_candidates(task, depth, complexity, document_context, estimated_input_tokens)
+
+
+def _get_provider_failover_candidates(
+    task: TaskType,
+    depth: ResponseDepth = ResponseDepth.BALANCED,
+    complexity: Optional[TaskComplexity] = None,
+    document_context: Optional[Dict[str, Any]] = None,
+    estimated_input_tokens: int = 0,
+) -> List[Candidate]:
+    """Select one Gemini model first, then apply provider-level Groq/OpenRouter failover."""
+    try:
+        selection = select_gemini_model(task, depth, complexity, document_context, estimated_input_tokens)
+        gemini = ("gemini", selection.model_id)
+    except RuntimeError:
+        gemini = None
+
     groq_fast = registry.groq_fast_model
     groq_balanced = registry.groq_balanced_model
-    gemini_code = getattr(registry, "gemini_code_model", "gemini-3.8-flash")
-    gemini_vision = getattr(registry, "gemini_vision_model", "gemini-3.8-flash")
-    gemini_reason = getattr(registry, "gemini_reasoning_model", "gemini-3.8-flash")
-    gemini_balanced = getattr(registry, "gemini_balanced_model", "gemini-3.6-flash")
-    gemini_fast = getattr(registry, "gemini_fast_model", "gemini-3.5-flash-lite")
-    samba_reason = registry.sambanova_reasoning_model
-    samba_fast = registry.sambanova_fast_model
-    openrouter_code = registry.openrouter_coding_model
     openrouter_free = registry.openrouter_free_model
 
-    # ── 1. PDF Study Studio Tasks (Gemini-Powered Academic Intelligence & High-Quota Failover) ──
-    if task in PDF_STUDY_TASKS:
-        gemini_pdf = getattr(registry, "gemini_pdf_model", "gemini-2.5-flash")
-        if task == TaskType.PDF_QUESTION_ANSWERING:
-            # Notes Assistant & Document Q&A: Gemini first for long-context grounding, followed by Groq / Cerebras / SambaNova
-            candidates = [
-                ("gemini", gemini_pdf),
-                ("groq", groq_balanced),
-                ("cerebras", "gpt-oss-120b"),
-                ("sambanova", samba_reason),
-                ("openrouter", openrouter_free)
-            ]
-        elif task in (TaskType.QUIZ_GENERATION, TaskType.IMPORTANT_QUESTION_GENERATION):
-            candidates = [
-                ("gemini", gemini_pdf),
-                ("groq", groq_balanced),
-                ("cerebras", "gpt-oss-120b"),
-                ("sambanova", samba_reason),
-                ("cerebras", "qwen-3.8-27b"),
-                ("openrouter", openrouter_free)
-            ]
-        elif task == TaskType.FLASHCARD_GENERATION:
-            candidates = [
-                ("gemini", gemini_pdf),
-                ("groq", groq_fast),
-                ("cerebras", "llama3.1-8b"),
-                ("sambanova", samba_fast),
-                ("openrouter", openrouter_free)
-            ]
-        else:
-            candidates = [
-                ("gemini", gemini_pdf),
-                ("groq", groq_balanced),
-                ("cerebras", "gpt-oss-120b"),
-                ("sambanova", samba_reason),
-                ("openrouter", openrouter_free)
-            ]
-        return _filter_eligible(candidates, disallow_gemini=False)
-
-    # ── 2. Fast Speed Tier: Greetings, Casual Chat, Simple Turn (Groq 8B First) ──
-    if complexity == TaskComplexity.FAST or task in (TaskType.QUICK_CHAT, TaskType.CHAT_TITLE_GENERATION):
-        candidates = [
-            ("groq", groq_fast),
-            ("cerebras", "llama3.1-8b"),
-            ("sambanova", samba_fast),
-            ("groq", groq_balanced),
-            ("gemini", gemini_fast),
-            ("openrouter", openrouter_free)
-        ]
+    candidates: List[Candidate] = []
+    if gemini:
+        candidates.append(gemini)
+    context = document_context or {}
+    multimodal_parts = context.get("multimodal_parts") or []
+    image_input = bool(context.get("has_image")) or task in MULTIMODAL_TASKS or any(
+        "image" in str(part.get("mime_type", part.get("mimeType", ""))).lower()
+        for part in multimodal_parts if isinstance(part, dict)
+    )
+    binary_pdf_input = any(
+        "application/pdf" in str(part.get("mime_type", part.get("mimeType", ""))).lower()
+        for part in multimodal_parts if isinstance(part, dict)
+    ) and not context.get("pdf_text")
+    if image_input:
+        # Groq's configured models are text-only. Preserve modality by allowing only
+        # a registered image model as the provider backup.
+        candidates.append(("openrouter", "nvidia/nemotron-3.5-super-vl:free"))
         return _filter_eligible(candidates)
-
-    # ── 3. Light Tier: Short Definitions, Quick Facts, Simple Translations, Text Correction ──
-    if (complexity == TaskComplexity.LIGHT or depth == ResponseDepth.FAST or task in (TaskType.TEXT_CORRECTION, TaskType.SHORT_JSON_EXTRACTION)) and task not in (
-        CODING_TASKS | MATH_TASKS | SCIENCE_TASKS | MULTIMODAL_TASKS | PDF_STUDY_TASKS | {TaskType.DEEP_REASONING, TaskType.UNCERTAIN_COMPLEX}
-    ):
-        candidates = [
-            ("groq", groq_fast),
-            ("gemini", gemini_fast),
-            ("cerebras", "llama3.1-8b"),
-            ("sambanova", samba_fast),
-            ("groq", groq_balanced),
-            ("openrouter", openrouter_free)
-        ]
+    if binary_pdf_input:
+        # Do not send raw PDF bytes to providers without verified PDF input support.
         return _filter_eligible(candidates)
-
-    # ── 4. Multimodal & Diagram Tasks ──
-    if task in MULTIMODAL_TASKS:
-        candidates = [
-            ("gemini", gemini_vision),
-            ("gemini", gemini_balanced),
-            ("gemini", gemini_fast),
-            ("openrouter", "nvidia/nemotron-3.5-super-vl:free"),
-            ("groq", groq_balanced),  # Text fallback if visual is extracted
-        ]
-        return _filter_eligible(candidates)
-
-    # ── 5. Coding Specialists (SQL, DSA, Debugging, Code Writing) ──
-    if task in CODING_TASKS:
-        candidates = [
-            ("gemini", gemini_code),
-            ("gemini", gemini_balanced),
-            ("openrouter", openrouter_code),
-            ("groq", groq_balanced),
-            ("sambanova", samba_reason),
-            ("cerebras", "gpt-oss-120b"),
-            ("openrouter", "google/gemma-4-31b-it:free"),
-            ("openrouter", openrouter_free)
-        ]
-        return _filter_eligible(candidates)
-
-    # ── 6. Mathematics Specialists ──
-    if task in MATH_TASKS:
-        candidates = [
-            ("gemini", gemini_reason),
-            ("gemini", gemini_balanced),
-            ("sambanova", samba_reason),
-            ("groq", groq_balanced),
-            ("cerebras", "gpt-oss-120b"),
-            ("cerebras", "qwen-3.8-27b"),
-            ("openrouter", openrouter_free)
-        ]
-        return _filter_eligible(candidates)
-
-    # ── 7. Science Specialists (Physics, Chemistry, Biology) ──
-    if task in SCIENCE_TASKS:
-        candidates = [
-            ("gemini", gemini_reason),
-            ("gemini", gemini_balanced),
-            ("groq", groq_balanced),
-            ("sambanova", samba_reason),
-            ("cerebras", "gpt-oss-120b"),
-            ("openrouter", openrouter_free)
-        ]
-        return _filter_eligible(candidates)
-
-    # ── 8. Web Research Synthesis ──
-    if task in (TaskType.WEB_RESEARCH, TaskType.CURRENT_INFO):
-        candidates = [
-            ("gemini", gemini_reason),
-            ("gemini", gemini_balanced),
-            ("groq", groq_balanced),
-            ("sambanova", samba_reason),
-            ("openrouter", openrouter_free)
-        ]
-        return _filter_eligible(candidates)
-
-    # ── 9. Deep Reasoning / Complex Architecture / Uncertain Complex ──
-    if task in (TaskType.DEEP_REASONING, TaskType.UNCERTAIN_COMPLEX) or depth == ResponseDepth.DEEP or complexity == TaskComplexity.DEEP:
-        candidates = [
-            ("gemini", gemini_reason),
-            ("gemini", gemini_balanced),
-            ("sambanova", samba_reason),
-            ("groq", groq_balanced),
-            ("cerebras", "gpt-oss-120b"),
-            ("openrouter", "nvidia/nemotron-3-ultra-550b-a55b:free"),
-            ("openrouter", openrouter_free)
-        ]
-        return _filter_eligible(candidates)
-
-    # ── 10. Writing & Composition Specialists ──
-    if task == TaskType.WRITING:
-        candidates = [
-            ("gemini", gemini_reason),
-            ("gemini", gemini_balanced),
-            ("groq", groq_balanced),
-            ("sambanova", samba_reason),
-            ("cerebras", "gpt-oss-120b"),
-            ("openrouter", openrouter_free)
-        ]
-        return _filter_eligible(candidates)
-
-    if task == TaskType.TRANSLATION:
-        candidates = [
-            ("gemini", gemini_balanced),
-            ("gemini", gemini_reason),
-            ("groq", groq_balanced),
-            ("sambanova", samba_reason),
-            ("openrouter", openrouter_free)
-        ]
-        return _filter_eligible(candidates)
-
-    # ── 11. General Detailed / Balanced Explanations ──
-    candidates = [
-        ("gemini", gemini_reason),
-        ("gemini", gemini_balanced),
-        ("groq", groq_balanced),
-        ("sambanova", samba_reason),
-        ("cerebras", "gpt-oss-120b"),
-        ("openrouter", openrouter_free)
-    ]
+    if task == TaskType.QUICK_CHAT or complexity in (TaskComplexity.FAST, TaskComplexity.LIGHT):
+        candidates.append(("groq", groq_fast))
+    else:
+        candidates.append(("groq", groq_balanced))
+    candidates.append(("openrouter", openrouter_free))
     return _filter_eligible(candidates)
 
 
@@ -340,7 +204,12 @@ def _filter_eligible(candidates: List[Candidate], disallow_gemini: bool = False)
     if eligible:
         return eligible
 
-    # Fallback during unit testing or cold start when no keys are set in env
+    # Keep the static policy visible during a cold start with no configured
+    # credentials. When credentials exist, honor disabled/denied model policy.
+    any_provider_configured = any(registry.is_provider_available(prov) for prov, _ in candidates)
+    if any_provider_configured:
+        return []
+
     fallback: List[Candidate] = []
     for prov, model in candidates:
         if disallow_gemini and prov.lower() == "gemini":
