@@ -9,6 +9,7 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 import os
+import io
 import re
 import uuid
 import hmac
@@ -23,8 +24,16 @@ import requests
 from datetime import datetime, timezone, timedelta
 from html import escape
 from functools import wraps
-from flask import Flask, request, jsonify, session, send_from_directory, redirect, Response, stream_with_context, g, has_request_context
+from flask import (
+    Flask, request, jsonify, session, send_from_directory, redirect, Response,
+    stream_with_context, g, has_request_context, send_file, make_response
+)
 from flask_cors import CORS
+
+from file_service import (
+    file_service, FileSecurityError, FileValidationError, FileTooLargeError,
+    FileNotFoundError as BrainyFileNotFoundError
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1209,12 +1218,12 @@ def sb_get_messages(session_id: str, user_id: int) -> list:
         while True:
             page = _sb_json(_sb_request("GET", "chat_messages",
                 params=(f"?session_id=eq.{session_id}&user_id=eq.{int(user_id)}"
-                        f"&select=id,role,content,created_at&order=id.asc&limit={page_size}&offset={offset}")), "chat_messages")
+                        f"&select=id,role,content,created_at,attachment_id&order=id.asc&limit={page_size}&offset={offset}")), "chat_messages")
             msgs.extend(page)
             if len(page) < page_size:
                 break
             offset += page_size
-    except SupabaseSchemaUnavailable:
+    except (SupabaseSchemaUnavailable, SupabaseOperationError):
         msgs = []
         offset = 0
         while True:
@@ -1232,6 +1241,8 @@ def sb_get_messages(session_id: str, user_id: int) -> list:
                 m["content"] = unmask_secure_hash(m["content"])
             except StoredChatContentUnavailable:
                 m["content"] = "[Encrypted message from previous session]"
+        if m.get("attachment_id") and not m.get("image"):
+            m["image"] = f"/api/files/{m['attachment_id']}/preview"
     return msgs
 
 
@@ -1257,7 +1268,7 @@ def sb_get_recent_messages(session_id: str, limit: int | None = 15, user_id: int
             while True:
                 page = _sb_json(_sb_request("GET", "chat_messages",
                     params=(f"?session_id=eq.{session_id}&user_id=eq.{int(user_id)}{id_filter}"
-                            "&select=id,role,content,created_at"
+                            "&select=id,role,content,created_at,attachment_id"
                             f"&order=id.asc&limit={page_size}&offset={offset}")), "chat_messages")
                 msgs.extend(page)
                 if len(page) < page_size:
@@ -1266,9 +1277,9 @@ def sb_get_recent_messages(session_id: str, limit: int | None = 15, user_id: int
         else:
             raw_msgs = _sb_json(_sb_request("GET", "chat_messages",
                 params=(f"?session_id=eq.{session_id}&user_id=eq.{int(user_id)}{id_filter}"
-                        f"&select=id,role,content,created_at&order=id.desc&limit={limit}")), "chat_messages")
+                        f"&select=id,role,content,created_at,attachment_id&order=id.desc&limit={limit}")), "chat_messages")
             msgs = list(reversed(raw_msgs))
-    except SupabaseSchemaUnavailable:
+    except (SupabaseSchemaUnavailable, SupabaseOperationError):
         if limit is None:
             page_size = 500
             offset = 0
@@ -1293,14 +1304,20 @@ def sb_get_recent_messages(session_id: str, limit: int | None = 15, user_id: int
                 m["content"] = unmask_secure_hash(m["content"])
             except StoredChatContentUnavailable:
                 m["content"] = "[Encrypted message from previous session]"
+        if m.get("attachment_id") and not m.get("image"):
+            m["image"] = f"/api/files/{m['attachment_id']}/preview"
     return msgs
 
 
 def sb_insert_message(session_id: str, role: str, content: str,
-                      idempotency_key: str | None = None, user_id: int | None = None) -> None:
+                      idempotency_key: str | None = None, user_id: int | None = None,
+                      attachment_id: str | None = None) -> None:
     msg_obj = {"role": role, "content": content, "created_at": datetime.now(timezone.utc).isoformat()}
     if idempotency_key:
         msg_obj["idempotency_key"] = idempotency_key
+    if attachment_id:
+        msg_obj["attachment_id"] = attachment_id
+        msg_obj["image"] = f"/api/files/{attachment_id}/preview"
     if not (SUPABASE_URL and SUPABASE_KEY):
         _require_supabase_in_production()
         if user_id is not None and not any(s.get("id") == session_id for s in MEM_SESSIONS.get(user_id, [])):
@@ -1320,6 +1337,8 @@ def sb_insert_message(session_id: str, role: str, content: str,
     payload = {"session_id": session_id, "user_id": int(user_id), "role": role, "content": stored_content}
     if idempotency_key:
         payload["idempotency_key"] = idempotency_key
+    if attachment_id:
+        payload["attachment_id"] = attachment_id
     try:
         if idempotency_key:
             # Try with idempotency constraint if unique index exists in Supabase
@@ -1329,9 +1348,25 @@ def sb_insert_message(session_id: str, role: str, content: str,
             except (SupabaseOperationError, SupabaseSchemaUnavailable) as e:
                 # If the unique index or constraint is missing in Supabase, fall back immediately to plain insert
                 logger.info("Retrying chat message insert without on_conflict: %s", str(e)[:100])
-                _sb_request("POST", "chat_messages", json_body=payload, prefer="return=minimal")
+                try:
+                    _sb_request("POST", "chat_messages", json_body=payload, prefer="return=minimal")
+                except SupabaseOperationError as oe:
+                    if attachment_id and "attachment_id" in str(oe).lower():
+                        p_copy = dict(payload)
+                        p_copy.pop("attachment_id", None)
+                        _sb_request("POST", "chat_messages", json_body=p_copy, prefer="return=minimal")
+                    else:
+                        raise
         else:
-            _sb_request("POST", "chat_messages", json_body=payload, prefer="return=minimal")
+            try:
+                _sb_request("POST", "chat_messages", json_body=payload, prefer="return=minimal")
+            except SupabaseOperationError as oe:
+                if attachment_id and "attachment_id" in str(oe).lower():
+                    p_copy = dict(payload)
+                    p_copy.pop("attachment_id", None)
+                    _sb_request("POST", "chat_messages", json_body=p_copy, prefer="return=minimal")
+                else:
+                    raise
     except SupabaseSchemaUnavailable:
         fallback_payload = {"session_id": session_id, "role": role, "content": stored_content}
         _sb_request("POST", "chat_messages", json_body=fallback_payload, prefer="return=minimal")
@@ -2493,8 +2528,19 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
         model_id = "brainy-fast"
     answer_length = (data.get("answer_length") or "").strip().lower()
 
-    if not content:
+    # Attachment & image input resolution
+    image_payload = data.get("image") or data.get("image_url") or data.get("attachment")
+    file_id = data.get("file_id") or data.get("attachment_id")
+    if isinstance(image_payload, dict) and "file_id" in image_payload:
+        file_id = image_payload.get("file_id")
+
+    has_image = bool(file_id or image_payload)
+
+    if not content and not has_image:
         return None, jsonify({"error": "Message content cannot be empty"}), 400
+    if not content and has_image:
+        content = "Analyze this attached image and explain its visual contents in detail."
+
     if session_id:
         try:
             uuid.UUID(str(session_id))
@@ -2552,7 +2598,8 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
         return None, response, 429
 
     # Fast deterministic greeting check (< 5ms response, zero token spend, no quota burn)
-    fast_greeting = _check_fast_greeting(content, first_name)
+    # Multimodal / image queries should never be short-circuited by a greeting
+    fast_greeting = None if has_image else _check_fast_greeting(content, first_name)
     if fast_greeting:
         quota_status = get_user_quota(user_id)
         allowed = True
@@ -2572,6 +2619,90 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
                 "message_limit": GLOBAL_MESSAGE_LIMIT
             }), 429
 
+    # ── Process Multimodal Image Attachment (Google Drive & Supabase) ──
+    document_context = None
+    resolved_attachment_id = None
+    if has_image:
+        img_allowed, remaining, effective_id = consume_user_image_quota(user_id)
+        if not img_allowed:
+            refund_user_quota(user_id)
+            return None, jsonify({
+                "error": "image_quota_exceeded",
+                "code": "IMAGE_QUOTA_EXCEEDED",
+                "message": "You've used your 5 free image requests. Your image allowance is currently exhausted.",
+                "usage": {"used": IMAGE_FREE_LIMIT, "remaining": 0, "limit": IMAGE_FREE_LIMIT},
+                "remaining": 0,
+                "limit": IMAGE_FREE_LIMIT
+            }), 429
+
+        clean_b64 = ""
+        mime_type = "image/jpeg"
+
+        if file_id:
+            try:
+                # Authenticated owner verification and retrieval from Google Drive / vault
+                file_rec, file_bytes = file_service.get_file_bytes(file_id, user_id)
+                mime_type = file_rec.get("mime_type", "image/jpeg")
+                clean_b64 = base64.b64encode(file_bytes).decode("ascii")
+                resolved_attachment_id = file_id
+            except (FileSecurityError, BrainyFileNotFoundError) as fe:
+                refund_user_quota(user_id)
+                return None, jsonify({"error": str(fe), "code": "FORBIDDEN"}), 403
+            except Exception as fe:
+                refund_user_quota(user_id)
+                logger.error("Failed retrieving file_id %s: %s", file_id, fe)
+                return None, jsonify({"error": "Failed to load attached file. Please retry.", "code": "ATTACHMENT_LOAD_FAILED"}), 500
+        elif image_payload:
+            # Legacy base64 or dict payload: parse, validate, and upload to centralized storage
+            b64_str = ""
+            if isinstance(image_payload, dict):
+                b64_str = image_payload.get("data") or ""
+                mime_type = image_payload.get("mime_type") or "image/jpeg"
+            elif isinstance(image_payload, str):
+                if image_payload.startswith("data:"):
+                    meta_p, _, b64_str = image_payload.partition(",")
+                    mime_type = meta_p.split(";")[0].replace("data:", "") if ";" in meta_p else "image/jpeg"
+                else:
+                    b64_str = image_payload
+                    mime_type = "image/jpeg"
+
+            clean_b64 = re.sub(r"\s+", "", b64_str)
+            raw_size = (len(clean_b64) * 3) // 4
+            if raw_size > 3 * 1024 * 1024:
+                refund_user_quota(user_id)
+                return None, jsonify({
+                    "error": "Image size exceeds the 3 MB limit. Please upload an image under 3 MB.",
+                    "code": "IMAGE_TOO_LARGE"
+                }), 413
+
+            if clean_b64:
+                try:
+                    raw_bytes = base64.b64decode(clean_b64)
+                    upload_res = file_service.upload_image(
+                        user_id=user_id,
+                        filename="uploaded_image",
+                        file_bytes=raw_bytes,
+                        source_chat_id=session_id
+                    )
+                    resolved_attachment_id = upload_res.get("file_id")
+                    mime_type = upload_res.get("mime_type", mime_type)
+                except Exception as ue:
+                    logger.warning("Auto-upload of image payload failed, proceeding with in-memory parts: %s", ue)
+
+        if clean_b64:
+            document_context = {
+                "has_image": True,
+                "file_id": resolved_attachment_id,
+                "multimodal_parts": [
+                    {
+                        "inline_data": {
+                            "mime_type": mime_type,
+                            "data": clean_b64
+                        }
+                    }
+                ]
+            }
+
     # Durable history is best effort for answer delivery. A database outage must
     # not discard the user's question or prevent an otherwise valid AI answer.
     persistence_warning = False
@@ -2587,7 +2718,8 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
     if session_id:
         try:
             sb_insert_message(session_id, "user", content,
-                idempotency_key=data.get("idempotency_key"), user_id=user_id)
+                idempotency_key=data.get("idempotency_key"), user_id=user_id,
+                attachment_id=resolved_attachment_id)
         except SupabaseOperationError as exc:
             logger.warning("User message persistence failed request_id=%s category=%s", getattr(g, "request_id", ""), type(exc).__name__)
             persistence_warning = True
@@ -2655,55 +2787,6 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
     except Exception:
         refund_user_quota(user_id)
         return None, jsonify({"error": "Your study profile is temporarily unavailable. Please retry.", "code": "MEMORY_LOAD_FAILED", "retryable": True}), 503
-
-    # ── Image attachment handling (Strict 3 MB validation & multimodal parts) ──
-    image_payload = data.get("image") or data.get("image_url")
-    document_context = None
-    if image_payload:
-        img_allowed, remaining, effective_id = consume_user_image_quota(user_id)
-        if not img_allowed:
-            refund_user_quota(user_id)
-            return None, jsonify({
-                "error": "image_quota_exceeded",
-                "code": "IMAGE_QUOTA_EXCEEDED",
-                "message": "You've used your 5 free image requests. Your image allowance is currently exhausted.",
-                "usage": {"used": IMAGE_FREE_LIMIT, "remaining": 0, "limit": IMAGE_FREE_LIMIT},
-                "remaining": 0,
-                "limit": IMAGE_FREE_LIMIT
-            }), 429
-        mime_type = "image/jpeg"
-        b64_str = ""
-        if isinstance(image_payload, dict):
-            b64_str = image_payload.get("data") or ""
-            mime_type = image_payload.get("mime_type") or "image/jpeg"
-        elif isinstance(image_payload, str):
-            if image_payload.startswith("data:"):
-                meta, _, b64_str = image_payload.partition(",")
-                mime_type = meta.split(";")[0].replace("data:", "") if ";" in meta else "image/jpeg"
-            else:
-                b64_str = image_payload
-                mime_type = "image/jpeg"
-
-        clean_b64 = re.sub(r"\s+", "", b64_str)
-        raw_size = (len(clean_b64) * 3) // 4
-        if raw_size > 3 * 1024 * 1024:
-            return None, jsonify({
-                "error": "Image size exceeds the 3 MB limit. Please upload an image under 3 MB.",
-                "code": "IMAGE_TOO_LARGE"
-            }), 413
-
-        if clean_b64:
-            document_context = {
-                "has_image": True,
-                "multimodal_parts": [
-                    {
-                        "inline_data": {
-                            "mime_type": mime_type,
-                            "data": clean_b64
-                        }
-                    }
-                ]
-            }
 
     # Re-route with full context if document is present or follow-up is detected
     if document_context or (messages_context and len(messages_context) > 1):
@@ -2884,6 +2967,7 @@ def _prepare_chat_request(data: dict, user_id: int, first_name: str, username: s
         "quota_status": quota_status,
         "fast_greeting": fast_greeting,
         "document_context": document_context,
+        "attachment_id": resolved_attachment_id,
         "persistence_warning": persistence_warning,
         "citations": citations,
         "workflow": routing_decision.workflow,
@@ -2967,9 +3051,11 @@ def send_message():
             refund_user_quota(user_id)
         except SupabaseOperationError:
             logger.error("Quota refund failed request_id=%s", getattr(g, "request_id", ""))
+        has_img = bool(prep.get("document_context") and prep["document_context"].get("has_image"))
+        err_msg = "Image analysis is temporarily unavailable. Please try again later." if has_img else "AI service temporarily unavailable. Please try again in a few moments."
         return jsonify({
             "error": "ai_provider_error",
-            "message": "AI service temporarily unavailable. Please try again in a few moments.",
+            "message": err_msg,
             "request_id": getattr(g, "request_id", None)
         }), 502
 
@@ -3244,11 +3330,13 @@ def stream_message():
                     refund_user_quota(user_id)
                 except SupabaseOperationError:
                     logger.error("Quota refund failed request_id=%s", request_id)
+                has_img = bool(prep.get("document_context") and prep["document_context"].get("has_image"))
+                err_msg = "Image analysis is temporarily unavailable. Please try again later." if has_img else "AI service temporarily unavailable. Please try again in a few moments."
                 yield json.dumps({
                     "type": "error",
                     "request_id": request_id,
                     "code": "ai_provider_error",
-                    "message": "AI service temporarily unavailable. Please try again in a few moments.",
+                    "message": err_msg,
                     "partial": False
                 }) + "\n"
             else:
@@ -3755,6 +3843,121 @@ def admin_export_csv(export_type: str):
             "Cache-Control": "no-cache, no-store, must-revalidate"
         }
     )
+
+
+# ── USER FILES & IMAGE INTELLIGENCE ENDPOINTS ─────────────────────────
+
+if _supabase_configured():
+    file_service.set_supabase_requester(_sb_request)
+
+
+@app.route("/api/upload", methods=["POST"])
+@app.route("/api/files/upload", methods=["POST"])
+@login_required
+@security_guard
+def upload_file_endpoint():
+    """
+    Authenticated user upload for images and study attachments.
+    Validates file signatures, enforces limits, uploads to private Google Drive,
+    and returns safe attachment metadata.
+    """
+    user_id = session["user_id"]
+    session_id = request.form.get("session_id") or (request.json.get("session_id") if request.is_json else None)
+
+    file_bytes = None
+    filename = None
+
+    if "file" in request.files:
+        f = request.files["file"]
+        filename = f.filename
+        file_bytes = f.read()
+    elif "image" in request.files:
+        f = request.files["image"]
+        filename = f.filename
+        file_bytes = f.read()
+    elif request.is_json:
+        data = request.get_json(silent=True) or {}
+        img_payload = data.get("image") or data.get("data")
+        filename = data.get("filename") or "uploaded_image.png"
+        if isinstance(img_payload, str) and img_payload:
+            if "," in img_payload:
+                img_payload = img_payload.split(",", 1)[1]
+            try:
+                file_bytes = base64.b64decode(img_payload)
+            except Exception:
+                return jsonify({"error": "Invalid base64 image data", "code": "INVALID_IMAGE"}), 400
+
+    if not file_bytes:
+        return jsonify({"error": "No file uploaded. Please attach an image file.", "code": "NO_FILE"}), 400
+
+    try:
+        res = file_service.upload_image(
+            user_id=user_id,
+            filename=filename or "attachment",
+            file_bytes=file_bytes,
+            source_chat_id=session_id
+        )
+        return jsonify(res), 200
+    except FileTooLargeError as e:
+        return jsonify({"error": str(e), "code": "IMAGE_TOO_LARGE"}), 413
+    except FileValidationError as e:
+        return jsonify({"error": str(e), "code": "INVALID_IMAGE"}), 400
+    except FileSecurityError as e:
+        return jsonify({"error": str(e), "code": "FORBIDDEN"}), 403
+    except Exception as e:
+        logger.error("File upload failed: %s", e)
+        return jsonify({"error": "Upload failed. Please retry.", "code": "UPLOAD_FAILED"}), 500
+
+
+@app.route("/api/files/<file_id>/preview", methods=["GET"])
+@app.route("/api/files/<file_id>", methods=["GET"])
+@login_required
+def get_file_preview_endpoint(file_id):
+    """
+    Streams private file bytes directly to the authenticated owner.
+    Enforces user isolation, no caching across users, and private headers.
+    """
+    user_id = session["user_id"]
+    try:
+        record, file_bytes = file_service.get_file_bytes(file_id, user_id)
+        resp = make_response(send_file(
+            io.BytesIO(file_bytes),
+            mimetype=record.get("mime_type", "image/jpeg"),
+            as_attachment=False,
+            download_name=record.get("original_filename", "image")
+        ))
+        resp.headers["Cache-Control"] = "private, no-cache, no-store, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
+    except BrainyFileNotFoundError:
+        return jsonify({"error": "File not found", "code": "NOT_FOUND"}), 404
+    except FileSecurityError:
+        return jsonify({"error": "Access denied: You do not own this file.", "code": "FORBIDDEN"}), 403
+    except Exception as e:
+        logger.error("File preview error file_id=%s: %s", file_id, e)
+        return jsonify({"error": "File preview unavailable.", "code": "PREVIEW_FAILED"}), 500
+
+
+@app.route("/api/files/<file_id>", methods=["DELETE"])
+@login_required
+@security_guard
+def delete_file_endpoint(file_id):
+    """
+    Secure deletion of an uploaded file by its authenticated owner.
+    Removes from Google Drive, local cache, and marks deleted in Supabase.
+    """
+    user_id = session["user_id"]
+    try:
+        file_service.delete_user_file(file_id, user_id)
+        return jsonify({"success": True, "file_id": file_id}), 200
+    except BrainyFileNotFoundError:
+        return jsonify({"error": "File not found", "code": "NOT_FOUND"}), 404
+    except FileSecurityError:
+        return jsonify({"error": "Access denied: You do not own this file.", "code": "FORBIDDEN"}), 403
+    except Exception as e:
+        logger.error("File deletion error file_id=%s: %s", file_id, e)
+        return jsonify({"error": "File deletion failed.", "code": "DELETE_FAILED"}), 500
 
 
 # ── PDF STUDY STUDIO API ENDPOINTS ────────────────────────────────────────

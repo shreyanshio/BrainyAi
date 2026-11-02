@@ -167,7 +167,7 @@ def _get_provider_failover_candidates(
         # Groq's configured models are text-only. Preserve modality by allowing only
         # a registered image model as the provider backup.
         candidates.append(("openrouter", "nvidia/nemotron-3.5-super-vl:free"))
-        return _filter_eligible(candidates)
+        return _filter_eligible(candidates, require_vision=True)
     if binary_pdf_input:
         # Do not send raw PDF bytes to providers without verified PDF input support.
         return _filter_eligible(candidates)
@@ -179,13 +179,18 @@ def _get_provider_failover_candidates(
     return _filter_eligible(candidates)
 
 
-def _filter_eligible(candidates: List[Candidate], disallow_gemini: bool = False) -> List[Candidate]:
+def _filter_eligible(
+    candidates: List[Candidate],
+    disallow_gemini: bool = False,
+    require_vision: bool = False
+) -> List[Candidate]:
     """
     Filters candidates by:
       1. Hard privacy constraint: completely strips Gemini if disallow_gemini is True.
-      2. Provider enablement switches.
-      3. Zero-budget pricing & availability eligibility.
-      4. Preserves order and deduplicates.
+      2. Vision requirement: if require_vision is True, excludes any model without verified vision capabilities.
+      3. Provider enablement switches.
+      4. Zero-budget pricing & availability eligibility.
+      5. Preserves order and deduplicates.
     """
     eligible: List[Candidate] = []
     seen = set()
@@ -195,6 +200,11 @@ def _filter_eligible(candidates: List[Candidate], disallow_gemini: bool = False)
             continue
         if (prov, model) in seen:
             continue
+
+        spec = registry.get_model_spec(model)
+        if require_vision:
+            if not spec or not spec.supports_vision:
+                continue
 
         # Check provider availability & zero-budget eligibility
         if registry.is_model_eligible(prov, model):
@@ -214,6 +224,10 @@ def _filter_eligible(candidates: List[Candidate], disallow_gemini: bool = False)
     for prov, model in candidates:
         if disallow_gemini and prov.lower() == "gemini":
             continue
+        spec = registry.get_model_spec(model)
+        if require_vision:
+            if not spec or not spec.supports_vision:
+                continue
         if (prov, model) not in seen:
             fallback.append((prov, model))
             seen.add((prov, model))

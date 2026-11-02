@@ -482,9 +482,14 @@ export default function BrainyApp() {
   }
 
   // ── Message Operations ────────────────────────────────────
-  const handleSendMessage = async (customPrompt?: string, imagePayload?: string | null, webSearch?: boolean) => {
+  const handleSendMessage = async (
+    customPrompt?: string,
+    imagePayload?: string | null,
+    webSearch?: boolean,
+    fileId?: string | null
+  ) => {
     const textToSend = (customPrompt || inputMessage).trim()
-    if ((!textToSend && !imagePayload) || isThinking || historyLoading || historyError) return
+    if ((!textToSend && !imagePayload && !fileId) || isThinking || historyLoading || historyError) return
     const sendViewGeneration = viewGenerationRef.current
     const belongsToCurrentView = () => sendViewGeneration === viewGenerationRef.current
 
@@ -503,7 +508,8 @@ export default function BrainyApp() {
       role: 'user',
       content: textToSend,
       created_at: new Date().toISOString(),
-      image: imagePayload || undefined,
+      image: imagePayload || (fileId ? `/api/files/${fileId}/preview` : undefined),
+      attachment_id: fileId || undefined,
     }
 
     // Add optimistic assistant message placeholder for streaming
@@ -529,11 +535,13 @@ export default function BrainyApp() {
       await streamChatMessage(
         {
           session_id: activeSessionId,
-          message: textToSend || (imagePayload ? 'Analyze this attached image.' : ''),
+          message: textToSend || (imagePayload || fileId ? 'Analyze this attached image.' : ''),
           model: activeModel,
           answer_length: activeLength,
           idempotency_key: idempotencyKey,
           image: imagePayload || undefined,
+          file_id: fileId || undefined,
+          attachment_id: fileId || undefined,
           web_search: webSearch || undefined,
         },
         {
@@ -848,7 +856,7 @@ export default function BrainyApp() {
             <Composer
               inputMessage={inputMessage}
               onInputChange={setInputMessage}
-              onSendMessage={(img, ws) => handleSendMessage(undefined, img, ws)}
+              onSendMessage={(img, ws, fId) => handleSendMessage(undefined, img, ws, fId)}
               onStop={handleStopGeneration}
               isThinking={isThinking}
               disabled={historyLoading || Boolean(historyError)}
@@ -860,6 +868,7 @@ export default function BrainyApp() {
               onSelectLength={setActiveLength}
               chatWidth={preferences.chatWidth}
               onOpenUsageModal={() => setUsageModalOpen(true)}
+              sessionId={activeSessionId}
             />
           </div>
         )}

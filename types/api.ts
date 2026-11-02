@@ -122,6 +122,44 @@ export interface ChatMessage {
 
   image?: string
 
+  attachment_id?: string
+
+  attachment?: {
+
+    file_id: string
+
+    filename?: string
+
+    mime_type?: string
+
+    file_size?: number
+
+    preview_url?: string
+
+  }
+
+}
+
+
+
+export interface UploadedFileResponse {
+
+  file_id: string
+
+  id?: string
+
+  original_filename: string
+
+  mime_type: string
+
+  file_size: number
+
+  preview_url: string
+
+  download_url?: string
+
+  created_at?: string
+
 }
 
 
@@ -143,6 +181,10 @@ export interface ChatSendRequest {
   idempotency_key?: string
 
   image?: string | { data: string; mime_type: string }
+
+  file_id?: string
+
+  attachment_id?: string
 
   web_search?: boolean
 

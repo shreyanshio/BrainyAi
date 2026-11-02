@@ -5,6 +5,7 @@ import { Copy, Check, Bookmark, BookmarkCheck, ArrowDown } from 'lucide-react'
 import { ChatMessage, ChatWidthOption, User } from '@/types/api'
 import { MarkdownRenderer } from '@/components/markdown/MarkdownRenderer'
 import { BrainyLogo } from '@/components/brand/BrainyLogo'
+import { getApiBase } from '@/lib/api'
 
 interface MessageListProps {
   messages: ChatMessage[]
@@ -93,9 +94,10 @@ export function MessageList({
                 {msg.image && (
                   <div className="mb-2">
                     <img
-                      src={msg.image}
+                      src={msg.image.startsWith('/') ? `${getApiBase()}${msg.image}` : msg.image}
                       alt="Uploaded attachment"
                       className="max-h-60 max-w-full rounded-2xl object-contain border border-white/20 shadow-xs"
+                      loading="lazy"
                     />
                   </div>
                 )}

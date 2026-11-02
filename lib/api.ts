@@ -14,6 +14,8 @@ import {
 
   ChatSession,
 
+  UploadedFileResponse,
+
   ModelDefinition,
 
   SystemHealthStatus,
@@ -660,6 +662,10 @@ export async function sendChatMessage(req: ChatSendRequest): Promise<ChatSendRes
 
       image: req.image,
 
+      file_id: req.file_id || req.attachment_id,
+
+      attachment_id: req.attachment_id || req.file_id,
+
       web_search: req.web_search,
 
     }),
@@ -731,6 +737,10 @@ export async function streamChatMessage(
       idempotency_key: req.idempotency_key,
 
       image: req.image,
+
+      file_id: req.file_id || req.attachment_id,
+
+      attachment_id: req.attachment_id || req.file_id,
 
       web_search: req.web_search,
 
@@ -1715,4 +1725,50 @@ export async function disconnectOwnerDrive(): Promise<{ success: boolean; messag
 export function getOwnerDriveConnectUrl(): string {
   const base = getApiBase()
   return `${base}/api/integrations/google-drive/owner/connect?redirect=1`
+}
+
+export async function uploadImageFile(
+  file: File,
+  sessionId?: string | null
+): Promise<UploadedFileResponse> {
+  const base = getApiBase()
+  const url = `${base}/api/upload`
+  const token = getStoredToken()
+  const formData = new FormData()
+  formData.append('file', file)
+  if (sessionId) {
+    formData.append('session_id', sessionId)
+  }
+
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+  }
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: formData,
+  })
+
+  if (!response.ok) {
+    let errMsg = `Upload failed with status ${response.status}`
+    try {
+      const errData = await response.json()
+      if (errData?.error) errMsg = errData.error
+      else if (errData?.message) errMsg = errData.message
+    } catch {}
+    throw new Error(errMsg)
+  }
+
+  return response.json()
+}
+
+export function getFilePreviewUrl(fileId: string): string {
+  if (!fileId) return ''
+  const base = getApiBase()
+  return `${base}/api/files/${encodeURIComponent(fileId)}/preview`
 }

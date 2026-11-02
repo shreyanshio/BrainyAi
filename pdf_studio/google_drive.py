@@ -182,6 +182,12 @@ class GoogleDriveStorageManager:
         self._sb_req = supabase_request_fn
         self._cached_access_token: Optional[str] = None
         self._token_expiry_ts: float = 0.0
+        self._stats: Dict[str, Any] = {
+            "last_successful_upload": None,
+            "last_failed_upload": None,
+            "upload_failures_count": 0,
+            "drive_api_errors_count": 0,
+        }
 
     def set_supabase_requester(self, sb_req_fn):
         self._sb_req = sb_req_fn
@@ -646,148 +652,289 @@ class GoogleDriveStorageManager:
             self.save_owner_config(cfg)
             return root_id, users_id
 
-    def get_or_create_user_pdf_folder(self, user_id: Any) -> str:
-        """
-        Resolves the private PDFs folder for a user:
-        Brainy/Users/user_<opaque_id>/PDFs/
-        Thread-safe and cached.
-        """
+    def get_or_create_user_folder(self, user_id: Any) -> Tuple[str, Dict[str, Any]]:
+        """Resolves and caches the top-level user folder: Brainy/Users/user_<opaque_id>/"""
         user_str = str(user_id)
         opaque_id = self.derive_user_opaque_id(user_str)
         user_folder_name = f"user_{opaque_id}"
-
-        # 1. Check local / Supabase cache
         cache_file = os.path.join(DATA_DIR, f"user_folder_{user_str}.json")
+        mapping = {}
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    mapping = json.load(f)
+                    if mapping.get("user_folder_id"):
+                        return mapping["user_folder_id"], mapping
+            except Exception:
+                mapping = {}
+
+        # Resolve Users folder ID
+        _, users_folder_id = self.initialize_root_hierarchy()
+        user_folder_id = self._find_or_create_folder(user_folder_name, parent_id=users_folder_id)
+        mapping.update({
+            "user_id": user_str,
+            "opaque_id": opaque_id,
+            "user_folder_id": user_folder_id,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        })
+        try:
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(mapping, f, indent=2)
+        except Exception:
+            pass
+        return user_folder_id, mapping
+
+    def get_or_create_user_pdf_folder(self, user_id: Any, use_dated: bool = False) -> str:
+        """
+        Resolves the private PDFs folder for a user:
+        Brainy/Users/user_<opaque_id>/PDFs/ (or PDFs/{year}/{month}/ if use_dated)
+        Thread-safe and cached.
+        """
+        user_str = str(user_id)
+        cache_file = os.path.join(DATA_DIR, f"user_folder_{user_str}.json")
+        now = datetime.now(timezone.utc)
+        year_str = str(now.year)
+        month_str = f"{now.month:02d}"
+        dated_key = f"pdf_{year_str}_{month_str}"
+
+        # 1. Check local cache before locking
         if os.path.exists(cache_file):
             try:
                 with open(cache_file, "r", encoding="utf-8") as f:
                     cached = json.load(f)
-                    if cached.get("pdf_folder_id"):
+                    if not use_dated and cached.get("pdf_folder_id"):
                         return cached["pdf_folder_id"]
+                    if use_dated and cached.get("dated_folders", {}).get(dated_key):
+                        return cached["dated_folders"][dated_key]
             except Exception:
                 pass
 
         with _FOLDER_LOCK:
-            # Re-check inside lock
-            if os.path.exists(cache_file):
+            user_folder_id, mapping = self.get_or_create_user_folder(user_id)
+            if not mapping.get("pdf_folder_id"):
+                pdf_folder_id = self._find_or_create_folder("PDFs", parent_id=user_folder_id)
+                mapping["pdf_folder_id"] = pdf_folder_id
                 try:
-                    with open(cache_file, "r", encoding="utf-8") as f:
-                        cached = json.load(f)
-                        if cached.get("pdf_folder_id"):
-                            return cached["pdf_folder_id"]
+                    with open(cache_file, "w", encoding="utf-8") as f:
+                        json.dump(mapping, f, indent=2)
                 except Exception:
                     pass
+                if self._sb_req:
+                    try:
+                        self._sb_req("POST", "google_drive_user_folders", json_body=mapping)
+                    except Exception:
+                        pass
+            else:
+                pdf_folder_id = mapping["pdf_folder_id"]
 
-            # Resolve Users folder ID
-            _, users_folder_id = self.initialize_root_hierarchy()
+            if not use_dated:
+                return pdf_folder_id
 
-            # Create or find user_<opaque_id> folder
-            user_folder_id = self._find_or_create_folder(user_folder_name, parent_id=users_folder_id)
+            # Dated subfolder: PDFs/{year}/{month}
+            dated_cache = mapping.setdefault("dated_folders", {})
+            if dated_key in dated_cache:
+                return dated_cache[dated_key]
 
-            # Create or find PDFs folder inside user_<opaque_id>
-            pdf_folder_id = self._find_or_create_folder("PDFs", parent_id=user_folder_id)
-
-            mapping = {
-                "user_id": user_str,
-                "opaque_id": opaque_id,
-                "user_folder_id": user_folder_id,
-                "pdf_folder_id": pdf_folder_id,
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }
+            year_folder_id = self._find_or_create_folder(year_str, parent_id=pdf_folder_id)
+            month_folder_id = self._find_or_create_folder(month_str, parent_id=year_folder_id)
+            dated_cache[dated_key] = month_folder_id
             try:
                 with open(cache_file, "w", encoding="utf-8") as f:
                     json.dump(mapping, f, indent=2)
-            except Exception as we:
-                logger.warning("Could not cache user folder mapping: %s", we)
+            except Exception:
+                pass
+            return month_folder_id
 
-            if self._sb_req:
+    def get_or_create_user_image_folder(self, user_id: Any, use_dated: bool = True) -> str:
+        """
+        Resolves the private Images folder for a user:
+        Brainy/Users/user_<opaque_id>/Images/{year}/{month}/
+        Thread-safe and cached.
+        """
+        user_str = str(user_id)
+        cache_file = os.path.join(DATA_DIR, f"user_folder_{user_str}.json")
+        now = datetime.now(timezone.utc)
+        year_str = str(now.year)
+        month_str = f"{now.month:02d}"
+        dated_key = f"image_{year_str}_{month_str}"
+
+        # 1. Check local cache before locking
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    cached = json.load(f)
+                    if not use_dated and cached.get("image_folder_id"):
+                        return cached["image_folder_id"]
+                    if use_dated and cached.get("dated_folders", {}).get(dated_key):
+                        return cached["dated_folders"][dated_key]
+            except Exception:
+                pass
+
+        with _FOLDER_LOCK:
+            user_folder_id, mapping = self.get_or_create_user_folder(user_id)
+            if not mapping.get("image_folder_id"):
+                image_folder_id = self._find_or_create_folder("Images", parent_id=user_folder_id)
+                mapping["image_folder_id"] = image_folder_id
                 try:
-                    self._sb_req("POST", "google_drive_user_folders", json_body=mapping)
+                    with open(cache_file, "w", encoding="utf-8") as f:
+                        json.dump(mapping, f, indent=2)
                 except Exception:
                     pass
+                if self._sb_req:
+                    try:
+                        self._sb_req("POST", "google_drive_user_folders", json_body=mapping)
+                    except Exception:
+                        pass
+            else:
+                image_folder_id = mapping["image_folder_id"]
 
-            return pdf_folder_id
+            if not use_dated:
+                return image_folder_id
+
+            # Dated subfolder: Images/{year}/{month}
+            dated_cache = mapping.setdefault("dated_folders", {})
+            if dated_key in dated_cache:
+                return dated_cache[dated_key]
+
+            year_folder_id = self._find_or_create_folder(year_str, parent_id=image_folder_id)
+            month_folder_id = self._find_or_create_folder(month_str, parent_id=year_folder_id)
+            dated_cache[dated_key] = month_folder_id
+            try:
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump(mapping, f, indent=2)
+            except Exception:
+                pass
+            return month_folder_id
 
     # ── UPLOAD, DOWNLOAD & DELETE OPERATIONS ──
+
+    def upload_file(
+        self,
+        user_id: Any,
+        filename: str,
+        file_bytes: bytes,
+        mime_type: str,
+        file_id: str,
+        file_type: str = "image"
+    ) -> Dict[str, Any]:
+        """
+        Uploads an original file (Image or PDF) into the user's private folder in the owner's Google Drive.
+        Enforces compliance pause, checksum verification, and returns drive_file_id.
+        """
+        if not self.is_compliance_cleared():
+            logger.info("Production Google Drive uploads paused pending compliance clearance. Operating in sandbox mode.")
+            raise GoogleDriveCompliancePause(
+                "Centralized Google Drive storage is paused pending Google API Terms of Service compliance confirmation. "
+                "Local persistence and processing remain active."
+            )
+
+        try:
+            if file_type == "image":
+                target_folder_id = self.get_or_create_user_image_folder(user_id, use_dated=True)
+            else:
+                target_folder_id = self.get_or_create_user_pdf_folder(user_id, use_dated=False)
+
+            token = self.get_valid_access_token()
+            checksum = hashlib.sha256(file_bytes).hexdigest()
+
+            # Sanitize filename
+            clean_name = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+            safe_name = f"{file_id}_{clean_name}"
+
+            metadata = {
+                "name": safe_name,
+                "parents": [target_folder_id],
+                "mimeType": mime_type,
+                "properties": {
+                    "brainy_file_id": file_id,
+                    "brainy_user_opaque": self.derive_user_opaque_id(user_id),
+                    "checksum": checksum,
+                    "file_type": file_type
+                }
+            }
+
+            # Multipart upload
+            boundary = "===============brainy_drive_boundary=="
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": f"multipart/related; boundary={boundary}"
+            }
+
+            body_meta = (
+                f"--{boundary}\r\n"
+                f"Content-Type: application/json; charset=UTF-8\r\n\r\n"
+                f"{json.dumps(metadata)}\r\n"
+            ).encode("utf-8")
+
+            body_file = (
+                f"--{boundary}\r\n"
+                f"Content-Type: {mime_type}\r\n\r\n"
+            ).encode("utf-8") + file_bytes + f"\r\n--{boundary}--\r\n".encode("utf-8")
+
+            payload = body_meta + body_file
+            url = f"{DRIVE_UPLOAD_BASE}/files?uploadType=multipart&fields=id,name,size,createdTime"
+
+            resp = requests.post(url, headers=headers, data=payload, timeout=30)
+            if resp.status_code not in (200, 201):
+                logger.error("Drive upload error status=%d: %s", resp.status_code, resp.text)
+                self._stats["upload_failures_count"] += 1
+                self._stats["drive_api_errors_count"] += 1
+                self._stats["last_failed_upload"] = datetime.now(timezone.utc).isoformat()
+                raise GoogleDriveError(f"Drive upload failed ({resp.status_code}): {resp.text}")
+
+            res_json = resp.json()
+            drive_file_id = res_json["id"]
+
+            self._stats["last_successful_upload"] = datetime.now(timezone.utc).isoformat()
+
+            audit_drive_event("FILE_UPLOADED", user_id, {
+                "file_id": file_id,
+                "file_type": file_type,
+                "drive_file_id": drive_file_id,
+                "folder_id": target_folder_id,
+                "size": len(file_bytes),
+                "checksum": checksum
+            })
+
+            return {
+                "drive_file_id": drive_file_id,
+                "drive_folder_id": target_folder_id,
+                "checksum": checksum,
+                "file_size": len(file_bytes),
+                "uploaded_at": res_json.get("createdTime", datetime.now(timezone.utc).isoformat())
+            }
+        except GoogleDriveCompliancePause:
+            raise
+        except Exception as e:
+            self._stats["upload_failures_count"] += 1
+            self._stats["last_failed_upload"] = datetime.now(timezone.utc).isoformat()
+            if not isinstance(e, GoogleDriveError):
+                self._stats["drive_api_errors_count"] += 1
+            raise
 
     def upload_pdf(self, user_id: Any, filename: str, file_bytes: bytes, doc_id: str) -> Dict[str, Any]:
         """
         Uploads an original PDF into the user's private folder in the owner's Google Drive.
         Enforces compliance pause, checksum verification, and returns drive_file_id.
         """
-        if not self.is_compliance_cleared():
-            logger.info("Production Google Drive uploads paused pending compliance clearance. Operating in sandbox mode.")
-            # Compliance pause enforcement
-            raise GoogleDriveCompliancePause(
-                "Centralized Google Drive storage is paused pending Google API Terms of Service compliance confirmation. "
-                "Local persistence and processing remain active."
-            )
-
-        pdf_folder_id = self.get_or_create_user_pdf_folder(user_id)
-        token = self.get_valid_access_token()
-        checksum = hashlib.sha256(file_bytes).hexdigest()
-
-        # Sanitize filename
-        safe_name = f"{doc_id}_{re.sub(r'[^a-zA-Z0-9._-]', '_', filename)}"
-
-        metadata = {
-            "name": safe_name,
-            "parents": [pdf_folder_id],
-            "mimeType": "application/pdf",
-            "properties": {
-                "brainy_doc_id": doc_id,
-                "brainy_user_opaque": self.derive_user_opaque_id(user_id),
-                "checksum": checksum
-            }
-        }
-
-        # Multipart upload
-        boundary = "===============brainy_drive_boundary=="
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": f"multipart/related; boundary={boundary}"
-        }
-
-        body_meta = (
-            f"--{boundary}\r\n"
-            f"Content-Type: application/json; charset=UTF-8\r\n\r\n"
-            f"{json.dumps(metadata)}\r\n"
-        ).encode("utf-8")
-
-        body_file = (
-            f"--{boundary}\r\n"
-            f"Content-Type: application/pdf\r\n\r\n"
-        ).encode("utf-8") + file_bytes + f"\r\n--{boundary}--\r\n".encode("utf-8")
-
-        payload = body_meta + body_file
-        url = f"{DRIVE_UPLOAD_BASE}/files?uploadType=multipart&fields=id,name,size,createdTime"
-
-        resp = requests.post(url, headers=headers, data=payload, timeout=30)
-        if resp.status_code not in (200, 201):
-            logger.error("Drive upload error status=%d: %s", resp.status_code, resp.text)
-            raise GoogleDriveError(f"Drive upload failed ({resp.status_code}): {resp.text}")
-
-        res_json = resp.json()
-        drive_file_id = res_json["id"]
-
-        audit_drive_event("PDF_UPLOADED", user_id, {
-            "doc_id": doc_id,
-            "drive_file_id": drive_file_id,
-            "folder_id": pdf_folder_id,
-            "size": len(file_bytes),
-            "checksum": checksum
-        })
-
+        res = self.upload_file(
+            user_id=user_id,
+            filename=filename,
+            file_bytes=file_bytes,
+            mime_type="application/pdf",
+            file_id=doc_id,
+            file_type="pdf"
+        )
         return {
-            "drive_file_id": drive_file_id,
-            "drive_folder_id": pdf_folder_id,
-            "checksum": checksum,
-            "uploaded_at": res_json.get("createdTime", datetime.now(timezone.utc).isoformat())
+            "drive_file_id": res["drive_file_id"],
+            "drive_folder_id": res["drive_folder_id"],
+            "checksum": res["checksum"],
+            "uploaded_at": res["uploaded_at"]
         }
 
-    def stream_pdf(self, user_id: Any, doc_id: str, drive_file_id: str) -> Generator[bytes, None, None]:
+    def stream_file(self, user_id: Any, file_id: str, drive_file_id: str) -> Generator[bytes, None, None]:
         """
-        Streams private PDF bytes from Google Drive API with verified user ownership.
+        Streams private file bytes from Google Drive API with verified user ownership.
         """
         token = self.get_valid_access_token()
         headers = {"Authorization": f"Bearer {token}"}
@@ -796,21 +943,42 @@ class GoogleDriveStorageManager:
         resp = requests.get(url, headers=headers, stream=True, timeout=20)
         if resp.status_code != 200:
             logger.error("Drive stream failed file_id=%s status=%d", drive_file_id, resp.status_code)
-            raise GoogleDriveError(f"Failed to stream PDF from Google Drive ({resp.status_code})")
+            self._stats["drive_api_errors_count"] += 1
+            raise GoogleDriveError(f"Failed to stream file from Google Drive ({resp.status_code})")
 
-        audit_drive_event("PDF_DOWNLOAD_AUTHORIZED", user_id, {"doc_id": doc_id, "drive_file_id": drive_file_id})
+        audit_drive_event("FILE_DOWNLOAD_AUTHORIZED", user_id, {"file_id": file_id, "drive_file_id": drive_file_id})
         for chunk in resp.iter_content(chunk_size=65536):
             if chunk:
                 yield chunk
 
-    def delete_pdf(self, user_id: Any, doc_id: str, drive_file_id: str):
-        """Deletes private PDF file from Google Drive."""
+    def stream_pdf(self, user_id: Any, doc_id: str, drive_file_id: str) -> Generator[bytes, None, None]:
+        """
+        Streams private PDF bytes from Google Drive API with verified user ownership.
+        """
+        return self.stream_file(user_id, doc_id, drive_file_id)
+
+    def get_file_bytes(self, user_id: Any, file_id: str, drive_file_id: str) -> bytes:
+        """
+        Retrieves complete file bytes for AI processing or validation.
+        """
+        chunks = []
+        for chunk in self.stream_file(user_id, file_id, drive_file_id):
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+    def delete_file(self, user_id: Any, file_id: str, drive_file_id: str):
+        """Deletes private file from Google Drive."""
         resp = self._drive_api_request("DELETE", f"/files/{drive_file_id}", timeout=10)
         if resp.status_code not in (200, 204, 404):
             logger.error("Drive delete failed file_id=%s status=%d", drive_file_id, resp.status_code)
+            self._stats["drive_api_errors_count"] += 1
             raise GoogleDriveError(f"Failed to delete Drive file ({resp.status_code})")
 
-        audit_drive_event("PDF_DELETED", user_id, {"doc_id": doc_id, "drive_file_id": drive_file_id})
+        audit_drive_event("FILE_DELETED", user_id, {"file_id": file_id, "drive_file_id": drive_file_id})
+
+    def delete_pdf(self, user_id: Any, doc_id: str, drive_file_id: str):
+        """Deletes private PDF file from Google Drive."""
+        self.delete_file(user_id, doc_id, drive_file_id)
 
     # ── HEALTH & STATUS ──
 
@@ -854,6 +1022,7 @@ class GoogleDriveStorageManager:
         # Storage Isolation Metrics
         registered_users_count = 0
         stored_docs_count = 0
+        stored_images_count = 0
         if self._sb_req:
             try:
                 uf_resp = self._sb_req("GET", "google_drive_user_folders", params="?select=user_id")
@@ -871,6 +1040,14 @@ class GoogleDriveStorageManager:
                         stored_docs_count = len(rows)
             except Exception:
                 pass
+            try:
+                img_resp = self._sb_req("GET", "user_files", params="?file_type=eq.image&drive_file_id=not.is.null&deleted_at=is.null&select=id")
+                if hasattr(img_resp, "json"):
+                    rows = img_resp.json()
+                    if isinstance(rows, list):
+                        stored_images_count = len(rows)
+            except Exception:
+                pass
 
         return {
             "connected": connected,
@@ -884,6 +1061,12 @@ class GoogleDriveStorageManager:
             "storage_quota": quota_info,
             "registered_user_folders": registered_users_count,
             "stored_drive_documents": stored_docs_count,
+            "stored_drive_images": stored_images_count,
+            "total_stored_files": stored_docs_count + stored_images_count,
+            "last_successful_upload": self._stats.get("last_successful_upload"),
+            "last_failed_upload": self._stats.get("last_failed_upload"),
+            "upload_failures_count": self._stats.get("upload_failures_count", 0),
+            "drive_api_errors_count": self._stats.get("drive_api_errors_count", 0),
             "last_checked_at": datetime.now(timezone.utc).isoformat()
         }
 

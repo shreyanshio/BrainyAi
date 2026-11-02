@@ -12,14 +12,27 @@ import {
   Sparkles,
   ChevronDown,
   X,
+  Loader2,
+  CheckCircle2,
+  UploadCloud,
 } from 'lucide-react'
 import { AnswerLength, ChatWidthOption, UsageStatus } from '@/types/api'
 import { ANSWER_LENGTH_OPTIONS, CAPABILITY_MODELS } from '@/lib/constants'
+import { uploadImageFile } from '@/lib/api'
+
+function formatBytes(bytes: number, decimals = 1) {
+  if (bytes === 0) return '0 B'
+  const k = 1024
+  const dm = decimals < 0 ? 0 : decimals
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i]
+}
 
 interface ComposerProps {
   inputMessage: string
   onInputChange: (val: string) => void
-  onSendMessage: (image?: string | null, webSearch?: boolean) => void
+  onSendMessage: (image?: string | null, webSearch?: boolean, fileId?: string | null) => void
   onStop?: () => void
   isThinking: boolean
   disabled?: boolean
@@ -31,6 +44,7 @@ interface ComposerProps {
   onSelectLength: (length: AnswerLength) => void
   chatWidth?: ChatWidthOption
   onOpenUsageModal: () => void
+  sessionId?: string | null
 }
 
 export function Composer({
@@ -48,13 +62,19 @@ export function Composer({
   onSelectLength,
   chatWidth = 'standard',
   onOpenUsageModal,
+  sessionId,
 }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const [isListening, setIsListening] = useState(false)
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
+  const [uploadedFileId, setUploadedFileId] = useState<string | null>(null)
+  const [isUploadingImage, setIsUploadingImage] = useState(false)
+  const [imageFileName, setImageFileName] = useState<string | null>(null)
+  const [imageFileSize, setImageFileSize] = useState<number | null>(null)
   const [imageError, setImageError] = useState<string | null>(null)
+  const [isDraggingOver, setIsDraggingOver] = useState(false)
   const [webSearchActive, setWebSearchActive] = useState<boolean>(false)
 
   // Auto-resize textarea as text grows
@@ -66,11 +86,49 @@ export function Composer({
     }
   }, [inputMessage])
 
-  const handleSend = () => {
-    if ((!inputMessage.trim() && !selectedImage) || isThinking || isExhausted || disabled) return
-    onSendMessage(selectedImage, webSearchActive)
-    setSelectedImage(null)
+  const processImageFile = async (file: File) => {
+    const validMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/jpg']
+    const hasValidExt = /\.(jpe?g|png|webp)$/i.test(file.name || '')
+    const isImage = file.type ? validMimes.includes(file.type.toLowerCase()) || file.type.startsWith('image/') : hasValidExt
+
+    if (!isImage) {
+      setImageError('Unsupported image format. Please select a JPEG, PNG, or WebP image.')
+      return
+    }
+
+    if (file.size > 3 * 1024 * 1024) {
+      setImageError('Image size exceeds 3 MB limit. Please select a smaller image.')
+      return
+    }
+
     setImageError(null)
+    setImageFileName(file.name || 'image.png')
+    setImageFileSize(file.size)
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      setSelectedImage(reader.result as string)
+    }
+    reader.readAsDataURL(file)
+
+    setIsUploadingImage(true)
+    try {
+      const resp = await uploadImageFile(file, sessionId)
+      setUploadedFileId(resp.file_id)
+      setIsUploadingImage(false)
+    } catch (err: any) {
+      setIsUploadingImage(false)
+      setImageError(err?.message || 'Failed to upload image. Please try again.')
+    }
+  }
+
+  const handleSend = () => {
+    if (isUploadingImage) return
+    const hasText = Boolean(inputMessage.trim())
+    const hasImage = Boolean(selectedImage || uploadedFileId)
+    if ((!hasText && !hasImage) || isThinking || isExhausted || disabled) return
+    onSendMessage(selectedImage, webSearchActive, uploadedFileId)
+    handleRemoveImage()
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -84,21 +142,59 @@ export function Composer({
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    if (!file.type.startsWith('image/')) {
-      setImageError('Please select a valid image file.')
-      return
-    }
-    if (file.size > 3 * 1024 * 1024) {
-      setImageError('Image size exceeds the 3 MB limit. Please select a smaller image.')
-      return
-    }
-    setImageError(null)
-    const reader = new FileReader()
-    reader.onload = () => {
-      setSelectedImage(reader.result as string)
-    }
-    reader.readAsDataURL(file)
+    processImageFile(file)
     e.target.value = ''
+  }
+
+  const handleRemoveImage = () => {
+    setSelectedImage(null)
+    setUploadedFileId(null)
+    setImageFileName(null)
+    setImageFileSize(null)
+    setImageError(null)
+    setIsUploadingImage(false)
+    if (imageInputRef.current) {
+      imageInputRef.current.value = ''
+    }
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!isDraggingOver) setIsDraggingOver(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return
+    setIsDraggingOver(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDraggingOver(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file) {
+      processImageFile(file)
+    }
+  }
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile()
+        if (file) {
+          e.preventDefault()
+          processImageFile(file)
+          return
+        }
+      }
+    }
   }
 
   // Voice dictation handling using Web Speech API
@@ -158,23 +254,70 @@ export function Composer({
         className="hidden"
       />
 
-      {/* Floating Glassmorphism Composer Card */}
-      <div className="relative rounded-3xl glass-panel p-2.5 sm:p-4 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.08)] transition-all focus-within:border-[var(--border-strong)] focus-within:shadow-[0_16px_48px_-10px_rgba(0,0,0,0.12)]">
-        {/* Selected Image Preview */}
+      {/* Floating Glassmorphism Composer Card with Drag & Drop */}
+      <div
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`relative rounded-3xl glass-panel p-2.5 sm:p-4 shadow-[0_12px_40px_-12px_rgba(0,0,0,0.08)] transition-all focus-within:border-[var(--border-strong)] focus-within:shadow-[0_16px_48px_-10px_rgba(0,0,0,0.12)] ${
+          isDraggingOver ? 'ring-2 ring-indigo-500/50 bg-indigo-500/5' : ''
+        }`}
+      >
+        {/* Drag Overlay */}
+        {isDraggingOver && (
+          <div className="absolute inset-0 z-30 rounded-3xl bg-[var(--bg-surface-elevated)]/90 backdrop-blur-xs border-2 border-dashed border-indigo-500/80 flex flex-col items-center justify-center pointer-events-none transition-all">
+            <UploadCloud size={32} className="text-indigo-500 animate-bounce mb-1.5" />
+            <span className="text-sm font-semibold text-[var(--text-primary)]">
+              Drop image here to attach
+            </span>
+            <span className="text-xs text-[var(--text-muted)]">JPEG, PNG, WebP up to 3 MB</span>
+          </div>
+        )}
+
+        {/* Selected Image Preview with Upload Status */}
         {selectedImage && (
-          <div className="relative inline-block mb-2">
-            <img
-              src={selectedImage}
-              alt="Attachment preview"
-              className="max-h-28 w-auto max-w-[240px] object-contain rounded-xl border border-[var(--border-subtle)] shadow-xs bg-black/10"
-            />
+          <div className="relative inline-flex items-center gap-3 mb-2.5 p-1.5 pr-3 rounded-2xl bg-[var(--bg-surface-elevated)] border border-[var(--border-subtle)] shadow-xs">
+            <div className="relative flex-shrink-0">
+              <img
+                src={selectedImage}
+                alt={imageFileName || 'Attachment preview'}
+                className="h-14 w-14 object-cover rounded-xl border border-[var(--border-subtle)] bg-black/10"
+              />
+              {isUploadingImage && (
+                <div className="absolute inset-0 bg-black/40 rounded-xl flex items-center justify-center">
+                  <Loader2 size={16} className="text-white animate-spin" />
+                </div>
+              )}
+            </div>
+            <div className="flex flex-col min-w-0 pr-1">
+              <span className="text-xs font-semibold text-[var(--text-primary)] truncate max-w-[140px] sm:max-w-[220px]">
+                {imageFileName || 'Image attachment'}
+              </span>
+              <span className="text-[11px] text-[var(--text-muted)]">
+                {imageFileSize ? formatBytes(imageFileSize) : ''}
+              </span>
+              <div className="flex items-center gap-1 mt-0.5">
+                {isUploadingImage ? (
+                  <span className="text-[10px] text-amber-500 font-medium flex items-center gap-1">
+                    <Loader2 size={10} className="animate-spin" /> Uploading to Drive...
+                  </span>
+                ) : uploadedFileId ? (
+                  <span className="text-[10px] text-emerald-500 font-medium flex items-center gap-1">
+                    <CheckCircle2 size={10} /> Secured in Drive
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-[var(--text-muted)]">Ready</span>
+                )}
+              </div>
+            </div>
             <button
               type="button"
-              onClick={() => setSelectedImage(null)}
-              className="absolute -top-2 -right-2 p-1 rounded-full bg-rose-600 text-white hover:bg-rose-500 shadow-sm cursor-pointer"
+              onClick={handleRemoveImage}
+              className="p-1 rounded-full bg-[var(--bg-surface-hover)] text-[var(--text-muted)] hover:text-rose-500 hover:bg-rose-500/10 transition cursor-pointer ml-auto flex-shrink-0"
               title="Remove image"
+              aria-label="Remove image"
             >
-              <X size={12} />
+              <X size={14} />
             </button>
           </div>
         )}
@@ -190,6 +333,7 @@ export function Composer({
           value={inputMessage}
           onChange={(e) => onInputChange(e.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           disabled={isThinking || isExhausted || disabled}
           placeholder={
             disabledMessage
@@ -344,11 +488,11 @@ export function Composer({
               <button
                 type="button"
                 onClick={handleSend}
-                disabled={(!inputMessage.trim() && !selectedImage) || isExhausted || disabled}
+                disabled={isUploadingImage || (!inputMessage.trim() && !selectedImage && !uploadedFileId) || isExhausted || disabled}
                 aria-label="Send message"
                 className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-[var(--text-primary)] text-[var(--bg-app)] hover:opacity-90 disabled:opacity-25 transition shadow-xs cursor-pointer flex items-center justify-center flex-shrink-0"
               >
-                <ArrowUp size={16} />
+                {isUploadingImage ? <Loader2 size={16} className="animate-spin" /> : <ArrowUp size={16} />}
               </button>
             )}
           </div>

@@ -98,13 +98,18 @@ class GeminiProvider(BaseProvider):
         start_t = time.perf_counter()
         last_exc = None
 
-        # Build contents
+        # Build contents - attach multimodal parts to the latest user message
         contents = []
+        last_user_idx = None
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") == "user":
+                last_user_idx = i
+                break
+
         for idx, m in enumerate(messages):
             role = "user" if m.get("role") == "user" else "model"
             parts: List[Dict[str, Any]] = []
-            # Attach multimodal parts (PDF / Images) to the first user message if provided
-            if idx == 0 and role == "user" and multimodal_parts:
+            if idx == last_user_idx and multimodal_parts:
                 parts.extend(multimodal_parts)
             text_val = m.get("content") or ""
             if text_val:
@@ -216,10 +221,16 @@ class GeminiProvider(BaseProvider):
         model_chain = _gemini_model_chain(primary_model)
 
         contents = []
+        last_user_idx = None
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") == "user":
+                last_user_idx = i
+                break
+
         for idx, m in enumerate(messages):
             role = "user" if m.get("role") == "user" else "model"
             parts = []
-            if idx == 0 and role == "user" and multimodal_parts:
+            if idx == last_user_idx and multimodal_parts:
                 parts.extend(multimodal_parts)
             text_val = m.get("content") or ""
             if text_val:
