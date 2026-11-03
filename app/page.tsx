@@ -261,12 +261,14 @@ export default function BrainyApp() {
       if (profileResult.status === 'fulfilled') setProfileStats(profileResult.value)
       const serverPrefs = preferencesResult.status === 'fulfilled' ? preferencesResult.value : {}
 
-      // Restore the last selected conversation for this account after refresh.
+      // Always open Brainy on a clean new chat window.
+      // Clean up any previously persisted active session keys so old chats are never auto-restored.
       if (typeof window !== 'undefined') {
-        const savedSessionId = localStorage.getItem(`brainy_active_session_${userId}`)
-        // Do not require the active chat to be in the first sidebar page.
-        // This restores older conversations even when the user has many chats.
-        if (savedSessionId) await loadSessionIntoView(savedSessionId)
+        try {
+          localStorage.removeItem(`brainy_active_session_${userId}`)
+        } catch {
+          // ignore storage errors
+        }
       }
 
       if (serverPrefs && Object.keys(serverPrefs).length > 0) {
@@ -283,7 +285,7 @@ export default function BrainyApp() {
     } finally {
       setSessionsLoading(false)
     }
-  }, [loadSessionIntoView])
+  }, [])
 
   useEffect(() => {
     const authenticate = async () => {
@@ -370,12 +372,6 @@ export default function BrainyApp() {
     }
     authenticate()
   }, [loadInitialData])
-
-  useEffect(() => {
-    if (typeof window !== 'undefined' && user && activeSessionId) {
-      localStorage.setItem(`brainy_active_session_${user.id}`, activeSessionId)
-    }
-  }, [activeSessionId, user])
 
   // ── Session Operations ────────────────────────────────────
   const selectSession = async (sessionId: string, title?: string) => {
