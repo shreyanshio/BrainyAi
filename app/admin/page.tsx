@@ -92,6 +92,7 @@ export default function AdminPage() {
   const [driveStatus, setDriveStatus] = useState<GoogleDriveOwnerStatus | null>(null)
   const [driveLoading, setDriveLoading] = useState(false)
   const [driveNotice, setDriveNotice] = useState<{ msg: string; type: 'success' | 'error' } | null>(null)
+  const [isConnectingDrive, setIsConnectingDrive] = useState(false)
   const [activeTab, setActiveTab] = useState<AdminTab>('overview')
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -1699,13 +1700,30 @@ export default function AdminPage() {
                       Disconnect Vault
                     </button>
                   ) : (
-                    <a
-                      href={getOwnerDriveConnectUrl()}
-                      className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold transition cursor-pointer shadow-lg shadow-purple-600/20 flex items-center gap-1.5"
+                    <button
+                      onClick={() => {
+                        setIsConnectingDrive(true)
+                        window.location.href = getOwnerDriveConnectUrl()
+                      }}
+                      disabled={isConnectingDrive}
+                      className={`px-3 py-1.5 rounded-lg text-white text-xs font-semibold transition flex items-center gap-1.5 ${
+                        isConnectingDrive
+                          ? 'bg-purple-800 opacity-60 cursor-not-allowed'
+                          : 'bg-purple-600 hover:bg-purple-500 cursor-pointer shadow-lg shadow-purple-600/20'
+                      }`}
                     >
-                      <HardDrive className="w-3.5 h-3.5" />
-                      <span>Authorize Owner Google Drive</span>
-                    </a>
+                      {isConnectingDrive ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Initiating OAuth...</span>
+                        </>
+                      ) : (
+                        <>
+                          <HardDrive className="w-3.5 h-3.5" />
+                          <span>Authorize Owner Google Drive</span>
+                        </>
+                      )}
+                    </button>
                   )}
                 </div>
               </div>

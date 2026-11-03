@@ -293,6 +293,10 @@ export default function BrainyApp() {
         // 1. Check URL query params for Telegram handshake or Google OAuth redirect
         if (typeof window !== 'undefined') {
           const urlParams = new URLSearchParams(window.location.search)
+          if (urlParams.has('drive_error') || urlParams.has('drive_connected')) {
+            window.location.replace('/admin' + window.location.search)
+            return
+          }
           const authSessionParam = urlParams.get('auth_session')
           if (authSessionParam) {
             setAuthLoading(true)

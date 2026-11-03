@@ -53,6 +53,8 @@ class TestGoogleDriveCentralizedStorage(unittest.TestCase):
         self.user_b_id = 10002
 
         # Configure environment for tests
+        os.environ.pop("BRAINY_DRIVE_OWNER_GOOGLE_SUB", None)
+        os.environ.pop("OWNER_GOOGLE_SUB", None)
         os.environ["BRAINY_DRIVE_OWNER_USER_ID"] = str(self.owner_id)
         os.environ["GOOGLE_DRIVE_CLIENT_ID"] = "test_client_id.apps.googleusercontent.com"
         os.environ["GOOGLE_DRIVE_CLIENT_SECRET"] = "test_client_secret"
@@ -305,6 +307,40 @@ class TestGoogleDriveCentralizedStorage(unittest.TestCase):
             cfg = drive_storage.get_owner_config()
             # Original refresh token must be intact
             self.assertEqual(cipher.decrypt(cfg["encrypted_refresh_token"]), "existing_valid_refresh_token")
+
+    def test_oauth_callback_endpoint_missing_code_or_state(self):
+        resp = self.app.get("/api/integrations/google-drive/callback")
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("drive_error=missing_code_or_state", resp.headers["Location"])
+
+    def test_oauth_callback_endpoint_mismatched_signature_state(self):
+        resp = self.app.get("/api/integrations/google-drive/callback?code=test_code&state=eyJuIjoidGVzdCJ9.bad_signature")
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("drive_error=signature_mismatch", resp.headers["Location"])
+
+    @patch("requests.post")
+    @patch("requests.get")
+    def test_oauth_callback_endpoint_reused_state_rejected(self, mock_get, mock_post):
+        state = drive_storage.generate_oauth_state(self.owner_id)
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"access_token": "ya29.tok", "refresh_token": "1//ref", "expires_in": 3600}
+        )
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"email": "shreyansh.npm@gmail.com", "sub": "sub_owner_123"}
+        )
+
+        with patch.object(drive_storage, "initialize_root_hierarchy", return_value=("root", "users")):
+            # First attempt succeeds
+            resp1 = self.app.get(f"/api/integrations/google-drive/callback?code=c1&state={state}")
+            self.assertEqual(resp1.status_code, 302)
+            self.assertIn("drive_connected=true", resp1.headers["Location"])
+
+            # Replaying same state must fail with already_consumed
+            resp2 = self.app.get(f"/api/integrations/google-drive/callback?code=c2&state={state}")
+            self.assertEqual(resp2.status_code, 302)
+            self.assertIn("drive_error=already_consumed", resp2.headers["Location"])
 
     # ── 5. OPAQUE USER FOLDERS & DATA ISOLATION ──
 

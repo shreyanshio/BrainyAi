@@ -210,7 +210,12 @@ def handle_uncaught(e):
     return jsonify({"error": "Unexpected error. Please try again."}), 500
 
 SUPABASE_URL = (os.getenv("SUPABASE_URL") or study_bot.SUPABASE_URL or "").rstrip("/")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY") or study_bot.SUPABASE_KEY
+SUPABASE_KEY = (
+    os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    or os.getenv("SUPABASE_SERVICE_KEY")
+    or os.getenv("SUPABASE_KEY")
+    or study_bot.SUPABASE_KEY
+)
 
 
 def _supabase_configured() -> bool:
@@ -4371,7 +4376,7 @@ def drive_owner_connect():
         }), 403
 
     try:
-        auth_url = drive_storage.get_oauth_authorization_url(owner_user_id=user_id, prompt_consent=True)
+        auth_url = drive_storage.get_oauth_authorization_url(owner_user_id=user_id, email=email, prompt_consent=True)
         if request.args.get('redirect') == '1' or 'text/html' in request.headers.get('Accept', ''):
             return redirect(auth_url)
         return jsonify({"auth_url": auth_url})

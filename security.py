@@ -98,7 +98,12 @@ def check_rate_limit(identifier: str, limit: int = 100, window: int = 60) -> boo
     """
     global _rate_limit_warning_logged, _shared_limiter_retry_at
     supabase_url = (os.getenv("SUPABASE_URL") or "").rstrip("/")
-    supabase_key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY") or ""
+    supabase_key = (
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("SUPABASE_SERVICE_KEY")
+        or os.getenv("SUPABASE_KEY")
+        or ""
+    )
     production = _is_production()
     now = time.time()
     shared_available = supabase_url and supabase_key and now >= _shared_limiter_retry_at
@@ -499,6 +504,7 @@ def login_required(f):
                     session["first_name"] = payload.get("name", "Student")
                     session["email"] = payload.get("email", "")
                     session["role"] = payload.get("role", "student")
+                    session["google_sub"] = payload.get("google_sub", "")
                     request.authenticated_user_id = payload["sub"]
                     g.auth_validation_ms = round((time.perf_counter() - auth_started) * 1000, 2)
                     return f(*args, **kwargs)
@@ -519,6 +525,7 @@ def login_required(f):
                 session["first_name"] = payload.get("name", "Student")
                 session["email"] = payload.get("email", "")
                 session["role"] = payload.get("role", "student")
+                session["google_sub"] = payload.get("google_sub", "")
                 request.authenticated_user_id = payload["sub"]
                 g.auth_validation_ms = round((time.perf_counter() - auth_started) * 1000, 2)
                 return f(*args, **kwargs)

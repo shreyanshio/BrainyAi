@@ -22,7 +22,7 @@ import logging
 import hashlib
 import threading
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, Tuple, Generator
+from typing import Dict, Any, Optional, Tuple, Generator, Set
 
 import requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -204,13 +204,42 @@ class GoogleDriveStorageManager:
     # ── MULTI-LAYER OWNER IDENTITY VERIFICATION ──
 
     def get_configured_owner_id(self) -> str:
-        return os.getenv("BRAINY_DRIVE_OWNER_USER_ID", "").strip()
+        return (
+            os.getenv("BRAINY_DRIVE_OWNER_USER_ID")
+            or os.getenv("OWNER_USER_ID")
+            or ""
+        ).strip()
+
+    def get_configured_owner_emails(self) -> Set[str]:
+        """Returns set of all authorized owner emails."""
+        emails: Set[str] = set()
+        env_owner = os.getenv("BRAINY_DRIVE_OWNER_EMAIL") or os.getenv("OWNER_EMAIL")
+        if env_owner:
+            emails.add(env_owner.strip().lower())
+        # Default authorized platform owners
+        emails.add("shreyansh.npm@gmail.com")
+        emails.add("shreyansh101008@gmail.com")
+        # Admin emails env overrides
+        for ev in ("ADMIN_EMAILS", "BRAINYAI_ADMIN_EMAILS"):
+            for part in os.getenv(ev, "").split(","):
+                part = part.strip().lower()
+                if part:
+                    emails.add(part)
+        return emails
 
     def get_configured_owner_email(self) -> str:
-        return (os.getenv("BRAINY_DRIVE_OWNER_EMAIL") or "shreyansh.npm@gmail.com").strip().lower()
+        return (
+            os.getenv("BRAINY_DRIVE_OWNER_EMAIL")
+            or os.getenv("OWNER_EMAIL")
+            or "shreyansh.npm@gmail.com"
+        ).strip().lower()
 
     def get_configured_owner_sub(self) -> str:
-        return os.getenv("BRAINY_DRIVE_OWNER_GOOGLE_SUB", "").strip()
+        return (
+            os.getenv("BRAINY_DRIVE_OWNER_GOOGLE_SUB")
+            or os.getenv("OWNER_GOOGLE_SUB")
+            or ""
+        ).strip()
 
     def verify_owner_identity(
         self,
@@ -232,18 +261,19 @@ class GoogleDriveStorageManager:
         user_id_str = str(user_id).strip()
         env_owner_id = self.get_configured_owner_id()
         env_owner_sub = self.get_configured_owner_sub()
-        env_owner_email = self.get_configured_owner_email()
+        allowed_owner_emails = self.get_configured_owner_emails()
 
         cfg = self.get_owner_config() or {}
         db_owner_id = str(cfg.get("owner_user_id")).strip() if cfg.get("owner_user_id") else ""
         db_owner_sub = str(cfg.get("owner_google_sub")).strip() if cfg.get("owner_google_sub") else ""
         db_owner_email = (cfg.get("owner_email") or "").strip().lower()
+        if db_owner_email:
+            allowed_owner_emails.add(db_owner_email)
 
         expected_owner_id = env_owner_id or db_owner_id
         expected_owner_sub = env_owner_sub or db_owner_sub
-        expected_owner_email = env_owner_email or db_owner_email or "shreyansh.npm@gmail.com"
 
-        # 1. User ID check
+        # 1. User ID check (if explicitly bound in DB or configured in env)
         if expected_owner_id:
             if user_id_str != expected_owner_id:
                 return False, f"USER_ID_MISMATCH (got {user_id_str}, expected {expected_owner_id})"
@@ -258,12 +288,18 @@ class GoogleDriveStorageManager:
         # 3. Email consistency check
         if email:
             clean_email = email.strip().lower()
-            if clean_email != expected_owner_email:
-                return False, f"EMAIL_MISMATCH (got {clean_email}, expected {expected_owner_email})"
+            if clean_email not in allowed_owner_emails:
+                return False, f"EMAIL_MISMATCH (got {clean_email}, expected one of {allowed_owner_emails})"
 
         # 4. Bootstrap / Unbound check: if expected_owner_id is not set in env or DB
         if not expected_owner_id:
-            if email and email.strip().lower() == expected_owner_email and google_sub:
+            # Check if user is registered in admin allowlist
+            admin_ids = set()
+            for part in os.getenv("ADMIN_USER_IDS", "").split(","):
+                part = part.strip()
+                if part:
+                    admin_ids.add(part)
+            if email and email.strip().lower() in allowed_owner_emails and (google_sub or user_id_str in admin_ids):
                 return True, "OWNER_BOOTSTRAP_ELIGIBLE"
             return False, "OWNER_NOT_CONFIGURED"
 
@@ -390,7 +426,7 @@ class GoogleDriveStorageManager:
                 sb_payload = {
                     "state_nonce": nonce,
                     "state_hash": record["state_hash"],
-                    "user_id": int(record["user_id"]) if str(record["user_id"]).isdigit() else 0,
+                    "user_id": str(record["user_id"]),
                     "operation": record.get("operation", "drive_owner_oauth"),
                     "expires_at": datetime.fromtimestamp(record["expires_at"], timezone.utc).isoformat(),
                     "consumed": False,
@@ -510,7 +546,7 @@ class GoogleDriveStorageManager:
 
         return consumed_ok
 
-    def generate_oauth_state(self, owner_user_id: Any) -> str:
+    def generate_oauth_state(self, owner_user_id: Any, email: Optional[str] = None) -> str:
         """
         Generates a cryptographically signed, single-use, time-limited state parameter.
         Persisted across shared storage (Supabase, disk vault, memory) to survive
@@ -519,8 +555,10 @@ class GoogleDriveStorageManager:
         nonce = secrets.token_hex(24)
         now = time.time()
         exp = now + 900.0  # 15 minutes validity
+        clean_email = str(email or "").strip().lower()
         payload = json.dumps({
             "u": str(owner_user_id),
+            "em": clean_email,
             "n": nonce,
             "e": exp,
             "op": "drive_owner_oauth"
@@ -535,6 +573,7 @@ class GoogleDriveStorageManager:
             "nonce": nonce,
             "state_hash": state_hash,
             "user_id": str(owner_user_id),
+            "email": clean_email,
             "operation": "drive_owner_oauth",
             "expires_at": exp,
             "created_at": now,
@@ -542,6 +581,13 @@ class GoogleDriveStorageManager:
         }
         self._save_oauth_state_record(nonce, record)
         self._cleanup_expired_states()
+        logger.info(
+            "Generated OAuth state nonce=%s for user_id=%s (email=%s, exp=%.0f)",
+            nonce[:8] + "...",
+            owner_user_id,
+            clean_email or "unspecified",
+            exp
+        )
         return state_str
 
     def validate_and_consume_oauth_state(self, state_str: str, expected_user_id: Any = None) -> Dict[str, Any]:
@@ -560,7 +606,16 @@ class GoogleDriveStorageManager:
         10. Bound user satisfies owner identity
         11. Consumes atomically exactly once
         """
-        if not state_str or not isinstance(state_str, str) or "." not in state_str:
+        has_state = bool(state_str and isinstance(state_str, str))
+        state_len = len(state_str) if has_state else 0
+        logger.info(
+            "OAuth state validation started (state_present=%s, length=%d, has_delimiter=%s)",
+            has_state,
+            state_len,
+            "." in state_str if has_state else False
+        )
+
+        if not has_state or "." not in state_str:
             logger.warning("OAuth state rejected: missing or malformed state parameter")
             return {"valid": False, "error": "missing_or_malformed", "user_id": None}
 
@@ -572,6 +627,8 @@ class GoogleDriveStorageManager:
                 logger.warning("OAuth state rejected: HMAC signature verification failed (tampered or mismatched secret)")
                 return {"valid": False, "error": "signature_mismatch", "user_id": None}
 
+            logger.info("OAuth state HMAC signature verified successfully")
+
             pad = len(p_b64) % 4
             raw_p = base64.urlsafe_b64decode((p_b64 + ("=" * (4 - pad) if pad else "")).encode("ascii")).decode("utf-8")
             payload = json.loads(raw_p)
@@ -579,7 +636,15 @@ class GoogleDriveStorageManager:
             nonce = payload.get("n")
             exp = float(payload.get("e", 0))
             user_id = str(payload.get("u", ""))
+            email = str(payload.get("em", "")).strip().lower()
             op = payload.get("op", "drive_owner_oauth")
+
+            logger.info(
+                "OAuth state payload unpacked (user_id=%s, op=%s, expires_in_sec=%.1f)",
+                user_id,
+                op,
+                exp - time.time()
+            )
 
             if not (nonce and user_id):
                 logger.warning("OAuth state rejected: payload missing required fields")
@@ -599,6 +664,13 @@ class GoogleDriveStorageManager:
 
             # Retrieve from shared storage (Supabase -> disk -> memory)
             stored = self._get_oauth_state_record(nonce)
+            logger.info(
+                "OAuth state persistent store lookup (record_found=%s, source=%s, consumed=%s)",
+                bool(stored),
+                stored.get("source") if stored else "none",
+                bool(stored.get("consumed")) if stored else False
+            )
+
             if not stored:
                 logger.warning("OAuth state rejected: nonce not found in persistent store (unrecognized state)")
                 return {"valid": False, "error": "nonce_not_found", "user_id": user_id}
@@ -621,9 +693,17 @@ class GoogleDriveStorageManager:
                 return {"valid": False, "error": "hash_mismatch", "user_id": user_id}
 
             # Verify owner identity
-            if not self.is_owner_user(user_id):
-                logger.warning("OAuth state rejected: initiating user %s is not authorized as project owner", user_id)
+            record_email = email or str(stored.get("email") or "").strip().lower()
+            is_owner, owner_reason = self.verify_owner_identity(user_id=user_id, email=record_email or None)
+            if not is_owner:
+                logger.warning(
+                    "OAuth state rejected: initiating user %s is not authorized as project owner (reason=%s)",
+                    user_id,
+                    owner_reason
+                )
                 return {"valid": False, "error": "unauthorized_owner", "user_id": user_id}
+
+            logger.info("OAuth state owner verification passed: %s (user_id=%s)", owner_reason, user_id)
 
             # Atomically consume the state
             consumed = self._consume_oauth_state_record(nonce)
@@ -632,7 +712,7 @@ class GoogleDriveStorageManager:
                 return {"valid": False, "error": "already_consumed", "user_id": user_id}
 
             logger.info("OAuth state validated and consumed successfully for user_id=%s (source=%s)", user_id, stored.get("source"))
-            return {"valid": True, "error": None, "user_id": user_id}
+            return {"valid": True, "error": None, "user_id": user_id, "email": record_email}
 
         except Exception as e:
             logger.warning("OAuth state validation exception: %s", e)
@@ -645,7 +725,12 @@ class GoogleDriveStorageManager:
 
     # ── OAUTH URL & CODE EXCHANGE ──
 
-    def get_oauth_authorization_url(self, owner_user_id: Any, prompt_consent: bool = True) -> str:
+    def get_oauth_authorization_url(
+        self,
+        owner_user_id: Any,
+        email: Optional[str] = None,
+        prompt_consent: bool = True
+    ) -> str:
         """Constructs Google OAuth 2.0 authorization URL for the owner."""
         client_id = os.getenv("GOOGLE_DRIVE_CLIENT_ID", "").strip()
         redirect_uri = os.getenv(
@@ -655,7 +740,7 @@ class GoogleDriveStorageManager:
         if not client_id:
             raise GoogleDriveAuthError("GOOGLE_DRIVE_CLIENT_ID environment variable is missing")
 
-        state = self.generate_oauth_state(owner_user_id)
+        state = self.generate_oauth_state(owner_user_id, email=email)
         prompt = "consent" if prompt_consent else "select_account"
         params = {
             "client_id": client_id,
