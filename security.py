@@ -594,13 +594,15 @@ def security_guard(f):
                     log_security_event("blacklist_match", ip, session.get("user_id"), f"GET param: {key}")
                     return jsonify({"error": "Invalid input detected", "request_id": g.request_id}), 403
 
-        # Check POST/PUT/PATCH JSON body (skip for auth token endpoints)
+        # Check POST/PUT/PATCH JSON body (skip for auth token endpoints and file uploads)
         if request.method in ['POST', 'PUT', 'PATCH'] and request.path not in BODY_SCAN_EXEMPT:
             data = request.get_json(silent=True) or {}
             for key, value in data.items():
-                # These endpoints treat message/content as plain text/code.
+                # These endpoints treat message/content as plain text/code, and image/data as base64 media.
                 # They enforce auth, size limits, and rate limits separately.
-                if request.path in {"/api/chat/send", "/api/chat/stream"} and key in {"message", "content"}:
+                if request.path in {"/api/chat/send", "/api/chat/stream"} and key in {"message", "content", "image", "image_url", "attachment", "data"}:
+                    continue
+                if request.path in {"/api/upload", "/api/files/upload"} and key in {"image", "data"}:
                     continue
                 if isinstance(value, str) and is_blacklisted(value):
                     log_security_event("blacklist_match", ip, session.get("user_id"), f"POST param: {key}")

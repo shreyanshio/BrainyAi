@@ -164,8 +164,8 @@ def _get_provider_failover_candidates(
         for part in multimodal_parts if isinstance(part, dict)
     ) and not context.get("pdf_text")
     if image_input:
-        # Groq's configured models are text-only. Preserve modality by allowing only
-        # a registered image model as the provider backup.
+        # For image requests: Groq qwen/qwen3.8-27b supports vision and acts as backup alongside OpenRouter VL
+        candidates.append(("groq", "qwen/qwen3.8-27b"))
         candidates.append(("openrouter", "nvidia/nemotron-3.5-super-vl:free"))
         return _filter_eligible(candidates, require_vision=True)
     if binary_pdf_input:

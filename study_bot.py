@@ -2189,6 +2189,11 @@ def ai_call(messages, system_prompt=None, max_tokens=None, platform=None, user_i
     pieces together. The model decides when it's actually finished, not an arbitrary cap.
     """
     prompt = system_prompt or SYSTEM_PROMPT
+    # For image/multimodal requests, NEVER fall back to text-only legacy streaming or text-only ai_call.
+    # Preserve modality and surface an honest, explicit error instead of fabricating or stripping visual input.
+    if document_context and (document_context.get("has_image") or document_context.get("multimodal_parts")):
+        raise Exception("Image analysis is temporarily unavailable. Please try again later.")
+
     q_type = detect_question_type(messages)
 
     if max_tokens is None:
@@ -2266,6 +2271,11 @@ def ai_stream(messages, system_prompt=None, max_tokens=None, model_id=None, plat
         return
     except Exception:
         pass
+    # For image/multimodal requests, NEVER fall back to text-only legacy streaming or text-only ai_call.
+    # Preserve modality and surface an honest, explicit error instead of fabricating or stripping visual input.
+    if document_context and (document_context.get("has_image") or document_context.get("multimodal_parts")):
+        raise Exception("Image analysis is temporarily unavailable. Please try again later.")
+
     q_type = detect_question_type(messages)
 
     if max_tokens is None:

@@ -54,6 +54,35 @@ def _retry_after_seconds(response, default: float = 60.0) -> float:
             return default
 
 
+def _normalize_gemini_parts(parts: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """
+    Normalizes multimodal parts to the canonical Google Gemini REST API schema:
+    `inlineData`: { `mimeType`: str, `data`: str (base64) } or `fileData`: { `mimeType`: str, `fileUri`: str }.
+    Accepts snake_case (inline_data, mime_type) and camelCase (inlineData, mimeType) interchangeably.
+    """
+    if not parts:
+        return []
+    normalized = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        if "inline_data" in part or "inlineData" in part:
+            blob = part.get("inline_data") or part.get("inlineData") or {}
+            mime = blob.get("mime_type") or blob.get("mimeType") or "image/jpeg"
+            data = blob.get("data") or ""
+            normalized.append({"inlineData": {"mimeType": mime, "data": data}})
+        elif "file_data" in part or "fileData" in part:
+            blob = part.get("file_data") or part.get("fileData") or {}
+            mime = blob.get("mime_type") or blob.get("mimeType") or "image/jpeg"
+            uri = blob.get("file_uri") or blob.get("fileUri") or ""
+            normalized.append({"fileData": {"mimeType": mime, "fileUri": uri}})
+        elif "text" in part:
+            normalized.append({"text": part.get("text", "")})
+        else:
+            normalized.append(part)
+    return normalized
+
+
 def _gemini_model_chain(primary_model: str) -> List[str]:
     """Return the chosen model and at most one eligible model-specific alternate."""
     primary_spec = registry.get_model_spec(primary_model)
@@ -69,6 +98,9 @@ def _gemini_model_chain(primary_model: str) -> List[str]:
         and registry.is_model_policy_eligible("gemini", alternate)
     ):
         chain.append(alternate)
+    # Include stable gemini-2.5-flash as the ultimate fallback in the chain
+    if "gemini-2.5-flash" not in chain and registry.is_model_policy_eligible("gemini", "gemini-2.5-flash"):
+        chain.append("gemini-2.5-flash")
     return chain
 
 class GeminiProvider(BaseProvider):
@@ -98,7 +130,8 @@ class GeminiProvider(BaseProvider):
         start_t = time.perf_counter()
         last_exc = None
 
-        # Build contents - attach multimodal parts to the latest user message
+        # Build contents - attach normalized multimodal parts to the latest user message
+        norm_parts = _normalize_gemini_parts(multimodal_parts)
         contents = []
         last_user_idx = None
         for i in range(len(messages) - 1, -1, -1):
@@ -109,16 +142,16 @@ class GeminiProvider(BaseProvider):
         for idx, m in enumerate(messages):
             role = "user" if m.get("role") == "user" else "model"
             parts: List[Dict[str, Any]] = []
-            if idx == last_user_idx and multimodal_parts:
-                parts.extend(multimodal_parts)
+            if idx == last_user_idx and norm_parts:
+                parts.extend(norm_parts)
             text_val = m.get("content") or ""
             if text_val:
                 parts.append({"text": text_val})
             if parts:
                 contents.append({"role": role, "parts": parts})
 
-        if not contents and multimodal_parts:
-            contents.append({"role": "user", "parts": multimodal_parts})
+        if not contents and norm_parts:
+            contents.append({"role": "user", "parts": norm_parts})
 
         payload: Dict[str, Any] = {
             "system_instruction": {"parts": [{"text": system_prompt}]},
@@ -220,6 +253,7 @@ class GeminiProvider(BaseProvider):
         primary_model = model_id or registry.gemini_reasoning_model
         model_chain = _gemini_model_chain(primary_model)
 
+        norm_parts = _normalize_gemini_parts(multimodal_parts)
         contents = []
         last_user_idx = None
         for i in range(len(messages) - 1, -1, -1):
@@ -230,16 +264,16 @@ class GeminiProvider(BaseProvider):
         for idx, m in enumerate(messages):
             role = "user" if m.get("role") == "user" else "model"
             parts = []
-            if idx == last_user_idx and multimodal_parts:
-                parts.extend(multimodal_parts)
+            if idx == last_user_idx and norm_parts:
+                parts.extend(norm_parts)
             text_val = m.get("content") or ""
             if text_val:
                 parts.append({"text": text_val})
             if parts:
                 contents.append({"role": role, "parts": parts})
 
-        if not contents and multimodal_parts:
-            contents.append({"role": "user", "parts": multimodal_parts})
+        if not contents and norm_parts:
+            contents.append({"role": "user", "parts": norm_parts})
 
         payload = {
             "system_instruction": {"parts": [{"text": system_prompt}]},

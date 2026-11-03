@@ -12,27 +12,62 @@ from ai_routing.registry import registry
 logger = logging.getLogger("groq_provider")
 
 
-def _prune_messages_for_groq(messages: List[Dict[str, Any]], system_prompt: str, max_chars: int = 18000) -> List[Dict[str, Any]]:
+def _prune_messages_for_groq(
+    messages: List[Dict[str, Any]],
+    system_prompt: str,
+    max_chars: int = 18000,
+    multimodal_parts: Optional[List[Dict[str, Any]]] = None
+) -> List[Dict[str, Any]]:
     """
     Groq free tier models enforce a strict 7,000 ITPM (Input Tokens Per Minute) ceiling.
     Keep system prompt + latest turns strictly under max_chars (~4,500 tokens) to prevent HTTP 413.
-    Always preserves the most recent user turn in its entirety.
+    Always preserves the most recent user turn in its entirety and formats OpenAI-compatible
+    multimodal image_url blocks when multimodal parts are provided.
     """
     sys_len = len(system_prompt or "")
     budget = max(4000, max_chars - sys_len)
     
     if not messages:
+        if multimodal_parts:
+            parts: List[Dict[str, Any]] = []
+            for p in multimodal_parts:
+                if isinstance(p, dict):
+                    blob = p.get("inline_data") or p.get("inlineData") or {}
+                    mime = blob.get("mime_type") or blob.get("mimeType") or "image/jpeg"
+                    data = blob.get("data") or ""
+                    if data:
+                        parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}"}})
+            if parts:
+                return [{"role": "user", "content": parts}]
         return []
     
     # Process from newest to oldest
     selected = []
     used_chars = 0
+    last_user_processed = False
     for m in reversed(messages):
         c = m.get("content")
         c_len = len(c) if isinstance(c, str) else 200
         if not selected:
-            # Always include the latest turn (truncate internally only if gargantuan)
-            if c_len > budget and isinstance(c, str):
+            # Most recent turn
+            if m.get("role") == "user" and multimodal_parts:
+                last_user_processed = True
+                parts: List[Dict[str, Any]] = []
+                text_part = c if isinstance(c, str) else ""
+                if text_part:
+                    if len(text_part) > budget:
+                        text_part = text_part[-budget:]
+                    parts.append({"type": "text", "text": text_part})
+                for p in multimodal_parts:
+                    if isinstance(p, dict):
+                        blob = p.get("inline_data") or p.get("inlineData") or {}
+                        mime = blob.get("mime_type") or blob.get("mimeType") or "image/jpeg"
+                        data = blob.get("data") or ""
+                        if data:
+                            parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{data}"}})
+                selected.append({**m, "content": parts if parts else text_part})
+                used_chars += len(text_part)
+            elif c_len > budget and isinstance(c, str):
                 c = c[-budget:]
                 selected.append({**m, "content": c})
                 used_chars += len(c)
@@ -75,9 +110,18 @@ class GroqProvider(BaseProvider):
 
         primary_model = model_id or registry.groq_fast_model
         model_chain = [primary_model, registry.groq_balanced_model, "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
+        # If multimodal parts are provided, strictly filter to models with verified vision support
+        if multimodal_parts:
+            model_chain = [
+                m for m in model_chain
+                if registry.get_model_spec(m) and registry.get_model_spec(m).supports_vision
+            ]
+            if not model_chain:
+                model_chain = ["qwen/qwen3.8-27b"]
+
         # Filter eligible active models
         model_chain = [m for m in dict.fromkeys(model_chain) if registry.is_model_eligible("groq", m)]
-        if not model_chain:
+        if not model_chain and not multimodal_parts:
             model_chain = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
 
         last_exc = None
@@ -89,7 +133,7 @@ class GroqProvider(BaseProvider):
 
             for model in model_chain:
                 try:
-                    pruned = _prune_messages_for_groq(messages, system_prompt)
+                    pruned = _prune_messages_for_groq(messages, system_prompt, multimodal_parts=multimodal_parts)
                     kwargs: Dict[str, Any] = {
                         "model": model,
                         "messages": [{"role": "system", "content": system_prompt}] + pruned,
@@ -147,8 +191,17 @@ class GroqProvider(BaseProvider):
 
         primary_model = model_id or registry.groq_fast_model
         model_chain = [primary_model, registry.groq_balanced_model, "openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
+        # If multimodal parts are provided, strictly filter to models with verified vision support
+        if multimodal_parts:
+            model_chain = [
+                m for m in model_chain
+                if registry.get_model_spec(m) and registry.get_model_spec(m).supports_vision
+            ]
+            if not model_chain:
+                model_chain = ["qwen/qwen3.8-27b"]
+
         model_chain = [m for m in dict.fromkeys(model_chain) if registry.is_model_eligible("groq", m)]
-        if not model_chain:
+        if not model_chain and not multimodal_parts:
             model_chain = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
 
         last_exc = None
@@ -158,7 +211,7 @@ class GroqProvider(BaseProvider):
 
             for model in model_chain:
                 try:
-                    pruned = _prune_messages_for_groq(messages, system_prompt)
+                    pruned = _prune_messages_for_groq(messages, system_prompt, multimodal_parts=multimodal_parts)
                     kwargs: Dict[str, Any] = {
                         "model": model,
                         "messages": [{"role": "system", "content": system_prompt}] + pruned,
