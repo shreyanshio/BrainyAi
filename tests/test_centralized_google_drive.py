@@ -27,6 +27,8 @@ import os
 import io
 import time
 import json
+import hmac
+import hashlib
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -65,7 +67,15 @@ class TestGoogleDriveCentralizedStorage(unittest.TestCase):
         # Clear in-memory state and test cache files
         drive_storage._cached_access_token = None
         drive_storage._token_expiry_ts = 0.0
-        from pdf_studio.google_drive import DATA_DIR
+        from pdf_studio.google_drive import DATA_DIR, OAUTH_STATES_DIR, _OAUTH_STATE_REGISTRY, _OAUTH_STATE_LOCK
+        with _OAUTH_STATE_LOCK:
+            _OAUTH_STATE_REGISTRY.clear()
+        if os.path.exists(OAUTH_STATES_DIR):
+            for fn in os.listdir(OAUTH_STATES_DIR):
+                try:
+                    os.remove(os.path.join(OAUTH_STATES_DIR, fn))
+                except Exception:
+                    pass
         cfg_file = os.path.join(DATA_DIR, "owner_config.json")
         if os.path.exists(cfg_file):
             try:
@@ -125,6 +135,12 @@ class TestGoogleDriveCentralizedStorage(unittest.TestCase):
         replayed = drive_storage.validate_oauth_state(state, expected_user_id=self.owner_id)
         self.assertFalse(replayed)
 
+    def test_oauth_state_missing_rejected(self):
+        self.assertFalse(drive_storage.validate_oauth_state("", self.owner_id))
+        self.assertFalse(drive_storage.validate_oauth_state(None, self.owner_id))
+        self.assertFalse(drive_storage.validate_oauth_state("invalid_without_delimiter", self.owner_id))
+        self.assertFalse(drive_storage.validate_oauth_state("...", self.owner_id))
+
     def test_oauth_state_user_mismatch_rejected(self):
         state = drive_storage.generate_oauth_state(self.owner_id)
         # Attempt to validate with a different user ID
@@ -135,6 +151,65 @@ class TestGoogleDriveCentralizedStorage(unittest.TestCase):
         state = drive_storage.generate_oauth_state(self.owner_id)
         tampered_state = state[:-5] + "12345"
         self.assertFalse(drive_storage.validate_oauth_state(tampered_state, self.owner_id))
+
+    def test_oauth_state_expired_rejected(self):
+        # Generate an already-expired state token
+        import secrets as sec
+        import base64 as b64
+        expired_nonce = sec.token_hex(24)
+        expired_ts = time.time() - 60.0  # 1 minute in the past
+        payload = json.dumps({"u": str(self.owner_id), "n": expired_nonce, "e": expired_ts, "op": "drive_owner_oauth"})
+        p_b64 = b64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
+        secret = drive_storage._get_auth_secret()
+        sig = hmac.new(secret.encode("utf-8"), p_b64.encode("utf-8"), hashlib.sha256).hexdigest()
+        expired_state = f"{p_b64}.{sig}"
+        drive_storage._save_oauth_state_record(expired_nonce, {
+            "nonce": expired_nonce,
+            "state_hash": hashlib.sha256(expired_state.encode("utf-8")).hexdigest(),
+            "user_id": str(self.owner_id),
+            "operation": "drive_owner_oauth",
+            "expires_at": expired_ts,
+            "created_at": time.time() - 120.0,
+            "consumed": False
+        })
+        self.assertFalse(drive_storage.validate_oauth_state(expired_state, self.owner_id))
+
+    def test_two_simultaneous_oauth_attempts(self):
+        # Two simultaneous connection attempts must generate unique states without collision
+        state1 = drive_storage.generate_oauth_state(self.owner_id)
+        state2 = drive_storage.generate_oauth_state(self.owner_id)
+        self.assertNotEqual(state1, state2)
+
+        # Both states must be valid independently
+        self.assertTrue(drive_storage.validate_oauth_state(state1, self.owner_id))
+        self.assertTrue(drive_storage.validate_oauth_state(state2, self.owner_id))
+
+        # Reusing either must be rejected
+        self.assertFalse(drive_storage.validate_oauth_state(state1, self.owner_id))
+        self.assertFalse(drive_storage.validate_oauth_state(state2, self.owner_id))
+
+    def test_oauth_state_persistence_across_instances(self):
+        from pdf_studio.google_drive import _OAUTH_STATE_REGISTRY, _OAUTH_STATE_LOCK
+        # Worker 1 generates state
+        state = drive_storage.generate_oauth_state(self.owner_id)
+
+        # Simulate Worker 2 / restart by completely purging in-memory registry
+        with _OAUTH_STATE_LOCK:
+            _OAUTH_STATE_REGISTRY.clear()
+
+        # Worker 2 receives callback and must validate state from shared storage (disk/Supabase)
+        self.assertTrue(drive_storage.validate_oauth_state(state, self.owner_id))
+
+        # Replay must fail even after memory wipe
+        with _OAUTH_STATE_LOCK:
+            _OAUTH_STATE_REGISTRY.clear()
+        self.assertFalse(drive_storage.validate_oauth_state(state, self.owner_id))
+
+    def test_unauthorized_user_attempting_owner_integration(self):
+        # Non-owner user attempts to initiate OAuth
+        state = drive_storage.generate_oauth_state(self.user_a_id)
+        # Validation must reject non-owner identity even with correct signature
+        self.assertFalse(drive_storage.validate_oauth_state(state, self.user_a_id))
 
     # ── 3. OWNER-ONLY AUTHORIZATION ROUTES ──
 

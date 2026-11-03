@@ -43,8 +43,8 @@ DEFAULT_SCOPES = f"{DRIVE_FILE_SCOPE} openid email"
 ENC_PREFIX = "drv_enc_v1_"
 AEAD_AAD = b"brainy_central_drive_v1"
 
-# In-memory single-use state store for OAuth CSRF protection: {nonce: (owner_user_id, exp_ts)}
-_OAUTH_STATE_REGISTRY: Dict[str, Tuple[str, float]] = {}
+# In-memory single-use state store for OAuth CSRF protection: {nonce: record}
+_OAUTH_STATE_REGISTRY: Dict[str, Dict[str, Any]] = {}
 _OAUTH_STATE_LOCK = threading.Lock()
 
 # In-memory folder mapping lock to prevent race conditions during folder creation
@@ -53,6 +53,8 @@ _FOLDER_LOCK = threading.Lock()
 # Local persistence directory for drive config/folder cache in dev or offline Supabase
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "google_drive")
 os.makedirs(DATA_DIR, exist_ok=True)
+OAUTH_STATES_DIR = os.path.join(DATA_DIR, "oauth_states")
+os.makedirs(OAUTH_STATES_DIR, exist_ok=True)
 
 
 class GoogleDriveError(Exception):
@@ -318,34 +320,257 @@ class GoogleDriveStorageManager:
 
     # ── OAUTH STATE MANAGEMENT (CSRF & SINGLE-USE) ──
 
+    def _get_auth_secret(self) -> str:
+        """Retrieves unified auth secret for signing and verifying OAuth states."""
+        try:
+            from security import _get_auth_secret_key
+            return _get_auth_secret_key()
+        except Exception:
+            return (
+                os.getenv("AUTH_SECRET_KEY")
+                or os.getenv("SECRET_KEY")
+                or os.getenv("FLASK_SECRET_KEY")
+                or "brainy_oauth_secret"
+            )
+
+    def _cleanup_expired_states(self):
+        """Prunes expired states from memory, disk, and Supabase."""
+        now = time.time()
+        # 1. In-memory cleanup
+        with _OAUTH_STATE_LOCK:
+            for n, rec in list(_OAUTH_STATE_REGISTRY.items()):
+                if isinstance(rec, dict) and rec.get("expires_at", 0) < now:
+                    _OAUTH_STATE_REGISTRY.pop(n, None)
+                elif isinstance(rec, tuple) and rec[1] < now:
+                    _OAUTH_STATE_REGISTRY.pop(n, None)
+
+        # 2. Disk cleanup (states expired over 10 mins ago)
+        try:
+            if os.path.exists(OAUTH_STATES_DIR):
+                for fname in os.listdir(OAUTH_STATES_DIR):
+                    if fname.endswith(".json"):
+                        fpath = os.path.join(OAUTH_STATES_DIR, fname)
+                        try:
+                            with open(fpath, "r", encoding="utf-8") as f:
+                                data = json.load(f)
+                            if data.get("expires_at", 0) < now - 600:
+                                os.remove(fpath)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        # 3. Supabase cleanup (states expired over 1 hour ago)
+        if self._sb_req:
+            try:
+                stale_threshold = datetime.fromtimestamp(now - 3600, timezone.utc).isoformat()
+                self._sb_req("DELETE", "google_drive_oauth_states", params=f"?expires_at=lt.{stale_threshold}", silent=True)
+            except Exception:
+                pass
+
+    def _save_oauth_state_record(self, nonce: str, record: Dict[str, Any]):
+        """Persists OAuth state across Supabase, shared local disk, and memory."""
+        # 1. In-memory
+        with _OAUTH_STATE_LOCK:
+            _OAUTH_STATE_REGISTRY[nonce] = record
+
+        # 2. Disk persistence
+        try:
+            fpath = os.path.join(OAUTH_STATES_DIR, f"{nonce}.json")
+            tmp_fpath = f"{fpath}.tmp.{uuid.uuid4().hex}"
+            with open(tmp_fpath, "w", encoding="utf-8") as f:
+                json.dump(record, f, indent=2)
+            os.replace(tmp_fpath, fpath)
+        except Exception as e:
+            logger.warning("Failed writing OAuth state to disk: %s", e)
+
+        # 3. Supabase persistence
+        if self._sb_req:
+            try:
+                sb_payload = {
+                    "state_nonce": nonce,
+                    "state_hash": record["state_hash"],
+                    "user_id": int(record["user_id"]) if str(record["user_id"]).isdigit() else 0,
+                    "operation": record.get("operation", "drive_owner_oauth"),
+                    "expires_at": datetime.fromtimestamp(record["expires_at"], timezone.utc).isoformat(),
+                    "consumed": False,
+                    "created_at": datetime.fromtimestamp(record["created_at"], timezone.utc).isoformat(),
+                }
+                self._sb_req("POST", "google_drive_oauth_states", json_body=sb_payload, silent=True)
+            except Exception as se:
+                logger.debug("Failed persisting OAuth state to Supabase (falling back to disk/memory): %s", se)
+
+    def _get_oauth_state_record(self, nonce: str) -> Optional[Dict[str, Any]]:
+        """Retrieves OAuth state record from Supabase, disk, or memory."""
+        # 1. Try Supabase first (shared across all instances)
+        if self._sb_req:
+            try:
+                resp = self._sb_req("GET", "google_drive_oauth_states", params=f"?state_nonce=eq.{nonce}&limit=1", silent=True)
+                rows = resp.json() if hasattr(resp, "json") else []
+                if isinstance(rows, list) and rows:
+                    r = rows[0]
+                    exp_ts = 0.0
+                    if r.get("expires_at"):
+                        try:
+                            exp_ts = datetime.fromisoformat(r["expires_at"].replace("Z", "+00:00")).timestamp()
+                        except Exception:
+                            pass
+                    return {
+                        "nonce": r["state_nonce"],
+                        "state_hash": r.get("state_hash", ""),
+                        "user_id": str(r.get("user_id", "")),
+                        "operation": r.get("operation", "drive_owner_oauth"),
+                        "expires_at": exp_ts,
+                        "consumed": bool(r.get("consumed", False)),
+                        "source": "supabase"
+                    }
+            except Exception as se:
+                logger.debug("Could not query Supabase for OAuth state: %s", se)
+
+        # 2. Try shared disk
+        fpath = os.path.join(OAUTH_STATES_DIR, f"{nonce}.json")
+        if os.path.exists(fpath):
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    data["source"] = "disk"
+                    return data
+            except Exception:
+                pass
+
+        # 3. Try in-memory store
+        with _OAUTH_STATE_LOCK:
+            rec = _OAUTH_STATE_REGISTRY.get(nonce)
+            if rec:
+                if isinstance(rec, dict):
+                    data = dict(rec)
+                    data["source"] = "memory"
+                    return data
+                elif isinstance(rec, tuple):
+                    return {
+                        "nonce": nonce,
+                        "user_id": str(rec[0]),
+                        "expires_at": rec[1],
+                        "consumed": False,
+                        "operation": "drive_owner_oauth",
+                        "source": "memory"
+                    }
+        return None
+
+    def _consume_oauth_state_record(self, nonce: str) -> bool:
+        """Atomically marks OAuth state as consumed across Supabase, disk, and memory."""
+        consumed_ok = True
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        # 1. Supabase CAS consumption
+        if self._sb_req:
+            try:
+                resp = self._sb_req(
+                    "PATCH",
+                    "google_drive_oauth_states",
+                    params=f"?state_nonce=eq.{nonce}&consumed=eq.false",
+                    json_body={"consumed": True, "consumed_at": now_iso},
+                    prefer="return=representation",
+                    silent=True
+                )
+                rows = resp.json() if hasattr(resp, "json") else []
+                if isinstance(rows, list) and len(rows) == 0:
+                    # Concurrently consumed in Supabase!
+                    consumed_ok = False
+            except Exception:
+                pass
+
+        # 2. Disk consumption
+        fpath = os.path.join(OAUTH_STATES_DIR, f"{nonce}.json")
+        if os.path.exists(fpath):
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if data.get("consumed"):
+                    consumed_ok = False
+                data["consumed"] = True
+                data["consumed_at"] = now_iso
+                tmp_fpath = f"{fpath}.tmp.{uuid.uuid4().hex}"
+                with open(tmp_fpath, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+                os.replace(tmp_fpath, fpath)
+            except Exception:
+                pass
+
+        # 3. In-memory consumption
+        with _OAUTH_STATE_LOCK:
+            rec = _OAUTH_STATE_REGISTRY.get(nonce)
+            if rec:
+                if isinstance(rec, dict):
+                    if rec.get("consumed"):
+                        consumed_ok = False
+                    rec["consumed"] = True
+                else:
+                    _OAUTH_STATE_REGISTRY.pop(nonce, None)
+
+        return consumed_ok
+
     def generate_oauth_state(self, owner_user_id: Any) -> str:
-        """Generates a cryptographically signed, single-use, time-limited state parameter."""
-        nonce = secrets.token_hex(16)
+        """
+        Generates a cryptographically signed, single-use, time-limited state parameter.
+        Persisted across shared storage (Supabase, disk vault, memory) to survive
+        Render multi-worker routing, restarts, and multi-instance deployments.
+        """
+        nonce = secrets.token_hex(24)
         now = time.time()
         exp = now + 900.0  # 15 minutes validity
-        with _OAUTH_STATE_LOCK:
-            # Clean expired states
-            for n, (_, e_ts) in list(_OAUTH_STATE_REGISTRY.items()):
-                if e_ts < now:
-                    _OAUTH_STATE_REGISTRY.pop(n, None)
-            _OAUTH_STATE_REGISTRY[nonce] = (str(owner_user_id), exp)
-
-        payload = json.dumps({"u": str(owner_user_id), "n": nonce, "e": exp})
+        payload = json.dumps({
+            "u": str(owner_user_id),
+            "n": nonce,
+            "e": exp,
+            "op": "drive_owner_oauth"
+        })
         p_b64 = base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
-        secret = os.getenv("AUTH_SECRET_KEY") or os.getenv("FLASK_SECRET_KEY") or "brainy_oauth_secret"
+        secret = self._get_auth_secret()
         sig = hmac.new(secret.encode("utf-8"), p_b64.encode("utf-8"), hashlib.sha256).hexdigest()
-        return f"{p_b64}.{sig}"
+        state_str = f"{p_b64}.{sig}"
+        state_hash = hashlib.sha256(state_str.encode("utf-8")).hexdigest()
 
-    def validate_oauth_state(self, state_str: str, expected_user_id: Any) -> bool:
-        """Validates and immediately consumes the OAuth state parameter."""
-        if not state_str or "." not in state_str:
-            return False
+        record = {
+            "nonce": nonce,
+            "state_hash": state_hash,
+            "user_id": str(owner_user_id),
+            "operation": "drive_owner_oauth",
+            "expires_at": exp,
+            "created_at": now,
+            "consumed": False,
+        }
+        self._save_oauth_state_record(nonce, record)
+        self._cleanup_expired_states()
+        return state_str
+
+    def validate_and_consume_oauth_state(self, state_str: str, expected_user_id: Any = None) -> Dict[str, Any]:
+        """
+        Validates and immediately consumes the OAuth state parameter.
+        Checks:
+        1. Non-empty and well-formed format (p_b64.sig)
+        2. Cryptographic HMAC signature against shared secret
+        3. Valid JSON payload with nonce, user, expiration, operation
+        4. Not expired (15-minute window)
+        5. Operation matches 'drive_owner_oauth'
+        6. Optional expected_user_id match
+        7. Record exists in shared store (Supabase / disk / memory)
+        8. Record has not been previously consumed (replay protection)
+        9. Exact state string SHA-256 matches stored state_hash
+        10. Bound user satisfies owner identity
+        11. Consumes atomically exactly once
+        """
+        if not state_str or not isinstance(state_str, str) or "." not in state_str:
+            logger.warning("OAuth state rejected: missing or malformed state parameter")
+            return {"valid": False, "error": "missing_or_malformed", "user_id": None}
+
         try:
             p_b64, sig = state_str.split(".", 1)
-            secret = os.getenv("AUTH_SECRET_KEY") or os.getenv("FLASK_SECRET_KEY") or "brainy_oauth_secret"
+            secret = self._get_auth_secret()
             expected_sig = hmac.new(secret.encode("utf-8"), p_b64.encode("utf-8"), hashlib.sha256).hexdigest()
             if not hmac.compare_digest(sig, expected_sig):
-                return False
+                logger.warning("OAuth state rejected: HMAC signature verification failed (tampered or mismatched secret)")
+                return {"valid": False, "error": "signature_mismatch", "user_id": None}
 
             pad = len(p_b64) % 4
             raw_p = base64.urlsafe_b64decode((p_b64 + ("=" * (4 - pad) if pad else "")).encode("ascii")).decode("utf-8")
@@ -354,24 +579,69 @@ class GoogleDriveStorageManager:
             nonce = payload.get("n")
             exp = float(payload.get("e", 0))
             user_id = str(payload.get("u", ""))
+            op = payload.get("op", "drive_owner_oauth")
+
+            if not (nonce and user_id):
+                logger.warning("OAuth state rejected: payload missing required fields")
+                return {"valid": False, "error": "invalid_payload", "user_id": None}
 
             if exp < time.time():
-                return False
+                logger.warning("OAuth state rejected: token timestamp expired (exp=%s, now=%s)", exp, time.time())
+                return {"valid": False, "error": "expired", "user_id": user_id}
+
+            if op != "drive_owner_oauth":
+                logger.warning("OAuth state rejected: unexpected operation context (got %s)", op)
+                return {"valid": False, "error": "operation_mismatch", "user_id": user_id}
 
             if expected_user_id and str(expected_user_id) != user_id:
-                return False
+                logger.warning("OAuth state rejected: user ID mismatch (expected %s, got %s)", expected_user_id, user_id)
+                return {"valid": False, "error": "user_mismatch", "user_id": user_id}
 
-            with _OAUTH_STATE_LOCK:
-                if nonce not in _OAUTH_STATE_REGISTRY:
-                    return False
-                stored_u, stored_exp = _OAUTH_STATE_REGISTRY.pop(nonce)
-                if stored_u != user_id or stored_exp < time.time():
-                    return False
+            # Retrieve from shared storage (Supabase -> disk -> memory)
+            stored = self._get_oauth_state_record(nonce)
+            if not stored:
+                logger.warning("OAuth state rejected: nonce not found in persistent store (unrecognized state)")
+                return {"valid": False, "error": "nonce_not_found", "user_id": user_id}
 
-            return True
+            if stored.get("consumed"):
+                logger.warning("OAuth state rejected: state has already been consumed (replay attack blocked)")
+                return {"valid": False, "error": "already_consumed", "user_id": user_id}
+
+            if stored.get("expires_at", 0) < time.time():
+                logger.warning("OAuth state rejected: persistent record indicates state has expired")
+                return {"valid": False, "error": "expired", "user_id": user_id}
+
+            if stored.get("user_id") and str(stored["user_id"]) != user_id:
+                logger.warning("OAuth state rejected: record user mismatch (stored %s vs payload %s)", stored.get("user_id"), user_id)
+                return {"valid": False, "error": "user_mismatch", "user_id": user_id}
+
+            expected_hash = hashlib.sha256(state_str.encode("utf-8")).hexdigest()
+            if stored.get("state_hash") and stored["state_hash"] != expected_hash:
+                logger.warning("OAuth state rejected: state hash mismatch against recorded hash")
+                return {"valid": False, "error": "hash_mismatch", "user_id": user_id}
+
+            # Verify owner identity
+            if not self.is_owner_user(user_id):
+                logger.warning("OAuth state rejected: initiating user %s is not authorized as project owner", user_id)
+                return {"valid": False, "error": "unauthorized_owner", "user_id": user_id}
+
+            # Atomically consume the state
+            consumed = self._consume_oauth_state_record(nonce)
+            if not consumed:
+                logger.warning("OAuth state rejected: failed to atomically consume state (concurrent replay)")
+                return {"valid": False, "error": "already_consumed", "user_id": user_id}
+
+            logger.info("OAuth state validated and consumed successfully for user_id=%s (source=%s)", user_id, stored.get("source"))
+            return {"valid": True, "error": None, "user_id": user_id}
+
         except Exception as e:
             logger.warning("OAuth state validation exception: %s", e)
-            return False
+            return {"valid": False, "error": "validation_exception", "user_id": None}
+
+    def validate_oauth_state(self, state_str: str, expected_user_id: Any = None) -> bool:
+        """Backward-compatible validation returning bool."""
+        res = self.validate_and_consume_oauth_state(state_str, expected_user_id=expected_user_id)
+        return res.get("valid", False)
 
     # ── OAUTH URL & CODE EXCHANGE ──
 

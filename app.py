@@ -88,6 +88,13 @@ app.config["SESSION_COOKIE_SAMESITE"] = os.getenv("SESSION_COOKIE_SAMESITE", "No
 app.config["SESSION_COOKIE_SECURE"] = os.getenv("SESSION_COOKIE_SECURE", "True").lower() == "true"
 app.config["PERMANENT_SESSION_LIFETIME"] = 86400  # 24 hours
 
+# Reverse proxy support (Render / Cloudflare / Nginx) to properly forward HTTPS scheme and client IP
+try:
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
+except Exception as pfe:
+    logger.debug("ProxyFix initialization skipped: %s", pfe)
+
 
 # ── ADMIN ACCESS CONTROL ──
 # Admins are whoever is already logged in AND matches one of these
@@ -4382,19 +4389,26 @@ def drive_oauth_callback():
     """
     frontend_url = os.getenv("FRONTEND_URL", "https://brainyai.cenai.workers.dev").rstrip("/")
     err = request.args.get("error", "").strip()
+    err_desc = request.args.get("error_description", "").strip()
     if err:
-        logger.warning("Google Drive OAuth error returned: %s", err)
-        return redirect(f"{frontend_url}/?drive_error={requests.utils.quote(err)}")
+        full_err = f"{err}: {err_desc}" if err_desc else err
+        logger.warning("Google Drive OAuth error returned: %s", full_err)
+        return redirect(f"{frontend_url}/admin?drive_error={requests.utils.quote(full_err)}")
 
     code = request.args.get("code", "").strip()
     state = request.args.get("state", "").strip()
     if not (code and state):
-        return redirect(f"{frontend_url}/?drive_error=missing_code_or_state")
+        logger.warning("Google Drive callback missing code or state parameters (code_present=%s, state_present=%s)", bool(code), bool(state))
+        return redirect(f"{frontend_url}/admin?drive_error=missing_code_or_state")
 
-    # Validate state (single-use, HMAC verified, time-limited)
-    if not drive_storage.validate_oauth_state(state, expected_user_id=None):
-        logger.warning("Google Drive callback rejected: invalid or expired OAuth state")
-        return redirect(f"{frontend_url}/?drive_error=invalid_state")
+    # Validate state (single-use, HMAC verified, time-limited, shared storage backed)
+    state_res = drive_storage.validate_and_consume_oauth_state(state, expected_user_id=None)
+    if not state_res.get("valid"):
+        err_code = state_res.get("error") or "invalid_state"
+        logger.warning("Google Drive callback rejected: %s", err_code)
+        return redirect(f"{frontend_url}/admin?drive_error={err_code}")
+
+    validated_user_id = state_res.get("user_id")
 
     try:
         tokens = drive_storage.exchange_code_for_tokens(code)
@@ -4411,7 +4425,7 @@ def drive_oauth_callback():
         elif refresh_token:
             enc_refresh = cipher.encrypt(refresh_token)
         else:
-            return redirect(f"{frontend_url}/?drive_error=missing_refresh_token")
+            return redirect(f"{frontend_url}/admin?drive_error=missing_refresh_token")
 
         # Fetch owner account identity
         owner_email = None
@@ -4451,7 +4465,7 @@ def drive_oauth_callback():
 
         # Save config
         config_data = {
-            "owner_user_id": existing_cfg.get("owner_user_id") or session.get("user_id"),
+            "owner_user_id": validated_user_id or existing_cfg.get("owner_user_id") or session.get("user_id"),
             "owner_email": owner_email or existing_cfg.get("owner_email"),
             "owner_google_sub": owner_google_sub or existing_cfg.get("owner_google_sub"),
             "encrypted_refresh_token": enc_refresh,
@@ -4470,7 +4484,7 @@ def drive_oauth_callback():
         except Exception as fe:
             logger.error("Failed to initialize Drive root hierarchy: %s", fe)
 
-        audit_drive_event("OWNER_CONNECTED", session.get("user_id"), {
+        audit_drive_event("OWNER_CONNECTED", validated_user_id or session.get("user_id"), {
             "owner_email": owner_email,
             "compliance_cleared": drive_storage.is_compliance_cleared()
         })
@@ -4478,7 +4492,7 @@ def drive_oauth_callback():
         return redirect(f"{frontend_url}/admin?drive_connected=true")
     except Exception as e:
         logger.error("Drive OAuth code exchange failed: %s", e)
-        return redirect(f"{frontend_url}/?drive_error={requests.utils.quote(str(e))}")
+        return redirect(f"{frontend_url}/admin?drive_error={requests.utils.quote(str(e))}")
 
 
 @app.route("/api/integrations/google-drive/owner/status", methods=["GET"])

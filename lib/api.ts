@@ -1724,7 +1724,9 @@ export async function disconnectOwnerDrive(): Promise<{ success: boolean; messag
 
 export function getOwnerDriveConnectUrl(): string {
   const base = getApiBase()
-  return `${base}/api/integrations/google-drive/owner/connect?redirect=1`
+  const token = getStoredToken()
+  const tokenParam = token ? `&token=${encodeURIComponent(token)}` : ''
+  return `${base}/api/integrations/google-drive/owner/connect?redirect=1${tokenParam}`
 }
 
 export async function uploadImageFile(

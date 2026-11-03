@@ -161,6 +161,22 @@ export default function AdminPage() {
       }
     }
     verifyAccess()
+
+    // Detect Drive OAuth connection result from URL params
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const driveConnected = params.get('drive_connected')
+      const driveError = params.get('drive_error')
+      if (driveConnected === '1' || driveConnected === 'true') {
+        setDriveNotice({ msg: 'Centralized Google Drive authorized and connected successfully!', type: 'success' })
+        loadDriveStatus()
+        window.history.replaceState({}, '', window.location.pathname)
+      } else if (driveError) {
+        setDriveNotice({ msg: `Google Drive connection rejected: ${driveError.replace(/_/g, ' ')}`, type: 'error' })
+        loadDriveStatus()
+        window.history.replaceState({}, '', window.location.pathname)
+      }
+    }
   }, [])
 
   // Auto-refresh timer

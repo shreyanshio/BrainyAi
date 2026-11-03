@@ -509,6 +509,23 @@ def login_required(f):
             response.headers["X-Request-ID"] = g.request_id
             return response, 401
 
+        # 1b. Check query token on safe GET/HEAD requests (for browser OAuth initiation redirects)
+        if request.method in ("GET", "HEAD") and request.args.get("token"):
+            token = request.args.get("token", "").strip()
+            payload = verify_auth_token(token)
+            if payload and payload.get("sub"):
+                session["user_id"] = payload["sub"]
+                session["username"] = payload.get("username", "")
+                session["first_name"] = payload.get("name", "Student")
+                session["email"] = payload.get("email", "")
+                session["role"] = payload.get("role", "student")
+                request.authenticated_user_id = payload["sub"]
+                g.auth_validation_ms = round((time.perf_counter() - auth_started) * 1000, 2)
+                return f(*args, **kwargs)
+            response = jsonify({"error": "Invalid or expired token", "request_id": g.request_id})
+            response.headers["X-Request-ID"] = g.request_id
+            return response, 401
+
         # 2. Check Flask session cookie
         if "user_id" in session:
             # Enforce CSRF origin validation on state-changing methods authenticated via cookie alone
