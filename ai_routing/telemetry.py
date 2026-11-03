@@ -17,6 +17,17 @@ from ai_routing.pricing import calculate_token_cost
 
 logger = logging.getLogger("ai_telemetry")
 
+def _parse_row_ts(ca: Any) -> float:
+    if not ca:
+        return 0.0
+    if isinstance(ca, (int, float)):
+        return float(ca)
+    try:
+        return datetime.fromisoformat(str(ca).replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return 0.0
+
+
 
 @dataclass
 class TelemetryRecord:
@@ -117,6 +128,26 @@ class AITelemetry:
     def set_supabase_requester(self, sb_req_fn):
         """Allows injecting Supabase PostgREST client for durable persistence."""
         self._sb_req = sb_req_fn
+        self._ai_request_logs_available = True
+
+    def _fetch_supabase_records(self, window_sec: float) -> Optional[List[Dict[str, Any]]]:
+        """Queries durable ai_request_logs from Supabase for the specified time window."""
+        if not self._sb_req or not self._ai_request_logs_available:
+            return None
+        try:
+            start_iso = datetime.fromtimestamp(time.time() - window_sec, tz=timezone.utc).isoformat()
+            params = f"?select=*&created_at=gte.{start_iso}&order=created_at.desc&limit=5000"
+            try:
+                res = self._sb_req("GET", "ai_request_logs", params=params, silent=True)
+            except TypeError:
+                res = self._sb_req("GET", "ai_request_logs", params=params)
+            if res and getattr(res, "status_code", 0) == 200:
+                rows = res.json()
+                if isinstance(rows, list):
+                    return rows
+        except Exception as e:
+            logger.debug("Failed to query ai_request_logs from Supabase: %s", e)
+        return None
 
     def record_call(
         self,
@@ -314,28 +345,50 @@ class AITelemetry:
         now = time.time()
         start_ts = now - window_sec
 
-        with self._lock:
-            window_recs = [r for r in self._records if r.timestamp >= start_ts]
+        sb_rows = self._fetch_supabase_records(window_sec)
+        if sb_rows is not None:
+            total_reqs = len(sb_rows)
+            succ_reqs = sum(1 for r in sb_rows if r.get("status") != "error")
+            fail_reqs = sum(1 for r in sb_rows if r.get("status") == "error")
+            fallback_reqs = sum(1 for r in sb_rows if r.get("fallback_used"))
+            normal_use_reqs = sum(1 for r in sb_rows if r.get("depth") == "QUICK_CHAT" or r.get("task") == "QUICK_CHAT")
+            escalation_reqs = sum(1 for r in sb_rows if r.get("fallback_from") is not None)
 
-        total_reqs = len(window_recs)
-        succ_reqs = sum(1 for r in window_recs if r.status != "error")
-        fail_reqs = sum(1 for r in window_recs if r.status == "error")
-        fallback_reqs = sum(1 for r in window_recs if r.fallback_used)
-        normal_use_reqs = sum(1 for r in window_recs if r.mode == "normal_use")
-        escalation_reqs = sum(1 for r in window_recs if r.escalation_reason)
+            in_tokens = sum(r.get("input_tokens") or 0 for r in sb_rows)
+            out_tokens = sum(r.get("output_tokens") or 0 for r in sb_rows)
+            total_tokens = in_tokens + out_tokens
+            total_cost = sum(float(r.get("cost_usd") or 0.0) for r in sb_rows)
 
-        in_tokens = sum(r.input_tokens or 0 for r in window_recs)
-        out_tokens = sum(r.output_tokens or 0 for r in window_recs)
-        total_tokens = in_tokens + out_tokens
-        total_cost = sum(r.cost_usd for r in window_recs)
+            latencies = [float(r["latency_ms"]) for r in sb_rows if r.get("latency_ms") and float(r["latency_ms"]) > 0]
+            avg_lat = (sum(latencies) / len(latencies)) if latencies else 0.0
+            sorted_lats = sorted(latencies) if latencies else []
+            p50_lat = sorted_lats[int(len(sorted_lats) * 0.50)] if sorted_lats else 0.0
+            p95_lat = sorted_lats[int(len(sorted_lats) * 0.95)] if sorted_lats else 0.0
 
-        latencies = [r.latency_ms for r in window_recs if r.latency_ms > 0]
-        avg_lat = (sum(latencies) / len(latencies)) if latencies else 0.0
-        sorted_lats = sorted(latencies) if latencies else []
-        p50_lat = sorted_lats[int(len(sorted_lats) * 0.50)] if sorted_lats else 0.0
-        p95_lat = sorted_lats[int(len(sorted_lats) * 0.95)] if sorted_lats else 0.0
+            unique_users = len(set(r.get("user_id") for r in sb_rows if r.get("user_id") is not None))
+        else:
+            with self._lock:
+                window_recs = [r for r in self._records if r.timestamp >= start_ts]
 
-        unique_users = len(set(r.user_id for r in window_recs if r.user_id is not None))
+            total_reqs = len(window_recs)
+            succ_reqs = sum(1 for r in window_recs if r.status != "error")
+            fail_reqs = sum(1 for r in window_recs if r.status == "error")
+            fallback_reqs = sum(1 for r in window_recs if r.fallback_used)
+            normal_use_reqs = sum(1 for r in window_recs if r.mode == "normal_use")
+            escalation_reqs = sum(1 for r in window_recs if r.escalation_reason)
+
+            in_tokens = sum(r.input_tokens or 0 for r in window_recs)
+            out_tokens = sum(r.output_tokens or 0 for r in window_recs)
+            total_tokens = in_tokens + out_tokens
+            total_cost = sum(r.cost_usd for r in window_recs)
+
+            latencies = [r.latency_ms for r in window_recs if r.latency_ms > 0]
+            avg_lat = (sum(latencies) / len(latencies)) if latencies else 0.0
+            sorted_lats = sorted(latencies) if latencies else []
+            p50_lat = sorted_lats[int(len(sorted_lats) * 0.50)] if sorted_lats else 0.0
+            p95_lat = sorted_lats[int(len(sorted_lats) * 0.95)] if sorted_lats else 0.0
+
+            unique_users = len(set(r.user_id for r in window_recs if r.user_id is not None))
 
         return {
             "total_requests": total_reqs,
@@ -367,24 +420,50 @@ class AITelemetry:
         start_ts = now - window_sec
         bucket_size = window_sec / num_buckets
 
-        with self._lock:
-            window_recs = [r for r in self._records if r.timestamp >= start_ts]
+        sb_rows = self._fetch_supabase_records(window_sec)
+        if sb_rows is not None:
+            parsed_recs = []
+            for r in sb_rows:
+                ts = _parse_row_ts(r.get("created_at"))
+                parsed_recs.append({
+                    "timestamp": ts,
+                    "status": r.get("status", "success"),
+                    "input_tokens": r.get("input_tokens") or 0,
+                    "output_tokens": r.get("output_tokens") or 0,
+                    "cost_usd": float(r.get("cost_usd") or 0.0),
+                    "latency_ms": float(r.get("latency_ms") or 0.0)
+                })
+            window_recs = [r for r in parsed_recs if r["timestamp"] >= start_ts]
+            use_dict = True
+        else:
+            with self._lock:
+                window_recs = [r for r in self._records if r.timestamp >= start_ts]
+            use_dict = False
 
         buckets = []
         for i in range(num_buckets):
             b_start = start_ts + i * bucket_size
             b_end = b_start + bucket_size
-            b_recs = [r for r in window_recs if b_start <= r.timestamp < b_end]
+            if use_dict:
+                b_recs = [r for r in window_recs if b_start <= r["timestamp"] < b_end]
+                reqs = len(b_recs)
+                succ = sum(1 for r in b_recs if r["status"] != "error")
+                fail = sum(1 for r in b_recs if r["status"] == "error")
+                in_tok = sum(r["input_tokens"] for r in b_recs)
+                out_tok = sum(r["output_tokens"] for r in b_recs)
+                cost = sum(r["cost_usd"] for r in b_recs)
+                lats = [r["latency_ms"] for r in b_recs if r["latency_ms"] > 0]
+            else:
+                b_recs = [r for r in window_recs if b_start <= r.timestamp < b_end]
+                reqs = len(b_recs)
+                succ = sum(1 for r in b_recs if r.status != "error")
+                fail = sum(1 for r in b_recs if r.status == "error")
+                in_tok = sum(r.input_tokens or 0 for r in b_recs)
+                out_tok = sum(r.output_tokens or 0 for r in b_recs)
+                cost = sum(r.cost_usd for r in b_recs)
+                lats = [r.latency_ms for r in b_recs if r.latency_ms > 0]
 
-            reqs = len(b_recs)
-            succ = sum(1 for r in b_recs if r.status != "error")
-            fail = sum(1 for r in b_recs if r.status == "error")
-            in_tok = sum(r.input_tokens or 0 for r in b_recs)
-            out_tok = sum(r.output_tokens or 0 for r in b_recs)
-            cost = sum(r.cost_usd for r in b_recs)
-            lats = [r.latency_ms for r in b_recs if r.latency_ms > 0]
             avg_l = (sum(lats) / len(lats)) if lats else 0.0
-
             b_iso = datetime.fromtimestamp(b_start, tz=timezone.utc).strftime("%H:%M" if window_sec <= 86400 else "%m-%d %H:00")
 
             buckets.append({
@@ -411,7 +490,46 @@ class AITelemetry:
         status: Optional[str] = None,
         user_id: Optional[int | str] = None
     ) -> Dict[str, Any]:
-        """Retrieves paginated, filtered request logs."""
+        """Retrieves paginated, filtered request logs from Supabase or memory."""
+        if self._sb_req and self._ai_request_logs_available:
+            try:
+                params_parts = [f"order=created_at.desc", f"limit={limit}", f"offset={offset}"]
+                if provider:
+                    params_parts.append(f"provider=eq.{provider}")
+                if model:
+                    params_parts.append(f"model=ilike.*{model}*")
+                if status:
+                    params_parts.append(f"status=eq.{status}")
+                if user_id is not None:
+                    params_parts.append(f"user_id=eq.{user_id}")
+
+                param_str = "?" + "&".join(params_parts)
+                try:
+                    res = self._sb_req("GET", "ai_request_logs", params=param_str, headers={"Prefer": "count=exact"}, silent=True)
+                except TypeError:
+                    res = self._sb_req("GET", "ai_request_logs", params=param_str)
+
+                if res and getattr(res, "status_code", 0) in (200, 206):
+                    rows = res.json()
+                    if isinstance(rows, list):
+                        cr = res.headers.get("Content-Range", "")
+                        total = len(rows)
+                        if "/" in cr:
+                            val = cr.split("/")[-1]
+                            if val.isdigit():
+                                total = int(val)
+                        for r in rows:
+                            if not r.get("timestamp"):
+                                r["timestamp"] = _parse_row_ts(r.get("created_at"))
+                        return {
+                            "total": total,
+                            "limit": limit,
+                            "offset": offset,
+                            "logs": rows
+                        }
+            except Exception as e:
+                logger.debug("Failed to query ai_request_logs from Supabase: %s", e)
+
         with self._lock:
             all_recs = list(self._records)
 
@@ -440,6 +558,36 @@ class AITelemetry:
 
     def get_user_analytics(self, user_id: int) -> Dict[str, Any]:
         """Aggregates usage statistics for a specific user ID."""
+        if self._sb_req and self._ai_request_logs_available:
+            try:
+                res = self._sb_req("GET", "ai_request_logs", params=f"?user_id=eq.{user_id}&order=created_at.desc&limit=200", silent=True)
+                if res and getattr(res, "status_code", 0) in (200, 206):
+                    rows = res.json()
+                    if isinstance(rows, list):
+                        total_reqs = len(rows)
+                        in_tok = sum(r.get("input_tokens") or 0 for r in rows)
+                        out_tok = sum(r.get("output_tokens") or 0 for r in rows)
+                        total_cost = sum(float(r.get("cost_usd") or 0.0) for r in rows)
+                        prov_counts: Dict[str, int] = {}
+                        for r in rows:
+                            p = r.get("provider", "unknown")
+                            prov_counts[p] = prov_counts.get(p, 0) + 1
+                        for r in rows:
+                            if not r.get("timestamp"):
+                                r["timestamp"] = _parse_row_ts(r.get("created_at"))
+                        return {
+                            "user_id": user_id,
+                            "total_requests": total_reqs,
+                            "input_tokens": in_tok,
+                            "output_tokens": out_tok,
+                            "total_tokens": in_tok + out_tok,
+                            "estimated_cost_usd": round(total_cost, 4),
+                            "provider_distribution": prov_counts,
+                            "recent_requests": rows[:10]
+                        }
+            except Exception as e:
+                logger.debug("Failed to query user telemetry: %s", e)
+
         with self._lock:
             user_recs = [r for r in self._records if str(r.user_id) == str(user_id)]
 

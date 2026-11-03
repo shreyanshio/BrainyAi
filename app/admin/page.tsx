@@ -32,7 +32,8 @@ import {
   Terminal,
   BookOpen,
   ChevronRight,
-  Filter
+  Filter,
+  RotateCcw
 } from 'lucide-react'
 import {
   fetchAdminCheck,
@@ -51,6 +52,10 @@ import {
   updateAdminConfig,
   getAdminExportUrl,
   fetchAdminUsers,
+  fetchAdminUserDetails,
+  fetchAdminRateLimits,
+  resetAdminRateLimit,
+  fetchAdminSystemLogs,
   toggleUserSuspend,
   deleteUserAccount,
   checkAuth,
@@ -71,6 +76,10 @@ import type {
   SystemConfig,
   CostsSummary,
   AdminUserRecord,
+  AdminUserDetailsResponse,
+  AdminRateLimitsResponse,
+  AdminSystemLogsResponse,
+  AdminSystemLogEvent,
   User
 } from '@/types/api'
 
@@ -116,6 +125,10 @@ export default function AdminPage() {
   const [userPage, setUserPage] = useState(1)
   const [selectedUser, setSelectedUser] = useState<AdminUserRecord | null>(null)
   const [userActionLoading, setUserActionLoading] = useState<number | null>(null)
+  const [selectedUserDetails, setSelectedUserDetails] = useState<AdminUserDetailsResponse | null>(null)
+  const [loadingUserDetails, setLoadingUserDetails] = useState(false)
+  const [rateLimitsData, setRateLimitsData] = useState<AdminRateLimitsResponse | null>(null)
+  const [resettingQuota, setResettingQuota] = useState<number | string | 'all' | null>(null)
 
   // Request Logs Tab State
   const [requestLogs, setRequestLogs] = useState<AIRequestLog[]>([])
@@ -217,7 +230,8 @@ export default function AdminPage() {
         cfgData,
         usersData,
         logsData,
-        auditData
+        auditData,
+        rateLimitsResp
       ] = await Promise.all([
         fetchAdminKPIs(activeWindow).catch(() => null),
         fetchAdminTimeSeries(activeWindow, 24).catch(() => []),
@@ -229,7 +243,8 @@ export default function AdminPage() {
         fetchAdminConfig().catch(() => null),
         fetchAdminUsers(userSearch, userPage, 25).catch(() => ({ total: 0, page: 1, limit: 25, users: [] })),
         fetchAdminRequests({ limit: 50, provider: logFilterProvider, status: logFilterStatus, user_id: logFilterUser }).catch(() => ({ total: 0, limit: 50, offset: 0, logs: [] })),
-        fetchAdminAuditLogs({ limit: 50 }).catch(() => ({ total: 0, limit: 50, offset: 0, logs: [] }))
+        fetchAdminAuditLogs({ limit: 50 }).catch(() => ({ total: 0, limit: 50, offset: 0, logs: [] })),
+        fetchAdminRateLimits().catch(() => null)
       ])
 
       if (kpiData) setKpis(kpiData)
@@ -238,6 +253,7 @@ export default function AdminPage() {
       if (quotaData) setQuotas(quotaData)
       if (costsData) setCosts(costsData)
       if (pdfData) setPdfStats(pdfData)
+      if (rateLimitsResp) setRateLimitsData(rateLimitsResp)
       if (alertData) setAlerts(alertData)
       if (cfgData) setConfig(cfgData)
       if (usersData) {
@@ -256,6 +272,49 @@ export default function AdminPage() {
       showNotice('Failed to update dashboard data', 'error')
     } finally {
       if (!background) setRefreshing(false)
+    }
+  }
+
+  // Load User Details on Select
+  useEffect(() => {
+    if (!selectedUser) {
+      setSelectedUserDetails(null)
+      return
+    }
+    let active = true
+    setLoadingUserDetails(true)
+    fetchAdminUserDetails(selectedUser.user_id)
+      .then(data => {
+        if (active) setSelectedUserDetails(data)
+      })
+      .catch(err => {
+        console.warn('Failed loading user details:', err)
+      })
+      .finally(() => {
+        if (active) setLoadingUserDetails(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [selectedUser])
+
+  // Quota Reset Handler
+  const handleResetQuota = async (userId?: number | string, all = false) => {
+    if (all && !window.confirm('Are you sure you want to reset quotas for ALL users?')) return
+    setResettingQuota(all ? 'all' : (userId ?? null))
+    try {
+      await resetAdminRateLimit(all ? { all: true } : { userId })
+      showNotice(all ? 'All user quotas have been reset' : `Quota for user ${userId} reset successfully`)
+      const updated = await fetchAdminRateLimits().catch(() => null)
+      if (updated) setRateLimitsData(updated)
+      if (selectedUser && (!userId || String(selectedUser.user_id) === String(userId))) {
+        const userDet = await fetchAdminUserDetails(selectedUser.user_id).catch(() => null)
+        if (userDet) setSelectedUserDetails(userDet)
+      }
+    } catch (err: any) {
+      showNotice(err.message || 'Failed to reset quota', 'error')
+    } finally {
+      setResettingQuota(null)
     }
   }
 
@@ -431,6 +490,7 @@ export default function AdminPage() {
             <option value={86400}>24H</option>
             <option value={604800}>7D</option>
             <option value={2592000}>30D</option>
+            <option value={7776000}>90D</option>
           </select>
 
           <div className="hidden sm:flex items-center bg-slate-800/80 rounded-lg p-0.5 border border-slate-700 text-xs">
@@ -438,7 +498,8 @@ export default function AdminPage() {
               { label: '1H', val: 3600 },
               { label: '24H', val: 86400 },
               { label: '7D', val: 604800 },
-              { label: '30D', val: 2592000 }
+              { label: '30D', val: 2592000 },
+              { label: '90D', val: 7776000 }
             ].map(w => (
               <button
                 key={w.val}
@@ -593,20 +654,53 @@ export default function AdminPage() {
 
               <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
                 <div className="flex items-center justify-between text-slate-400 text-xs">
-                  <span>Active Users</span>
+                  <span>Registered Users & Activity</span>
                   <Users className="w-4 h-4 text-blue-400" />
                 </div>
                 <div className="mt-2 flex items-baseline justify-between">
                   <span className="text-2xl font-bold font-mono text-white">
                     {kpis?.total_users?.toLocaleString() ?? 0}
                   </span>
-                  <span className="text-xs text-blue-400">
-                    {kpis?.active_users_today ?? 0} today
+                  <span className="text-xs text-blue-400 font-medium">
+                    {kpis?.active_users_today ?? 0} DAU
                   </span>
                 </div>
-                <div className="mt-2 text-[11px] text-slate-500">
-                  {kpis?.suspended_users ?? 0} suspended
+                <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
+                  <span>{kpis?.active_users_week ?? 0} WAU • {kpis?.active_users_month ?? 0} MAU</span>
+                  <span className="text-slate-500">{kpis?.suspended_users ?? 0} suspended</span>
                 </div>
+              </div>
+            </div>
+
+            {/* System Volume & Growth Cohorts Bar */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-900/40 border border-slate-800 rounded-xl p-3.5 text-xs">
+              <div>
+                <span className="text-slate-400 block text-[11px]">Total Conversations</span>
+                <span className="text-base font-bold font-mono text-white mt-0.5 block">
+                  {kpis?.total_conversations?.toLocaleString() ?? 0}
+                </span>
+                <span className="text-[10px] text-slate-500">Stored sessions</span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[11px]">Total Student Messages</span>
+                <span className="text-base font-bold font-mono text-purple-300 mt-0.5 block">
+                  {kpis?.total_messages?.toLocaleString() ?? 0}
+                </span>
+                <span className="text-[10px] text-slate-500">Student queries</span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[11px]">New Registrations (7D)</span>
+                <span className="text-base font-bold font-mono text-emerald-400 mt-0.5 block">
+                  +{kpis?.new_users_7d ?? 0}
+                </span>
+                <span className="text-[10px] text-slate-500">+{kpis?.new_users_today ?? 0} today</span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[11px]">Monthly Cohort (30D)</span>
+                <span className="text-base font-bold font-mono text-blue-400 mt-0.5 block">
+                  +{kpis?.new_users_30d ?? 0}
+                </span>
+                <span className="text-[10px] text-slate-500">Past 30 days</span>
               </div>
             </div>
 
@@ -918,18 +1012,25 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* User Detail Drawer Modal */}
+            {/* User Detail Drawer Modal with Full Telemetry & Quota Controls */}
             {selectedUser && (
-              <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+              <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-4 my-8 max-h-[90vh] overflow-y-auto">
                   <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                    <div className="flex items-center space-x-2.5">
-                      <div className="w-9 h-9 rounded-full bg-purple-600/30 text-purple-300 flex items-center justify-center font-bold text-sm">
-                        {(selectedUser.first_name || 'U')[0]}
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-purple-600 to-indigo-500 text-white flex items-center justify-center font-bold text-sm shadow-md">
+                        {(selectedUser.first_name || selectedUser.username || 'U')[0]}
                       </div>
                       <div>
-                        <h3 className="font-bold text-white text-sm">{selectedUser.first_name || 'User'}</h3>
-                        <p className="text-xs text-slate-400 font-mono">User ID: {selectedUser.user_id}</p>
+                        <div className="flex items-center space-x-2">
+                          <h3 className="font-bold text-white text-base">{selectedUser.first_name || 'Brainy Student'}</h3>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider ${
+                            selectedUser.is_admin ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' : 'bg-slate-800 text-slate-400'
+                          }`}>
+                            {selectedUser.is_admin ? 'Admin' : 'Student'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 font-mono">User ID: {selectedUser.user_id} {selectedUser.username ? `• @${selectedUser.username}` : ''}</p>
                       </div>
                     </div>
                     <button
@@ -940,40 +1041,130 @@ export default function AdminPage() {
                     </button>
                   </div>
 
+                  {/* Real Rate Limit & Quota Card */}
+                  <div className="p-4 bg-slate-800/40 rounded-xl border border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <Clock className="w-4 h-4 text-purple-400" />
+                        <span className="text-xs font-semibold text-slate-200 uppercase tracking-wider">Live Message & Image Quota</span>
+                      </div>
+                      <button
+                        onClick={() => handleResetQuota(selectedUser.user_id)}
+                        disabled={resettingQuota === selectedUser.user_id}
+                        className="px-2.5 py-1 rounded-md bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 text-[11px] font-medium flex items-center space-x-1 transition disabled:opacity-50"
+                      >
+                        <RotateCcw className={`w-3 h-3 ${resettingQuota === selectedUser.user_id ? 'animate-spin' : ''}`} />
+                        <span>{resettingQuota === selectedUser.user_id ? 'Resetting...' : 'Reset Quota'}</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      <div>
+                        <span className="text-slate-400 text-[11px]">5-Hour Message Window</span>
+                        <div className="font-mono text-white text-sm font-bold mt-0.5">
+                          {selectedUserDetails?.quota ? `${selectedUserDetails.quota.used} / ${selectedUserDetails.quota.limit} used` : 'Tracking active'}
+                        </div>
+                        <span className="text-[10px] text-slate-500">
+                          {selectedUserDetails?.quota?.remaining ?? 30} messages remaining
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 text-[11px]">Free Image Uploads</span>
+                        <div className="font-mono text-white text-sm font-bold mt-0.5">
+                          {selectedUserDetails?.image_quota ? `${selectedUserDetails.image_quota.used} / ${selectedUserDetails.image_quota.limit} used` : '0 / 5 used'}
+                        </div>
+                        <span className="text-[10px] text-slate-500">
+                          {selectedUserDetails?.image_quota?.remaining ?? 5} images remaining
+                        </span>
+                      </div>
+                    </div>
+
+                    {selectedUserDetails?.quota?.reset_at && (
+                      <div className="text-[10px] text-slate-400 border-t border-slate-700/40 pt-2 font-mono">
+                        Window resets at: {new Date(selectedUserDetails.quota.reset_at).toLocaleString()}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* AI Token & Telemetry Summary */}
+                  <div className="p-4 bg-slate-800/40 rounded-xl border border-slate-800 space-y-3">
+                    <div className="flex items-center space-x-2">
+                      <Cpu className="w-4 h-4 text-indigo-400" />
+                      <span className="text-xs font-semibold text-slate-200 uppercase tracking-wider">AI Usage Telemetry</span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 text-xs">
+                      <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
+                        <span className="text-[10px] text-slate-400">Total AI Calls</span>
+                        <div className="font-mono text-white font-bold text-sm mt-0.5">
+                          {selectedUserDetails?.telemetry?.total_requests ?? 0}
+                        </div>
+                      </div>
+                      <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
+                        <span className="text-[10px] text-slate-400">Tokens In / Out</span>
+                        <div className="font-mono text-purple-300 font-bold text-sm mt-0.5">
+                          {selectedUserDetails?.telemetry?.total_tokens ? `${(selectedUserDetails.telemetry.total_tokens / 1000).toFixed(1)}k` : '0'}
+                        </div>
+                      </div>
+                      <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
+                        <span className="text-[10px] text-slate-400">Est. Cost USD</span>
+                        <div className="font-mono text-emerald-400 font-bold text-sm mt-0.5">
+                          ${selectedUserDetails?.telemetry?.estimated_cost_usd?.toFixed(4) ?? '0.0000'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {selectedUserDetails?.telemetry?.provider_distribution && Object.keys(selectedUserDetails.telemetry.provider_distribution).length > 0 && (
+                      <div className="pt-2">
+                        <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Provider Distribution</span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {Object.entries(selectedUserDetails.telemetry.provider_distribution).map(([prov, count]) => (
+                            <span key={prov} className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-[10px] font-mono text-slate-300">
+                              {prov}: {count}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Metadata Grid */}
                   <div className="grid grid-cols-2 gap-3 text-xs">
                     <div className="p-3 bg-slate-800/40 rounded-xl border border-slate-800">
-                      <span className="text-slate-400">Username</span>
-                      <div className="font-medium text-slate-200 mt-0.5">{selectedUser.username ? `@${selectedUser.username}` : 'Not set'}</div>
-                    </div>
-                    <div className="p-3 bg-slate-800/40 rounded-xl border border-slate-800">
-                      <span className="text-slate-400">Account Status</span>
+                      <span className="text-slate-400">First Seen</span>
                       <div className="font-medium text-slate-200 mt-0.5">
-                        {selectedUser.is_suspended ? 'Suspended' : 'Active'}
+                        {selectedUser.first_seen ? new Date(selectedUser.first_seen).toLocaleDateString() : '—'}
                       </div>
                     </div>
                     <div className="p-3 bg-slate-800/40 rounded-xl border border-slate-800">
-                      <span className="text-slate-400">Total Chats</span>
-                      <div className="font-medium text-slate-200 mt-0.5">{selectedUser.session_count ?? selectedUser.login_count ?? 0} sessions</div>
-                    </div>
-                    <div className="p-3 bg-slate-800/40 rounded-xl border border-slate-800">
-                      <span className="text-slate-400">Student Messages</span>
-                      <div className="font-medium text-slate-200 mt-0.5">{selectedUser.message_count ?? 0} prompts</div>
+                      <span className="text-slate-400">Last Seen</span>
+                      <div className="font-medium text-slate-200 mt-0.5">
+                        {selectedUser.last_seen ? new Date(selectedUser.last_seen).toLocaleDateString() : '—'}
+                      </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-end space-x-2 pt-2">
-                    <button
-                      onClick={() => handleToggleSuspend(selectedUser)}
-                      className="px-3 py-1.5 rounded-lg border border-amber-500/40 text-amber-300 text-xs font-medium hover:bg-amber-950/40 transition"
-                    >
-                      {selectedUser.is_suspended ? 'Unsuspend' : 'Suspend Account'}
-                    </button>
-                    <button
-                      onClick={() => handleDeleteUser(selectedUser)}
-                      className="px-3 py-1.5 rounded-lg border border-red-500/40 text-red-300 text-xs font-medium hover:bg-red-950/40 transition"
-                    >
-                      Delete User
-                    </button>
+                  {/* Actions Footer */}
+                  <div className="flex items-center justify-between pt-3 border-t border-slate-800">
+                    <span className="text-xs text-slate-400">
+                      Account Status: <strong className={selectedUser.is_suspended ? 'text-red-400' : 'text-emerald-400'}>{selectedUser.is_suspended ? 'Suspended' : 'Active'}</strong>
+                    </span>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => handleToggleSuspend(selectedUser)}
+                        disabled={selectedUser.is_admin}
+                        className="px-3 py-1.5 rounded-lg border border-amber-500/40 text-amber-300 text-xs font-medium hover:bg-amber-950/40 transition disabled:opacity-40"
+                      >
+                        {selectedUser.is_suspended ? 'Unsuspend' : 'Suspend Account'}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteUser(selectedUser)}
+                        disabled={selectedUser.is_admin}
+                        className="px-3 py-1.5 rounded-lg border border-red-500/40 text-red-300 text-xs font-medium hover:bg-red-950/40 transition disabled:opacity-40"
+                      >
+                        Delete User
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1142,9 +1333,102 @@ export default function AdminPage() {
         {/* ── 5. QUOTAS & COSTS TAB ── */}
         {activeTab === 'quotas_costs' && (
           <div className="space-y-6">
-            <div>
-              <h2 className="text-base font-bold text-white">Rate-Limit Quotas & Pricing Registry</h2>
-              <p className="text-xs text-slate-400">Observed upstream headers and official per-model token cost accounting</p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-white">Rate-Limit Enforcements & Resource Control</h2>
+                <p className="text-xs text-slate-400">Active user quotas, system rate limit configuration, and official pricing registry</p>
+              </div>
+              <button
+                onClick={() => handleResetQuota(undefined, true)}
+                disabled={resettingQuota === 'all'}
+                className="px-3 py-1.5 rounded-lg bg-red-950/40 hover:bg-red-900/60 border border-red-500/40 text-red-200 text-xs font-medium flex items-center space-x-1.5 transition disabled:opacity-50"
+              >
+                <RotateCcw className={`w-3.5 h-3.5 ${resettingQuota === 'all' ? 'animate-spin' : ''}`} />
+                <span>{resettingQuota === 'all' ? 'Resetting All...' : 'Reset All User Quotas'}</span>
+              </button>
+            </div>
+
+            {/* System Enforcement Rules Card */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
+                <span className="text-slate-400 text-xs">Standard Message Limit</span>
+                <div className="text-xl font-bold font-mono text-white mt-1">30 msgs / 5 hrs</div>
+                <p className="text-[11px] text-slate-500 mt-1">Atomic Supabase PostgreSQL user_quotas</p>
+              </div>
+              <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
+                <span className="text-slate-400 text-xs">Free Image Allowance</span>
+                <div className="text-xl font-bold font-mono text-purple-300 mt-1">5 lifetime images</div>
+                <p className="text-[11px] text-slate-500 mt-1">Google Drive backed multimodal storage</p>
+              </div>
+              <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
+                <span className="text-slate-400 text-xs">Burst Rate Limit</span>
+                <div className="text-xl font-bold font-mono text-indigo-300 mt-1">60 req / min</div>
+                <p className="text-[11px] text-slate-500 mt-1">IP-based sliding window DDoS defense</p>
+              </div>
+            </div>
+
+            {/* Active User Quotas Ledger */}
+            <div className="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
+              <div className="px-4 py-3 bg-slate-800/40 border-b border-slate-800 flex items-center justify-between">
+                <div>
+                  <h3 className="text-xs font-semibold text-slate-200 uppercase tracking-wider">Active User Quota Ledger</h3>
+                  <p className="text-[11px] text-slate-400">Live usage records tracked in database</p>
+                </div>
+                <span className="text-xs font-mono text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">
+                  {rateLimitsData?.active_quotas?.length ?? 0} tracked
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs font-mono">
+                  <thead className="bg-slate-800/60 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
+                    <tr>
+                      <th className="py-2.5 px-4 font-sans">User</th>
+                      <th className="py-2.5 px-4">Messages Used</th>
+                      <th className="py-2.5 px-4">Remaining</th>
+                      <th className="py-2.5 px-4">Window Resets</th>
+                      <th className="py-2.5 px-4 text-right font-sans">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 text-slate-300">
+                    {!rateLimitsData?.active_quotas || rateLimitsData.active_quotas.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-8 text-center text-slate-500 font-sans">
+                          No active rate-limit consumptions in the current 5-hour window.
+                        </td>
+                      </tr>
+                    ) : (
+                      rateLimitsData.active_quotas.map(q => (
+                        <tr key={q.user_id} className="hover:bg-slate-800/20">
+                          <td className="py-2 px-4 font-sans">
+                            <span className="font-medium text-slate-200">{q.first_name || q.username || `User ${q.user_id}`}</span>
+                            <div className="text-[10px] text-slate-500 font-mono">ID: {q.user_id}</div>
+                          </td>
+                          <td className="py-2 px-4">
+                            <span className="text-purple-300 font-bold">{q.used}</span> / {q.limit}
+                          </td>
+                          <td className="py-2 px-4">
+                            <span className={q.remaining === 0 ? 'text-red-400 font-bold' : 'text-emerald-400 font-medium'}>
+                              {q.remaining} left
+                            </span>
+                          </td>
+                          <td className="py-2 px-4 text-slate-400 text-[11px]">
+                            {q.reset_at ? new Date(q.reset_at).toLocaleTimeString() : '—'}
+                          </td>
+                          <td className="py-2 px-4 text-right font-sans">
+                            <button
+                              onClick={() => handleResetQuota(q.user_id)}
+                              disabled={resettingQuota === q.user_id}
+                              className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[10px] transition disabled:opacity-50"
+                            >
+                              {resettingQuota === q.user_id ? 'Resetting...' : 'Reset'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             {/* Observed Quotas */}

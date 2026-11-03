@@ -1477,6 +1477,7 @@ def build_usage_report() -> dict:
     now = datetime.now(timezone.utc)
     today_cutoff = now - timedelta(hours=24)
     week_cutoff = now - timedelta(days=7)
+    month_cutoff = now - timedelta(days=30)
 
     # session_id -> user_id, for attributing messages to a user
     session_owner = {s["id"]: s.get("user_id") for s in sessions if s.get("id")}
@@ -1491,11 +1492,11 @@ def build_usage_report() -> dict:
             continue
         msg_counts[uid] = msg_counts.get(uid, 0) + 1
 
-    # Per-user login aggregation. Logins arrive newest-first, so the first
-    # row seen for a user is their most recent login.
+    # Per-user login aggregation
     users: dict = {}
     login_type_breakdown: dict = {}
-    active_today, active_week = set(), set()
+    active_today, active_week, active_month = set(), set(), set()
+    new_today, new_week, new_month = set(), set(), set()
 
     for row in logins:
         uid = row.get("user_id")
@@ -1529,6 +1530,18 @@ def build_usage_report() -> dict:
             active_today.add(uid)
         if ts and ts >= week_cutoff:
             active_week.add(uid)
+        if ts and ts >= month_cutoff:
+            active_month.add(uid)
+
+    for uid, rec in users.items():
+        fs = rec.get("first_seen")
+        if fs:
+            if fs >= today_cutoff:
+                new_today.add(uid)
+            if fs >= week_cutoff:
+                new_week.add(uid)
+            if fs >= month_cutoff:
+                new_month.add(uid)
 
     users_list = [{
         "user_id": uid,
@@ -1551,14 +1564,45 @@ def build_usage_report() -> dict:
         "created_at": row.get("created_at"),
     } for row in logins[:50]]
 
+    # Exact database counts if Supabase is active
+    exact_msg_count = None
+    exact_session_count = None
+    exact_login_count = None
+    if SUPABASE_URL and SUPABASE_KEY:
+        try:
+            h = _sb_headers()
+            h["Prefer"] = "count=exact"
+            h["Range-Unit"] = "items"
+            h["Range"] = "0-0"
+            rm = requests.get(f"{SUPABASE_URL}/rest/v1/chat_messages?role=eq.user", headers=h, timeout=5)
+            if rm.status_code in (200, 206) and "/" in rm.headers.get("Content-Range", ""):
+                exact_msg_count = int(rm.headers["Content-Range"].split("/")[-1])
+            rs = requests.get(f"{SUPABASE_URL}/rest/v1/chat_sessions", headers=h, timeout=5)
+            if rs.status_code in (200, 206) and "/" in rs.headers.get("Content-Range", ""):
+                exact_session_count = int(rs.headers["Content-Range"].split("/")[-1])
+            rl = requests.get(f"{SUPABASE_URL}/rest/v1/user_logins", headers=h, timeout=5)
+            if rl.status_code in (200, 206) and "/" in rl.headers.get("Content-Range", ""):
+                exact_login_count = int(rl.headers["Content-Range"].split("/")[-1])
+        except Exception as e:
+            logger.debug("Exact counts fetch error: %s", e)
+
+    tot_sessions = exact_session_count if exact_session_count is not None else len(sessions)
+    tot_messages = exact_msg_count if exact_msg_count is not None else sum(1 for m in messages if m.get("role") == "user")
+    tot_logins = exact_login_count if exact_login_count is not None else len(logins)
+
     return {
         "summary": {
             "total_users": len(users_list),
-            "total_logins": len(logins),
-            "total_sessions": len(sessions),
-            "total_messages": sum(1 for m in messages if m.get("role") == "user"),
+            "total_logins": tot_logins,
+            "total_sessions": tot_sessions,
+            "total_messages": tot_messages,
             "active_today": len(active_today),
             "active_7d": len(active_week),
+            "active_30d": len(active_month),
+            "new_today": len(new_today),
+            "new_7d": len(new_week),
+            "new_30d": len(new_month),
+            "suspended_users_count": len(_suspended_users),
         },
         "login_type_breakdown": login_type_breakdown,
         "users": users_list,
@@ -3653,6 +3697,310 @@ def admin_probe_provider(provider_id: str):
     )
     return jsonify(result)
 
+
+
+@app.route("/api/admin/users/<int:target_user_id>", methods=["GET"])
+@admin_required
+def admin_get_user_details(target_user_id: int):
+    """Admin-only: detailed user profile, quotas, session statistics, and telemetry timeline."""
+    try:
+        report = build_usage_report()
+        users = report.get("users", [])
+        matched_user = next((u for u in users if u.get("user_id") == target_user_id), None)
+
+        if not matched_user:
+            matched_user = {
+                "user_id": target_user_id,
+                "first_name": "Unknown",
+                "username": f"user_{target_user_id}",
+                "login_types": [],
+                "login_count": 0,
+                "message_count": 0,
+                "first_seen": None,
+                "last_seen": None,
+            }
+
+        matched_user["is_suspended"] = is_user_suspended(target_user_id)
+        matched_user["is_admin"] = target_user_id in ADMIN_USER_IDS or (matched_user.get("username") or "").lower() in ADMIN_USERNAMES
+
+        # Quota information
+        msg_quota = get_user_quota(target_user_id)
+        img_quota = get_user_image_quota(target_user_id)
+
+        # Telemetry analytics
+        from ai_routing.telemetry import telemetry
+        user_telemetry = telemetry.get_user_analytics(target_user_id)
+
+        # Recent logins for this user
+        user_logins = [l for l in report.get("recent_logins", []) if l.get("user_id") == target_user_id]
+        if not user_logins and SUPABASE_URL and SUPABASE_KEY:
+            try:
+                r = requests.get(
+                    f"{SUPABASE_URL}/rest/v1/user_logins?user_id=eq.{target_user_id}&order=created_at.desc&limit=10",
+                    headers=_sb_headers(), timeout=5
+                )
+                if r.status_code == 200:
+                    user_logins = r.json()
+            except Exception:
+                pass
+
+        return jsonify({
+            "user": matched_user,
+            "quota": msg_quota,
+            "image_quota": img_quota,
+            "telemetry": user_telemetry,
+            "recent_logins": user_logins
+        })
+    except Exception as e:
+        logger.error("admin_get_user_details error: %s", e)
+        return jsonify({"error": "Failed to fetch user details"}), 500
+
+
+@app.route("/api/admin/rate-limits", methods=["GET"])
+@admin_required
+def admin_rate_limits():
+    """Admin-only: live user quotas, system rate limit configuration, and provider observations."""
+    try:
+        from ai_routing.telemetry import telemetry
+        provider_quotas = telemetry.get_quota_observations()
+
+        active_quotas = []
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        if SUPABASE_URL and SUPABASE_KEY:
+            try:
+                r = requests.get(
+                    f"{SUPABASE_URL}/rest/v1/user_quotas?order=updated_at.desc&limit=100",
+                    headers=_sb_headers(), timeout=5
+                )
+                if r.status_code == 200:
+                    rows = r.json()
+                    for row in rows:
+                        uid = row.get("user_id")
+                        used = row.get("used", 0)
+                        active_quotas.append({
+                            "user_id": uid,
+                            "used": used,
+                            "remaining": max(0, GLOBAL_MESSAGE_LIMIT - used),
+                            "limit": GLOBAL_MESSAGE_LIMIT,
+                            "window_hours": QUOTA_WINDOW_HOURS,
+                            "window_start": row.get("window_start"),
+                            "reset_at": row.get("reset_at"),
+                            "updated_at": row.get("updated_at")
+                        })
+            except Exception as e:
+                logger.debug("Failed to query user_quotas: %s", e)
+
+        if not active_quotas:
+            with _dev_quota_lock:
+                for uid_str, q in _dev_user_quotas.items():
+                    active_quotas.append({
+                        "user_id": int(uid_str) if uid_str.isdigit() else uid_str,
+                        "used": q.get("used", 0),
+                        "remaining": max(0, GLOBAL_MESSAGE_LIMIT - q.get("used", 0)),
+                        "limit": GLOBAL_MESSAGE_LIMIT,
+                        "window_hours": QUOTA_WINDOW_HOURS,
+                        "window_start": q.get("window_start"),
+                        "reset_at": q.get("reset_at"),
+                        "updated_at": q.get("updated_at")
+                    })
+
+        # Enrich active quotas with usernames from build_usage_report
+        try:
+            report = build_usage_report()
+            user_map = {u["user_id"]: u for u in report.get("users", [])}
+            for q in active_quotas:
+                u_info = user_map.get(q["user_id"])
+                if u_info:
+                    q["username"] = u_info.get("username")
+                    q["first_name"] = u_info.get("first_name")
+        except Exception:
+            pass
+
+        return jsonify({
+            "config": {
+                "message_limit": GLOBAL_MESSAGE_LIMIT,
+                "window_hours": QUOTA_WINDOW_HOURS,
+                "image_limit": 5,
+                "system_rate_limit_per_min": 60
+            },
+            "active_quotas": active_quotas,
+            "provider_observations": provider_quotas
+        })
+    except Exception as e:
+        logger.error("admin_rate_limits error: %s", e)
+        return jsonify({"error": "Failed to fetch rate limits"}), 500
+
+
+@app.route("/api/admin/rate-limits/reset", methods=["POST"])
+@admin_required
+def admin_reset_rate_limit():
+    """Admin-only: reset quota for a specific user or all users."""
+    try:
+        data = request.get_json(silent=True) or {}
+        target_uid = data.get("user_id")
+        reset_all = data.get("all", False)
+        now = datetime.now(timezone.utc)
+        new_reset = (now + timedelta(hours=QUOTA_WINDOW_HOURS)).isoformat()
+
+        if reset_all:
+            if SUPABASE_URL and SUPABASE_KEY:
+                try:
+                    requests.patch(
+                        f"{SUPABASE_URL}/rest/v1/user_quotas",
+                        headers=_sb_headers(),
+                        json={"used": 0, "window_start": now.isoformat(), "reset_at": new_reset, "updated_at": now.isoformat()},
+                        timeout=5
+                    )
+                except Exception as e:
+                    logger.warning("Supabase reset all quotas error: %s", e)
+            with _dev_quota_lock:
+                for q in _dev_user_quotas.values():
+                    q["used"] = 0
+                    q["window_start"] = now.isoformat()
+                    q["reset_at"] = new_reset
+                    q["updated_at"] = now.isoformat()
+
+            admin_service.audit.log(
+                actor_id=session.get("user_id"),
+                actor_email=session.get("email"),
+                action="reset_all_quotas",
+                target_type="quota",
+                target_id="all",
+                ip_address=request.remote_addr
+            )
+            return jsonify({"status": "ok", "message": "All user quotas have been reset."})
+
+        if target_uid is None:
+            return jsonify({"error": "Missing user_id parameter"}), 400
+
+        target_uid_int = int(target_uid) if str(target_uid).isdigit() else target_uid
+
+        if SUPABASE_URL and SUPABASE_KEY:
+            try:
+                requests.patch(
+                    f"{SUPABASE_URL}/rest/v1/user_quotas?user_id=eq.{target_uid_int}",
+                    headers=_sb_headers(),
+                    json={"used": 0, "window_start": now.isoformat(), "reset_at": new_reset, "updated_at": now.isoformat()},
+                    timeout=5
+                )
+            except Exception as e:
+                logger.warning("Supabase reset user quota error: %s", e)
+
+        with _dev_quota_lock:
+            uid_str = str(target_uid_int)
+            if uid_str in _dev_user_quotas:
+                _dev_user_quotas[uid_str]["used"] = 0
+                _dev_user_quotas[uid_str]["window_start"] = now.isoformat()
+                _dev_user_quotas[uid_str]["reset_at"] = new_reset
+                _dev_user_quotas[uid_str]["updated_at"] = now.isoformat()
+
+        admin_service.audit.log(
+            actor_id=session.get("user_id"),
+            actor_email=session.get("email"),
+            action="reset_user_quota",
+            target_type="user_quota",
+            target_id=str(target_uid_int),
+            ip_address=request.remote_addr
+        )
+
+        return jsonify({
+            "status": "ok",
+            "user_id": target_uid_int,
+            "quota": {
+                "used": 0,
+                "remaining": GLOBAL_MESSAGE_LIMIT,
+                "limit": GLOBAL_MESSAGE_LIMIT,
+                "reset_at": new_reset,
+                "window_hours": QUOTA_WINDOW_HOURS
+            }
+        })
+    except Exception as e:
+        logger.error("admin_reset_rate_limit error: %s", e)
+        return jsonify({"error": "Failed to reset quota"}), 500
+
+
+@app.route("/api/admin/system-logs", methods=["GET"])
+@admin_required
+def admin_system_logs():
+    """Admin-only: aggregated system errors, provider failures, rate-limit occurrences, and security events."""
+    try:
+        category = request.args.get("category", "all")
+        limit = min(200, max(1, int(request.args.get("limit", 50))))
+        offset = max(0, int(request.args.get("offset", 0)))
+
+        from admin_service import admin_service
+        from ai_routing.telemetry import telemetry
+
+        # Get error request logs
+        error_logs_resp = telemetry.get_request_logs(limit=100, status="error")
+        error_logs = error_logs_resp.get("logs", [])
+
+        # Get audit logs
+        audit_resp = admin_service.audit.get_logs(limit=100)
+        audit_logs = audit_resp.get("logs", [])
+
+        # Get active alerts
+        alerts = admin_service.alerts.get_active_alerts()
+
+        events = []
+        for e in error_logs:
+            events.append({
+                "id": e.get("request_id") or str(uuid.uuid4()),
+                "type": "provider_error",
+                "severity": "error",
+                "title": f"Provider Failure: {e.get('provider')} / {e.get('model')}",
+                "message": f"Error category: {e.get('error_category') or 'unknown'}. Latency: {e.get('latency_ms', 0)}ms",
+                "component": e.get("provider", "ai_routing"),
+                "timestamp": e.get("timestamp") or time.time(),
+                "created_at": e.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                "details": e
+            })
+
+        for a in audit_logs:
+            events.append({
+                "id": a.get("id") or str(uuid.uuid4()),
+                "type": "audit",
+                "severity": "info",
+                "title": f"Admin Action: {a.get('action')}",
+                "message": f"Actor: {a.get('actor_email')} on {a.get('target_type')}/{a.get('target_id')}",
+                "component": "admin_service",
+                "timestamp": a.get("timestamp") or time.time(),
+                "created_at": a.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                "details": a
+            })
+
+        for al in alerts:
+            events.append({
+                "id": al.get("id") or str(uuid.uuid4()),
+                "type": "system_alert",
+                "severity": al.get("severity", "warning"),
+                "title": al.get("title", "System Alert"),
+                "message": al.get("message", ""),
+                "component": al.get("component", "system"),
+                "timestamp": time.time(),
+                "created_at": al.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                "details": al
+            })
+
+        if category == "errors":
+            events = [ev for ev in events if ev["type"] in ("provider_error", "system_alert")]
+        elif category == "audit":
+            events = [ev for ev in events if ev["type"] == "audit"]
+
+        events.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+        total = len(events)
+        sliced = events[offset: offset + limit]
+
+        return jsonify({
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "events": sliced
+        })
+    except Exception as e:
+        logger.error("admin_system_logs error: %s", e)
+        return jsonify({"error": "Failed to fetch system logs"}), 500
 
 @app.route("/api/admin/quotas", methods=["GET"])
 @admin_required

@@ -169,6 +169,34 @@ class AdminAuditLogger:
                 logger.debug("Failed to persist audit log to Supabase: %s", e)
 
     def get_logs(self, limit: int = 50, offset: int = 0, action: Optional[str] = None) -> Dict[str, Any]:
+        if self._sb_req:
+            try:
+                params_parts = [f"order=created_at.desc", f"limit={limit}", f"offset={offset}"]
+                if action:
+                    params_parts.append(f"action=eq.{action}")
+                param_str = "?" + "&".join(params_parts)
+                try:
+                    res = self._sb_req("GET", "admin_audit_logs", params=param_str, headers={"Prefer": "count=exact"}, silent=True)
+                except TypeError:
+                    res = self._sb_req("GET", "admin_audit_logs", params=param_str)
+                if res and getattr(res, "status_code", 0) in (200, 206):
+                    rows = res.json()
+                    if isinstance(rows, list):
+                        cr = res.headers.get("Content-Range", "")
+                        total = len(rows)
+                        if "/" in cr:
+                            val = cr.split("/")[-1]
+                            if val.isdigit():
+                                total = int(val)
+                        return {
+                            "total": total,
+                            "limit": limit,
+                            "offset": offset,
+                            "logs": rows
+                        }
+            except Exception as e:
+                logger.debug("Failed to query admin_audit_logs from Supabase: %s", e)
+
         logs_list = list(self._logs)
         if action:
             logs_list = [l for l in logs_list if l["action"].lower() == action.lower()]
@@ -368,6 +396,20 @@ class SystemAlertsManager:
         return True
 
     def get_active_alerts(self) -> List[Dict[str, Any]]:
+        # Fetch persisted unresolved alerts from Supabase if available
+        if self._sb_req:
+            try:
+                res = self._sb_req("GET", "admin_system_alerts", params="?is_resolved=eq.false&order=created_at.desc&limit=50", silent=True)
+                if res and getattr(res, "status_code", 0) == 200:
+                    rows = res.json()
+                    if isinstance(rows, list):
+                        for r in rows:
+                            aid = r.get("id")
+                            if aid:
+                                self._alerts[aid] = r
+            except Exception as e:
+                logger.debug("Non-fatal alerts query error: %s", e)
+
         # Evaluate dynamic alert rules
         prov_health = telemetry.get_provider_health_summary()
         for prov_name, stats in prov_health.items():
@@ -449,15 +491,17 @@ class AdminControlService:
         pdf_analytics = self.get_pdf_analytics()
 
         # User metrics
-        total_users = 0
-        active_today = 0
-        active_week = 0
-        suspended_users = 0
-        if user_report:
-            total_users = user_report.get("total_users", 0)
-            active_today = user_report.get("active_today", 0)
-            active_week = user_report.get("active_week", 0)
-            suspended_users = user_report.get("suspended_users_count", 0)
+        summary = user_report.get("summary", {}) if user_report else {}
+        total_users = summary.get("total_users", 0) if summary else (user_report.get("total_users", 0) if user_report else 0)
+        active_today = summary.get("active_today", 0) if summary else (user_report.get("active_today", 0) if user_report else 0)
+        active_week = summary.get("active_7d", 0) if summary else (user_report.get("active_week", 0) if user_report else 0)
+        active_month = summary.get("active_30d", 0) if summary else 0
+        total_sessions = summary.get("total_sessions", 0) if summary else 0
+        total_messages = summary.get("total_messages", 0) if summary else 0
+        new_today = summary.get("new_today", 0) if summary else 0
+        new_7d = summary.get("new_7d", 0) if summary else 0
+        new_30d = summary.get("new_30d", 0) if summary else 0
+        suspended_users = summary.get("suspended_users_count", 0) if summary else (user_report.get("suspended_users_count", 0) if user_report else 0)
 
         active_alerts = len(self.alerts.get_active_alerts())
 
@@ -466,6 +510,12 @@ class AdminControlService:
             "total_users": total_users,
             "active_users_today": active_today,
             "active_users_week": active_week,
+            "active_users_month": active_month,
+            "total_conversations": total_sessions,
+            "total_messages": total_messages,
+            "new_users_today": new_today,
+            "new_users_7d": new_7d,
+            "new_users_30d": new_30d,
             "suspended_users": suspended_users,
             "total_pdf_documents": pdf_analytics.get("total_documents", 0),
             "total_pdf_pages": pdf_analytics.get("total_pages", 0),

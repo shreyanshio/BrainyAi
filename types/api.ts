@@ -893,6 +893,12 @@ export interface AdminKPIs {
   total_pdf_pages: number
 
   active_alerts_count: number
+  active_users_month?: number
+  total_conversations?: number
+  total_messages?: number
+  new_users_today?: number
+  new_users_7d?: number
+  new_users_30d?: number
 
   server_timestamp: number
 
@@ -1136,3 +1142,72 @@ export interface CostsSummary {
 
 
 
+
+
+export interface AdminUserDetailsResponse {
+  user: AdminUserRecord
+  quota: {
+    used: number
+    remaining: number
+    limit: number
+    reset_at: string
+    window_hours: number
+  }
+  image_quota: {
+    used: number
+    remaining: number
+    limit: number
+  }
+  telemetry: {
+    user_id: number | string
+    total_requests: number
+    input_tokens: number
+    output_tokens: number
+    total_tokens: number
+    estimated_cost_usd: number
+    provider_distribution: Record<string, number>
+    recent_requests: any[]
+  }
+  recent_logins: any[]
+}
+
+export interface AdminRateLimitsResponse {
+  config: {
+    message_limit: number
+    window_hours: number
+    image_limit: number
+    system_rate_limit_per_min: number
+  }
+  active_quotas: Array<{
+    user_id: number | string
+    username?: string
+    first_name?: string
+    used: number
+    remaining: number
+    limit: number
+    window_hours: number
+    window_start?: string
+    reset_at?: string
+    updated_at?: string
+  }>
+  provider_observations: Record<string, QuotaObservation>
+}
+
+export interface AdminSystemLogEvent {
+  id: string
+  type: 'provider_error' | 'audit' | 'system_alert'
+  severity: string
+  title: string
+  message: string
+  component: string
+  timestamp: number
+  created_at: string
+  details: any
+}
+
+export interface AdminSystemLogsResponse {
+  total: number
+  limit: number
+  offset: number
+  events: AdminSystemLogEvent[]
+}

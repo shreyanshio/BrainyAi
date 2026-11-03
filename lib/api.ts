@@ -1494,6 +1494,9 @@ import type {
   PDFAnalytics,
 
   AdminAuditLog,
+  AdminUserDetailsResponse,
+  AdminRateLimitsResponse,
+  AdminSystemLogsResponse,
 
   SystemAlert,
 
@@ -1773,4 +1776,40 @@ export function getFilePreviewUrl(fileId: string): string {
   if (!fileId) return ''
   const base = getApiBase()
   return `${base}/api/files/${encodeURIComponent(fileId)}/preview`
+}
+
+
+export async function fetchAdminUserDetails(userId: number | string): Promise<AdminUserDetailsResponse> {
+  return request<AdminUserDetailsResponse>(`/api/admin/users/${userId}`)
+}
+
+export async function fetchAdminRateLimits(): Promise<AdminRateLimitsResponse> {
+  return request<AdminRateLimitsResponse>('/api/admin/rate-limits')
+}
+
+export async function resetAdminRateLimit(target: { userId?: number | string; all?: boolean }): Promise<{
+  status: string
+  user_id?: number | string
+  quota?: any
+  message?: string
+}> {
+  return request<{ status: string; user_id?: number | string; quota?: any; message?: string }>(
+    '/api/admin/rate-limits/reset',
+    {
+      method: 'POST',
+      body: JSON.stringify(target.all ? { all: true } : { user_id: target.userId }),
+    }
+  )
+}
+
+export async function fetchAdminSystemLogs(params: {
+  category?: string
+  limit?: number
+  offset?: number
+} = {}): Promise<AdminSystemLogsResponse> {
+  const query = new URLSearchParams()
+  if (params.category) query.set('category', params.category)
+  if (params.limit) query.set('limit', String(params.limit))
+  if (params.offset) query.set('offset', String(params.offset))
+  return request<AdminSystemLogsResponse>(`/api/admin/system-logs?${query.toString()}`)
 }
