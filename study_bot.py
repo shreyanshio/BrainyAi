@@ -20,6 +20,7 @@ if hasattr(sys.stdout, "reconfigure"):
 from groq import Groq
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram import Poll
+from telegram.error import RetryAfter, BadRequest, TelegramError
 def safe_split_telegram_message(text: str, max_chunk: int = 4000) -> list[str]:
     """
     Splits long messages into clean Telegram chunks without breaking code fences.
@@ -2326,13 +2327,12 @@ def ai_stream(messages, system_prompt=None, max_tokens=None, model_id=None, plat
 def _analyze_gemini_vision(image_bytes: bytes, question: str) -> str:
     if not GEMINI_API_KEYS:
         raise Exception("NO_KEYS: gemini_vision")
-    VISION_MODELS = [
-        os.getenv("GEMINI_VISION_MODEL", "gemini-3.8-flash"),
-        "gemini-3.8-flash",
-        "gemini-3.5-flash",
-        "gemini-2.5-flash",
-    ]
-    key = _rotate_key("gemini", GEMINI_API_KEYS)
+    custom_model = os.getenv("GEMINI_VISION_MODEL")
+    candidate_models = [custom_model] if custom_model else []
+    candidate_models.extend(["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-pro"])
+    seen = set()
+    VISION_MODELS = [m for m in candidate_models if m and not (m in seen or seen.add(m))]
+
     img_b64 = base64.b64encode(image_bytes).decode("utf-8")
     user_text = question if question else "Solve or explain whatever question, problem, or concept is in this image."
 
@@ -2344,6 +2344,7 @@ def _analyze_gemini_vision(image_bytes: bytes, question: str) -> str:
     last_err = None
     for model in VISION_MODELS:
         try:
+            key = _rotate_key("gemini", GEMINI_API_KEYS)
             full_text = ""
             rounds = 0
             convo = list(contents)
@@ -2355,7 +2356,7 @@ def _analyze_gemini_vision(image_bytes: bytes, question: str) -> str:
                 }
                 resp = requests.post(
                     f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}",
-                    json=payload, timeout=30
+                    json=payload, timeout=20
                 )
                 resp.raise_for_status()
                 data = resp.json()
@@ -2372,11 +2373,9 @@ def _analyze_gemini_vision(image_bytes: bytes, question: str) -> str:
                 ]
             return full_text
         except Exception as e:
-            if "404" in str(e) or "not found" in str(e).lower():
-                print(f"Gemini vision model {model} not found, trying next...")
-                last_err = e
-                continue
-            raise
+            logger.warning(f"Gemini vision model {model} attempt failed: {e}")
+            last_err = e
+            continue
     raise last_err or Exception("All Gemini vision models failed")
 
 def _analyze_groq_vision(image_bytes: bytes, question: str) -> str:
@@ -2493,24 +2492,49 @@ def is_abusing_owner(text: str) -> bool:
     return any(w in t for w in ABUSE_KEYWORDS) and any(n in t for n in OWNER_NAMES)
 
 async def send(update: Update, text: str, reply_markup=None):
-    """Send a message safely split for Telegram 4096-char ceiling without breaking code fences."""
+    """Send a message safely split for Telegram 4096-char ceiling without breaking code fences, resilient to flood control."""
     _has_html = "<code>" in text or "<pre>" in text
     _parse = "HTML" if _has_html else None
     chunks = safe_split_telegram_message(text, max_chunk=4000)
     for i, chunk in enumerate(chunks):
         is_last = (i == len(chunks) - 1)
         markup = reply_markup if is_last else None
-        try:
-            await update.message.reply_text(chunk, parse_mode=_parse, reply_markup=markup)
-        except Exception:
-            await update.message.reply_text(chunk, reply_markup=markup)
+        sent = False
+        for attempt in range(3):
+            try:
+                await update.message.reply_text(chunk, parse_mode=_parse, reply_markup=markup)
+                sent = True
+                break
+            except RetryAfter as e:
+                wait_sec = min(float(e.retry_after), 35.0)
+                logger.warning(f"Flood limit in send: sleeping {wait_sec}s before retry")
+                await asyncio.sleep(wait_sec)
+            except Exception:
+                try:
+                    await update.message.reply_text(chunk, reply_markup=markup)
+                    sent = True
+                    break
+                except RetryAfter as e:
+                    wait_sec = min(float(e.retry_after), 35.0)
+                    logger.warning(f"Flood limit in fallback send: sleeping {wait_sec}s before retry")
+                    await asyncio.sleep(wait_sec)
+                except Exception as ex:
+                    logger.warning(f"Send failed attempt {attempt + 1}: {ex}")
+                    break
+        if not sent:
+            logger.error("Failed to send telegram chunk after retries")
 
 async def safe_edit(msg, text: str):
+    """Safely edit a message, swallowing non-fatal errors and flood control during cosmetic updates."""
     try:
         await msg.edit_text(text)
+    except RetryAfter as e:
+        logger.debug(f"Flood control in safe_edit, skipping cosmetic edit: retry in {e.retry_after}s")
     except Exception as e:
-        if "message is not modified" not in str(e).lower():
-            raise
+        err_str = str(e).lower()
+        if "message is not modified" in err_str or "message to edit not found" in err_str:
+            return
+        logger.debug(f"safe_edit non-fatal exception: {e}")
 
 async def maintenance_guard(update: Update, *, silent_in_group: bool = False) -> bool:
     """
@@ -2889,7 +2913,7 @@ async def _process_image_analysis(update: Update, context: ContextTypes.DEFAULT_
         while not ai_task.done():
             await safe_edit(loading_msg, SCANNING_DOTS[dot % 3])
             dot += 1
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(2.0)
 
         result = await ai_task
         result = clean_response(result)
@@ -2907,6 +2931,12 @@ async def _process_image_analysis(update: Update, context: ContextTypes.DEFAULT_
             user_conversations[user_id].append({"role": "assistant", "content": result})
             save_user_memory_async(user_id)
     except Exception as e:
+        # Ensure ai_task exception is retrieved to avoid "Future exception was never retrieved"
+        if 'ai_task' in locals() and ai_task.done():
+            try:
+                _ = ai_task.exception()
+            except Exception:
+                pass
         logger.error(f"Image analysis error: {e}")
         release_image_quota(res_id)
         try:
@@ -4407,7 +4437,15 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     # Always acknowledge to Telegram first (stops the loading spinner on the button)
-    await query.answer()
+    try:
+        await query.answer()
+    except BadRequest as e:
+        if "query is too old" in str(e).lower():
+            logger.debug(f"Ignoring expired callback query: {e}")
+        else:
+            logger.warning(f"BadRequest on query.answer(): {e}")
+    except Exception as e:
+        logger.warning(f"Error acknowledging callback query: {e}")
 
     data     = query.data or ""
     user_id  = query.from_user.id if query.from_user else None
