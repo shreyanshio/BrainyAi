@@ -50,11 +50,14 @@ __v0_jsx-dev-runtime.ts
 .snowflake/
 
 # Test caches & private test fixtures
-tests/__pycache__/
-tests/*.pyc
-tests/*.log
-tests/fixtures/private_*
+tests/
+ai_routing/intent/tests/
 .v0-trash/
+
+# Local developer docs, scripts, and raw logo assets
+docs/
+scripts/
+logos/
 
 # Private user data & uploaded documents
 data/
