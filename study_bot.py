@@ -9,6 +9,8 @@ import random
 import requests
 from urllib.parse import urlparse
 from datetime import datetime
+import time
+from typing import Optional, List, Dict, Any, Tuple
 from dotenv import load_dotenv
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -2591,75 +2593,287 @@ async def roast_abuser(update: Update):
 #   CORE QUERY PROCESSORS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-async def _run_ai(update: Update, messages: list, system_prompt: str, max_tok: int, source: str = "chat", suppress_feedback: bool = False):
-    # Send loading message immediately — user sees response in <100ms
-    loading_msg = await update.message.reply_text(THINKING_DOTS[0])
-    loop = asyncio.get_event_loop()
-    plat = "telegram_group" if is_group(update) else "telegram_dm"
-    # Apply deterministic language intelligence directive to preserve user language/script
-    detected_lang = detect_language(last_user_msg)
-    effective_prompt = apply_language_directive(system_prompt, detected_lang)
-    ai_task = loop.run_in_executor(None, lambda: ai_call(messages, effective_prompt, max_tok, platform=plat))
-    try:
-        dot = 1
-        while not ai_task.done():
-            await safe_edit(loading_msg, THINKING_DOTS[dot % 3])
-            dot += 1
-            await asyncio.sleep(0.6)   # slower animation = fewer Telegram edit-rate-limit hits
-        result = await ai_task
-        result = clean_response(result)
-        keyboard = None if suppress_feedback else _feedback_keyboard()
-        last_user_msg = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
-        sent_msg = None
+async def _safe_reply(update: Update, text: str, reply_markup=None, parse_mode: Optional[str] = None, req_id: str = ""):
+    """Send a reply to update.message with flood control retries and plain-text fallback."""
+    if not text or not str(text).strip():
+        logger.warning(f"[{req_id}] _safe_reply received empty text, skipping send.")
+        return None
 
-        # Detect if result contains HTML code tags for parse_mode
-        _has_html = "<code>" in result or "<pre>" in result
+    for attempt in range(2):
+        try:
+            return await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+        except RetryAfter as ra:
+            wait_sec = min(float(ra.retry_after), 15.0)
+            logger.warning(f"[{req_id}] Flood control on reply_text: sleeping {wait_sec}s (attempt {attempt+1})")
+            await asyncio.sleep(wait_sec)
+        except BadRequest as br:
+            if "parse" in str(br).lower() or "entity" in str(br).lower():
+                logger.warning(f"[{req_id}] Parse mode '{parse_mode}' rejected by Telegram, retrying as plain text")
+                parse_mode = None
+                continue
+            break
+        except Exception as e:
+            logger.warning(f"[{req_id}] Reply attempt {attempt+1} failed: {e}")
+            break
+
+    # Fallback attempt with plain text (parse_mode=None)
+    try:
+        return await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=None)
+    except Exception as fe:
+        logger.error(f"[{req_id}] Final fallback reply failed: {fe}")
+        return None
+
+
+async def _run_ai(
+    update: Update,
+    messages: list,
+    system_prompt: str,
+    max_tok: int,
+    source: str = "chat",
+    suppress_feedback: bool = False,
+    header: Optional[str] = None,
+    timeout_sec: float = 60.0
+) -> Optional[str]:
+    req_id = str(uuid.uuid4())[:8]
+    user_id = update.effective_user.id if update.effective_user else 0
+    chat_id = update.effective_chat.id if update.effective_chat else 0
+    logger.info(f"[{req_id}] Telegram AI request started: user={user_id} chat={chat_id} source={source}")
+
+    # Extract user message safely (handles strings, lists, dicts) BEFORE language intelligence
+    raw_user_msg = next((m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), "")
+    if isinstance(raw_user_msg, str):
+        last_user_text = raw_user_msg
+    elif isinstance(raw_user_msg, list):
+        parts = []
+        for p in raw_user_msg:
+            if isinstance(p, dict) and "text" in p:
+                parts.append(p["text"])
+            elif isinstance(p, str):
+                parts.append(p)
+        last_user_text = " ".join(parts)
+    else:
+        last_user_text = str(raw_user_msg or "")
+
+    # Language intelligence with defensive fallback
+    detected_lang = None
+    if last_user_text:
+        try:
+            detected_lang = detect_language(last_user_text)
+        except Exception as le:
+            logger.debug(f"[{req_id}] Language detection non-fatal notice: {le}")
+
+    effective_prompt = apply_language_directive(system_prompt, detected_lang) if detected_lang else system_prompt
+
+    # Send loading message immediately — user sees response in <100ms
+    loading_msg = None
+    try:
+        loading_msg = await update.message.reply_text(THINKING_DOTS[0])
+        logger.info(f"[{req_id}] Thinking placeholder sent: msg_id={loading_msg.message_id}")
+    except Exception as me:
+        logger.warning(f"[{req_id}] Could not send initial loading message: {me}")
+
+    try:
+        loop = asyncio.get_running_loop()
+        plat = "telegram_group" if is_group(update) else "telegram_dm"
+        start_time = time.monotonic()
+
+        ai_task = loop.run_in_executor(
+            None,
+            lambda: ai_call(messages, effective_prompt, max_tok, platform=plat, user_id=user_id)
+        )
+        logger.info(f"[{req_id}] AI task submitted to executor (max_tokens={max_tok}, platform={plat})")
+
+        # Smooth, rate-limit friendly animation loop (1.8s interval, max 10 edits, refresh typing action)
+        dot = 1
+        edit_interval = 1.8
+        max_animation_edits = 10
+        animation_count = 0
+        last_typing_time = 0.0
+
+        while not ai_task.done():
+            now = time.monotonic()
+            if now - start_time > timeout_sec:
+                logger.warning(f"[{req_id}] AI request exceeded timeout of {timeout_sec:.1f}s")
+                break
+
+            # Refresh Telegram typing status every 4 seconds
+            if now - last_typing_time >= 4.0:
+                try:
+                    await update.effective_chat.send_action("typing")
+                    last_typing_time = now
+                except Exception:
+                    pass
+
+            # Cosmetic dot animation (capped to prevent flood wait)
+            if loading_msg and animation_count < max_animation_edits:
+                await safe_edit(loading_msg, THINKING_DOTS[dot % len(THINKING_DOTS)])
+                dot += 1
+                animation_count += 1
+
+            await asyncio.sleep(edit_interval)
+
+        if not ai_task.done():
+            raise TimeoutError(f"AI provider request timed out after {timeout_sec:.0f}s")
+
+        raw_result = await ai_task
+        elapsed = time.monotonic() - start_time
+        logger.info(f"[{req_id}] Provider response received in {elapsed:.2f}s")
+
+        result = clean_response(raw_result) if raw_result else ""
+        if not result or not result.strip():
+            raise RuntimeError("AI returned an empty response. Please try rephrasing your question.")
+
+        final_text = f"{header}{result}" if header else result
+        keyboard = None if suppress_feedback else _feedback_keyboard()
+        _has_html = "<code>" in final_text or "<pre>" in final_text
         _parse = "HTML" if _has_html else None
 
-        # INSTANT: edit the loading message directly with the answer (saves 2 roundtrips)
-        if len(result) <= 4096:
+        sent_msg = None
+        logger.info(f"[{req_id}] Attempting Telegram delivery (len={len(final_text)}, parse={_parse})")
+
+        if len(final_text) <= 4000:
+            delivered = False
+            # Strategy A: Edit the existing loading_msg directly
+            if loading_msg:
+                try:
+                    sent_msg = await loading_msg.edit_text(final_text, reply_markup=keyboard, parse_mode=_parse)
+                    delivered = True
+                except RetryAfter as ra:
+                    wait_sec = min(float(ra.retry_after), 15.0)
+                    logger.warning(f"[{req_id}] Flood control on edit_text: sleeping {wait_sec}s")
+                    await asyncio.sleep(wait_sec)
+                    try:
+                        sent_msg = await loading_msg.edit_text(final_text, reply_markup=keyboard, parse_mode=_parse)
+                        delivered = True
+                    except Exception:
+                        pass
+                except BadRequest as br:
+                    if "parse" in str(br).lower() or "entity" in str(br).lower():
+                        logger.warning(f"[{req_id}] HTML parse error in edit_text, retrying with plain text")
+                        try:
+                            sent_msg = await loading_msg.edit_text(final_text, reply_markup=keyboard, parse_mode=None)
+                            delivered = True
+                        except Exception:
+                            pass
+                except Exception as ee:
+                    logger.debug(f"[{req_id}] edit_text non-fatal exception: {ee}")
+
+            # Strategy B: Fallback to delete loading_msg and send as a fresh reply
+            if not delivered:
+                if loading_msg:
+                    try:
+                        await loading_msg.delete()
+                    except Exception:
+                        pass
+                sent_msg = await _safe_reply(update, final_text, keyboard, _parse, req_id)
+        else:
+            # Long answer (>4000 chars): safe chunking
+            chunks = safe_split_telegram_message(final_text, max_chunk=4000)
+            logger.info(f"[{req_id}] Long response split into {len(chunks)} chunks")
+
+            chunk0_delivered = False
+            if loading_msg:
+                _c0_parse = "HTML" if ("<code>" in chunks[0] or "<pre>" in chunks[0]) else None
+                try:
+                    sent_msg = await loading_msg.edit_text(
+                        chunks[0],
+                        reply_markup=keyboard if len(chunks) == 1 else None,
+                        parse_mode=_c0_parse
+                    )
+                    chunk0_delivered = True
+                except Exception:
+                    try:
+                        await loading_msg.delete()
+                    except Exception:
+                        pass
+
+            if not chunk0_delivered:
+                _c0_parse = "HTML" if ("<code>" in chunks[0] or "<pre>" in chunks[0]) else None
+                sent_msg = await _safe_reply(
+                    update,
+                    chunks[0],
+                    keyboard if len(chunks) == 1 else None,
+                    _c0_parse,
+                    req_id
+                )
+
+            for i, chunk in enumerate(chunks[1:], start=2):
+                is_last = (i == len(chunks))
+                _ci_parse = "HTML" if ("<code>" in chunk or "<pre>" in chunk) else None
+                try:
+                    c_msg = await _safe_reply(
+                        update,
+                        chunk,
+                        keyboard if is_last else None,
+                        _ci_parse,
+                        req_id
+                    )
+                    if is_last:
+                        sent_msg = c_msg
+                except Exception as ce:
+                    logger.error(f"[{req_id}] Failed sending chunk {i}/{len(chunks)}: {ce}")
+
+        if sent_msg is not None and last_user_text:
+            _remember_feedback_target(sent_msg.message_id, user_id, last_user_text, result)
+
+        logger.info(f"[{req_id}] Successfully delivered AI response to user {user_id} via {source}")
+
+        # Save interaction for learning & web history sync
+        if last_user_text and result:
             try:
-                sent_msg = await loading_msg.edit_text(result, reply_markup=keyboard, parse_mode=_parse)
+                save_interaction(user_id, last_user_text, result, source)
+                sync_to_web_history(user_id, last_user_text, result)
+            except Exception as se:
+                logger.debug(f"[{req_id}] Memory sync notice: {se}")
+
+        return result
+
+    except Exception as e:
+        logger.error(f"[{req_id}] AI processing failed: {type(e).__name__}: {str(e)[:120]}")
+
+        err_str = str(e).lower()
+        if "timeout" in err_str or "timed out" in err_str:
+            user_err = "⏱️ Request timed out. The AI model took too long to respond. Please try again!"
+        elif "rate limit" in err_str or "quota" in err_str or "429" in err_str:
+            user_err = "⏳ High traffic volume right now. Please wait a moment and try again!"
+        elif "no_keys" in err_str or "all providers failed" in err_str:
+            user_err = "⚠️ AI services are temporarily unavailable. Please try again in a few minutes!"
+        elif "empty response" in err_str:
+            user_err = "⚠️ AI generated an empty response. Please try rephrasing your question."
+        else:
+            user_err = "❌ Kuch technical issue aaya hai. Kripya thodi der baad dobara try karein!"
+
+        err_delivered = False
+        if loading_msg:
+            try:
+                await loading_msg.edit_text(user_err)
+                err_delivered = True
+            except RetryAfter as ra:
+                wait_sec = min(float(ra.retry_after), 10.0)
+                await asyncio.sleep(wait_sec)
+                try:
+                    await loading_msg.edit_text(user_err)
+                    err_delivered = True
+                except Exception:
+                    pass
             except Exception:
-                # edit failed (e.g. same text or HTML parse error) — fall back to delete+send
+                pass
+
+        if not err_delivered:
+            if loading_msg:
                 try:
                     await loading_msg.delete()
                 except Exception:
                     pass
-                try:
-                    sent_msg = await update.message.reply_text(result, reply_markup=keyboard, parse_mode=_parse)
-                except Exception:
-                    sent_msg = await update.message.reply_text(result, reply_markup=keyboard)
-        else:
-            # Long answer: delete loading, send in chunks — buttons go on the final chunk
-            await loading_msg.delete()
-            chunks = safe_split_telegram_message(result, max_chunk=4000)
-            for i, chunk in enumerate(chunks):
-                is_last = (i == len(chunks) - 1)
-                try:
-                    sent_msg = await update.message.reply_text(chunk, reply_markup=keyboard if is_last else None, parse_mode=_parse)
-                except Exception:
-                    sent_msg = await update.message.reply_text(chunk, reply_markup=keyboard if is_last else None)
+            try:
+                await update.message.reply_text(user_err)
+            except Exception as re:
+                logger.error(f"[{req_id}] Failed sending error message: {re}")
 
-        if sent_msg is not None and last_user_msg:
-            _remember_feedback_target(sent_msg.message_id, update.effective_user.id, last_user_msg, result)
-
-        print(f"✅ Sent to {update.effective_user.id} via {source}")
-        # Save interaction for learning
-        if last_user_msg and result:
-            save_interaction(update.effective_user.id, last_user_msg, result, source)
-            # Mirror into the same Supabase tables the Web app reads, so this
-            # exchange shows up in the user's Web chat history too.
-            sync_to_web_history(update.effective_user.id, last_user_msg, result)
-        return result
-    except Exception as e:
-        logger.error(f"AI error: {e}")
-        try:
-            await loading_msg.edit_text(f"❌ Kuch error aaya: {str(e)[:100]}\n\n⏳ Thodi der baad phir try karo!")
-        except Exception:
-            await loading_msg.delete()
-            await send(update, f"❌ Kuch error aaya: {str(e)[:100]}\n\n⏳ Thodi der baad phir try karo!")
         return None
+
+    finally:
+        logger.info(f"[{req_id}] Processing cleanup completed for user {user_id}")
 
 async def process_ask(update: Update, question: str):
     if is_abusing_owner(question):
@@ -2700,6 +2914,9 @@ async def process_ask(update: Update, question: str):
         user_conversations[user_id].append({"role": "assistant", "content": result})
         # ── Persist to Supabase async (non-blocking) ─────────
         save_user_memory_async(user_id)
+    else:
+        if user_conversations[user_id] and user_conversations[user_id][-1]["role"] == "user":
+            user_conversations[user_id].pop()
 
 async def process_brainy(update: Update, question: str, suppress_feedback: bool = False):
     if is_abusing_owner(question):
@@ -2730,6 +2947,9 @@ async def process_brainy(update: Update, question: str, suppress_feedback: bool 
     if result:
         user_conversations[user_id].append({"role": "assistant", "content": result})
         save_user_memory_async(user_id)
+    else:
+        if user_conversations[user_id] and user_conversations[user_id][-1]["role"] == "user":
+            user_conversations[user_id].pop()
 
 async def process_query(update: Update, question: str, system_prompt=None, suppress_feedback: bool = False):
     user_id    = update.effective_user.id
@@ -2775,6 +2995,9 @@ async def process_query(update: Update, question: str, system_prompt=None, suppr
                 if result:
                     user_conversations[user_id].append({"role": "assistant", "content": result})
                     save_user_memory_async(user_id)
+                else:
+                    if user_conversations[user_id] and user_conversations[user_id][-1]["role"] == "user":
+                        user_conversations[user_id].pop()
                 return
             elif intent == "summarize":
                 user_conversations[user_id].append({"role": "user", "content": question + level_ctx})
@@ -2783,6 +3006,9 @@ async def process_query(update: Update, question: str, system_prompt=None, suppr
                 if result:
                     user_conversations[user_id].append({"role": "assistant", "content": result})
                     save_user_memory_async(user_id)
+                else:
+                    if user_conversations[user_id] and user_conversations[user_id][-1]["role"] == "user":
+                        user_conversations[user_id].pop()
                 return
             elif intent == "translate":
                 user_conversations[user_id].append({"role": "user", "content": question + level_ctx})
@@ -2791,6 +3017,9 @@ async def process_query(update: Update, question: str, system_prompt=None, suppr
                 if result:
                     user_conversations[user_id].append({"role": "assistant", "content": result})
                     save_user_memory_async(user_id)
+                else:
+                    if user_conversations[user_id] and user_conversations[user_id][-1]["role"] == "user":
+                        user_conversations[user_id].pop()
                 return
             elif intent == "motivate":
                 user_name = first_name or "champ"
@@ -2885,6 +3114,9 @@ async def process_query(update: Update, question: str, system_prompt=None, suppr
         if result:
             user_conversations[user_id].append({"role": "assistant", "content": result})
             save_user_memory_async(user_id)
+        else:
+            if user_conversations[user_id] and user_conversations[user_id][-1]["role"] == "user":
+                user_conversations[user_id].pop()
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #   IMAGE HANDLER
@@ -2927,7 +3159,10 @@ async def _process_image_analysis(update: Update, context: ContextTypes.DEFAULT_
 
         result = await ai_task
         result = clean_response(result)
-        await loading_msg.delete()
+        try:
+            await loading_msg.delete()
+        except Exception:
+            pass
 
         # Commit quota reservation on successful reasoning
         commit_image_quota(res_id)
@@ -3405,35 +3640,26 @@ async def roast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     args = update.message.text.partition(" ")[2].strip()
     if not args:
-        await send(update, "🎯Who do you want to roast? Example: /roast @username or /roast Rahul")
+        await send(update, "🎯 Who do you want to roast? Example: /roast @username or /roast Rahul")
         return
     target_name = args.lstrip("@")
     if update.message.reply_to_message:
         reply_user = update.message.reply_to_message.from_user
         target_name = reply_user.first_name or target_name
-    loading_msg = await update.message.reply_text("🔥 Thinking .  ")
     roast_prompt = (
         f"Target: {target_name}\n\n"
         f"Destroy them with the most savage creative roast. Address by name. Make it legendary. "
         f"6-8 lines. Build up to devastating kill shot at end."
     )
-    loop = asyncio.get_event_loop()
-    ai_task = loop.run_in_executor(None, lambda: ai_call([{"role": "user", "content": roast_prompt}], ROAST_COMMAND_PROMPT, 400))
-    try:
-        dot = 0
-        while not ai_task.done():
-            await safe_edit(loading_msg, THINKING_DOTS[dot % 3])
-            dot += 1
-            await asyncio.sleep(0.4)
-        roast_text = await ai_task
-        roast_text = clean_response(roast_text)
-        await loading_msg.delete()
-        await send(update, f"🔥 𝗕𝗥𝗔𝗜𝗡𝗬 𝗥𝗢𝗔𝗦𝗧𝗦 {target_name.upper()}\n\n{roast_text}")
-        print(f"Roast delivered for: {target_name}")
-    except Exception as e:
-        logger.error(f"Roast error: {e}")
-        await loading_msg.delete()
-        await send(update, "❌ Roast not generated!")
+    await _run_ai(
+        update,
+        [{"role": "user", "content": roast_prompt}],
+        ROAST_COMMAND_PROMPT,
+        400,
+        source="roast",
+        suppress_feedback=True,
+        header=f"🔥 𝗕𝗥𝗔𝗜𝗡𝗬 𝗥𝗢𝗔𝗦𝗧𝗦 {target_name.upper()}\n\n"
+    )
 
 
 async def tip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3542,28 +3768,28 @@ async def search_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"NEVER use **asterisks** markdown. Use emojis and → for formatting."
         )
 
-        ai_task = loop.run_in_executor(
-            None,
-            lambda: ai_call([{"role": "user", "content": ai_prompt}], SEARCH_SYSTEM_PROMPT, 600)
-        )
-        while not ai_task.done():
-            await safe_edit(loading_msg, scanning_frames[dot % 3])
-            dot += 1
-            await asyncio.sleep(0.5)
-        ai_answer = await ai_task
-        ai_answer = clean_response(ai_answer)
+        try:
+            await loading_msg.delete()
+        except Exception:
+            pass
 
-        await loading_msg.delete()
-        await send(update,
-            f"🔍 𝗪𝗲𝗯 𝗦𝗲𝗮𝗿𝗰𝗵: {mono(query)}\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"{ai_answer}"
+        await _run_ai(
+            update,
+            [{"role": "user", "content": ai_prompt}],
+            SEARCH_SYSTEM_PROMPT,
+            600,
+            source="search",
+            suppress_feedback=True,
+            header=f"🔍 𝗪𝗲𝗯 𝗦𝗲𝗮𝗿𝗰𝗵: {mono(query)}\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         )
         print(f"Search completed for Telegram user {update.effective_user.id}")
 
     except Exception as e:
         logger.error(f"Search command error: {e}")
-        await loading_msg.delete()
+        try:
+            await loading_msg.delete()
+        except Exception:
+            pass
         await send(update, f"❌ Search error: {str(e)[:100]}\n\n⏳ Try again in a bit!")
 
 
@@ -4218,20 +4444,15 @@ async def translate_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "3. Give a simple Hindi/Hinglish explanation of what it means in a student context.\n"
         "Plain text, no markdown asterisks."
     )
-    loading_msg = await update.message.reply_text(THINKING_DOTS[0])
-    loop = asyncio.get_event_loop()
-    ai_task = loop.run_in_executor(None, lambda: ai_call([{"role": "user", "content": prompt}], TRANSLATE_SYSTEM_PROMPT, 400))
-    try:
-        dot = 1
-        while not ai_task.done():
-            await safe_edit(loading_msg, THINKING_DOTS[dot % 3])
-            dot += 1
-            await asyncio.sleep(0.6)
-        result = clean_response(await ai_task)
-        await loading_msg.edit_text(f"🌐 𝗧𝗿𝗮𝗻𝘀𝗹𝗮𝘁𝗲:\n\n{result}")
-    except Exception as e:
-        logger.error(f"Translate error: {e}")
-        await loading_msg.edit_text("❌ Translation failed. Try again!")
+    await _run_ai(
+        update,
+        [{"role": "user", "content": prompt}],
+        TRANSLATE_SYSTEM_PROMPT,
+        400,
+        source="translate",
+        suppress_feedback=True,
+        header="🌐 𝗧𝗿𝗮𝗻𝘀𝗹𝗮𝘁𝗲:\n\n"
+    )
 
 
 # ── NEW: /define ────────────────────────────────────────────
@@ -4258,20 +4479,15 @@ async def define_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "4. A quick memory trick (if applicable)\n"
         "Plain text. No markdown asterisks."
     )
-    loading_msg = await update.message.reply_text(THINKING_DOTS[0])
-    loop = asyncio.get_event_loop()
-    ai_task = loop.run_in_executor(None, lambda: ai_call([{"role": "user", "content": prompt}], DEFINE_SYSTEM_PROMPT, 350))
-    try:
-        dot = 1
-        while not ai_task.done():
-            await safe_edit(loading_msg, THINKING_DOTS[dot % 3])
-            dot += 1
-            await asyncio.sleep(0.6)
-        result = clean_response(await ai_task)
-        await loading_msg.edit_text(f"📖 𝗗𝗲𝗳𝗶𝗻𝗶𝘁𝗶𝗼𝗻 — {mono(word)}:\n\n{result}")
-    except Exception as e:
-        logger.error(f"Define error: {e}")
-        await loading_msg.edit_text("❌ Definition not found. Try again!")
+    await _run_ai(
+        update,
+        [{"role": "user", "content": prompt}],
+        DEFINE_SYSTEM_PROMPT,
+        350,
+        source="define",
+        suppress_feedback=True,
+        header=f"📖 𝗗𝗲𝗳𝗶𝗻𝗶𝘁𝗶𝗼𝗻 — {mono(word)}:\n\n"
+    )
 
 
 # ── NEW: /motivate ──────────────────────────────────────────
@@ -4300,20 +4516,15 @@ async def motivate_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{context_hint}\n"
         "Make it punchy, real, personal — not generic quotes. Mix English + Hinglish. 5-7 lines max."
     )
-    loading_msg = await update.message.reply_text("💪 Loading motivation...")
-    loop = asyncio.get_event_loop()
-    ai_task = loop.run_in_executor(None, lambda: ai_call([{"role": "user", "content": prompt}], MOTIVATE_SYSTEM_PROMPT, 250))
-    try:
-        dot = 1
-        while not ai_task.done():
-            await safe_edit(loading_msg, THINKING_DOTS[dot % 3])
-            dot += 1
-            await asyncio.sleep(0.5)
-        result = clean_response(await ai_task)
-        await loading_msg.edit_text(f"💪 𝗠𝗼𝘁𝗶𝘃𝗮𝘁𝗶𝗼𝗻 𝗳𝗼𝗿 {user_name}:\n\n{result}")
-    except Exception as e:
-        logger.error(f"Motivate error: {e}")
-        await loading_msg.edit_text("❌ Failed to load motivation. You got this though 💪")
+    await _run_ai(
+        update,
+        [{"role": "user", "content": prompt}],
+        MOTIVATE_SYSTEM_PROMPT,
+        250,
+        source="motivate",
+        suppress_feedback=True,
+        header=f"💪 𝗠𝗼𝘁𝗶𝘃𝗮𝘁𝗶𝗼𝗻 𝗳𝗼𝗿 {user_name}:\n\n"
+    )
 
 
 # ── NEW: /mynotes ───────────────────────────────────────────
@@ -4360,24 +4571,15 @@ async def myplan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Each day: morning + evening sessions, specific topics, and one revision task.\n"
         "Keep it practical — not overwhelming. Hinglish tone. Plain text, no markdown."
     )
-    loading_msg = await update.message.reply_text(THINKING_DOTS[0])
-    loop = asyncio.get_event_loop()
-    ai_task = loop.run_in_executor(None, lambda: ai_call([{"role": "user", "content": prompt}], PLAN_SYSTEM_PROMPT, 1000))
-    try:
-        dot = 1
-        while not ai_task.done():
-            await safe_edit(loading_msg, THINKING_DOTS[dot % 3])
-            dot += 1
-            await asyncio.sleep(0.6)
-        result = clean_response(await ai_task)
-        await loading_msg.delete()
-        await send(update, f"📅 𝗬𝗼𝘂𝗿 𝟕-𝗗𝗮𝘆 𝗦𝘁𝘂𝗱𝘆 𝗣𝗹𝗮𝗻:\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n{result}")
-    except Exception as e:
-        logger.error(f"Plan error: {e}")
-        try:
-            await loading_msg.edit_text("❌ Plan generation failed. Try again!")
-        except Exception:
-            pass
+    await _run_ai(
+        update,
+        [{"role": "user", "content": prompt}],
+        PLAN_SYSTEM_PROMPT,
+        1000,
+        source="myplan",
+        suppress_feedback=True,
+        header="📅 𝗬𝗼𝘂𝗿 𝟕-𝗗𝗮𝘆 𝗦𝘁𝘂𝗱𝘆 𝗣𝗹𝗮𝗻:\n━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    )
 
 
 # ── NEW: /stats (owner-only) ────────────────────────────────
